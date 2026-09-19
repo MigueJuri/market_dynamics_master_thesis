@@ -1,0 +1,25 @@
+# Entornos e ignorados automáticos
+.venv/
+.env
+__pycache__/
+*.pyc
+
+# Datos (NUNCA subir bases de datos completas a Git)
+data/
+*.parquet
+*.csv
+
+# Artefactos y salidas
+outputs/
+*.npy
+*.pt
+*.pth
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
