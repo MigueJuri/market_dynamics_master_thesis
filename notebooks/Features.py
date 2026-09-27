@@ -197,7 +197,9 @@ def compute_correlation_matrix(series_x, series_y, max_lookback=504, max_lookahe
             if valid_idx.sum() > 2:
                 x = mom[valid_idx].values
                 y = fut_ret[valid_idx].values
-                corr, _ = spearmanr(x, y)
+                # Pearson Correlation
+                corr, _ = stats.pearsonr(x, y)
+                # corr, _ = spearmanr(x, y)
                 rank_corr_matrix[i, j] = corr
             else:
                 rank_corr_matrix[i, j] = np.nan
@@ -208,7 +210,7 @@ def compute_correlation_matrix(series_x, series_y, max_lookback=504, max_lookahe
 def plot_correlation_matrix(corr_matrix, lookbacks, lookaheads, 
                             title='Rank Correlation (Spearman) by Lag',
                             xlabel='Momentum Lookback (Days)', 
-                            ylabel='Future Return Lookahead (Days)'):
+                            ylabel='Retorno Futuro (Días hábiles)'):
     """
     Plots a heatmap of the rank correlation matrix.
     
@@ -227,7 +229,7 @@ def plot_correlation_matrix(corr_matrix, lookbacks, lookaheads,
     ax = sns.heatmap(corr_matrix, 
                      cmap='coolwarm', 
                      center=0,
-                     cbar_kws={'label': 'Spearman Rank Correlation'})
+                     cbar_kws={'label': 'Correlación de Spearman'})
 
     # Dynamic tick stepping
     tick_step_x = max(1, len(lookbacks) // 10)
@@ -249,19 +251,67 @@ def plot_correlation_matrix(corr_matrix, lookbacks, lookaheads,
 
 
 # %%
-mom_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(log_ret, log_ret, max_lookback=504, max_lookahead=504, steps=100)
+mom_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(log_ret, log_ret, max_lookback=2*252, max_lookahead=2*252, steps=300)
 plot_correlation_matrix(mom_corr_matrix, lookbacks, lookaheads,
-                        xlabel='Ventana de Retornos Pasados (Días)',
-                        ylabel='Retorno Futuro (Días)')
+                        xlabel='Ventana de Retornos Pasados (Días hábiles)')
 
 # %% [markdown]
 # # Volatility
 
 # %%
-mom_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(log_ret**2, log_ret, max_lookback=504, max_lookahead=504, steps=300)
+
+def compute_correlation_matrix_vol(series_x, series_y, max_lookback=504, max_lookahead=504, steps=150):
+    """
+    Computes a Spearman rank correlation matrix across different lookback and lookahead windows.
+    
+    Parameters:
+    series_x : pd.Series
+        The base feature series (e.g., squared log returns, log returns).
+    series_y : pd.Series
+        The target base series (e.g., log returns to be summed for future returns).
+    max_lookback : int
+        Maximum lookback window.
+    max_lookahead : int
+        Maximum lookahead window.
+    steps : int
+        Approximate number of steps to divide the total grid into.
+    """
+    # Calculate step size, ensuring it's at least 1
+    step = max(1, (max_lookback + max_lookahead) // steps)
+    
+    lookbacks = np.arange(step, max_lookback + step, step)
+    lookaheads = np.arange(step, max_lookahead + step, step)
+    
+    rank_corr_matrix = np.zeros((len(lookaheads), len(lookbacks)))
+    
+    # OPTIMIZATION: Precompute rolling sums for lookbacks. 
+    # In the original script, `mom` was being recalculated inside the lookahead loop, 
+    # which is highly inefficient since `mom` only depends on the lookback period `l`.
+    mom_dict = {j: series_x.rolling(l).std() for j, l in enumerate(lookbacks)}
+    
+    for i, f in enumerate(lookaheads):
+        fut_ret = series_y.rolling(f).sum().shift(-f)
+        
+        for j in range(len(lookbacks)):
+            mom = mom_dict[j]
+            
+            # Boolean mask to align data and drop NaNs
+            valid_idx = ~(mom.isna() | fut_ret.isna())
+            
+            if valid_idx.sum() > 2:
+                x = mom[valid_idx].values
+                y = fut_ret[valid_idx].values
+                # Pearson Correlation
+                corr, _ = stats.pearsonr(x, y)
+                # corr, _ = spearmanr(x, y)
+                rank_corr_matrix[i, j] = corr
+            else:
+                rank_corr_matrix[i, j] = np.nan
+                
+    return rank_corr_matrix, lookbacks, lookaheads
+mom_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix_vol(log_ret, log_ret, max_lookback=2*252, max_lookahead=2*252, steps=300)
 plot_correlation_matrix(mom_corr_matrix, lookbacks, lookaheads,
-                        xlabel='Ventana de Volatilidad Pasada (Días)',
-                        ylabel='Retorno Futuro (Días)')
+                        xlabel='Ventana de Volatilidad Pasada (Días hábiles)')
 
 # %% [markdown]
 # # Cross Sectional
@@ -274,16 +324,31 @@ import matplotlib.pyplot as plt
 from scipy.stats import spearmanr
 
 # --- Universe: tickers grouped by sector ---
+# sector_tickers = {
+#     'Tech':  ['AAPL', 'MSFT', 'NVDA', 'GOOGL'],
+#     'Financials':  ['JPM', 'BAC', 'GS', 'MS'],
+#     'Energy':      ['XOM', 'CVX', 'SLB', 'COP'],
+#     'Healthcare':  ['JNJ', 'UNH', 'PFE', 'MRK'],
+#     'Consumer':    ['PG', 'KO', 'WMT', 'MCD'],
+# }
+
 sector_tickers = {
-    'Tech':  ['AAPL', 'MSFT', 'NVDA', 'GOOGL'],
-    'Financials':  ['JPM', 'BAC', 'GS', 'MS'],
-    'Energy':      ['XOM', 'CVX', 'SLB', 'COP'],
-    'Healthcare':  ['JNJ', 'UNH', 'PFE', 'MRK'],
-    'Consumer':    ['PG', 'KO', 'WMT', 'MCD'],
+    'Tecnología':  ['XLK'],
+    'Comunicaciones': ['XLC'],
+    'Financieros':  ['XLF'],
+    'Consumo Discrecional': ['XLY'],
+    'Salud':  ['XLV'],
+    'Industriales':  ['XLI'],
+    'SPY': ['SPY'],
 }
 sector_colors = {
-    'Tech': 'tab:blue', 'Financials': 'tab:green', 'Energy': 'tab:orange',
-    'Healthcare': 'tab:red', 'Consumer': 'tab:purple',
+    'Tecnología': 'tab:blue', 
+    'Financieros': 'tab:green', 
+    'Industriales': 'tab:orange',
+    'Comunicaciones': 'tab:cyan',
+    'Salud': 'tab:red', 
+    'Consumo Discrecional': 'tab:purple',
+    'SPY': 'black',
 }
 
 trading_days_per_year = 252
@@ -294,6 +359,7 @@ min_valid_n = 50  # discard estimates with fewer effective observations
 
 # --- Download and compute log returns for every ticker ---
 all_tickers = [t for tickers in sector_tickers.values() for t in tickers]
+
 # raw = yf.download(all_tickers, start=start, end=end, auto_adjust=True)['Close']
 raw = load_multiple_prices(all_tickers)
 log_ret_df = np.log(raw / raw.shift(1)).dropna(how='all')
@@ -311,41 +377,39 @@ for ticker in all_tickers:
         valid_idx = ~(mom.isna() | fut_ret.isna())
         n_valid = valid_idx.sum()
         if n_valid >= min_valid_n:
-            corr, _ = spearmanr(mom[valid_idx].values, fut_ret[valid_idx].values)
+            corr, _ = stats.pearsonr(mom[valid_idx].values, fut_ret[valid_idx].values)
             corr_matrix.loc[lag, ticker] = corr
 
 avg_corr = corr_matrix.mean(axis=1, skipna=True)
 
 # --- Plot ---
-fig, ax = plt.subplots(figsize=(11, 7))
+fig, ax = plt.subplots(figsize=(6, 3))
 
 for ticker in all_tickers:
     sector = ticker_to_sector[ticker]
-    ax.plot(lags / trading_days_per_year, corr_matrix[ticker],
-             color=sector_colors[sector], alpha=0.35, linewidth=1)
+    if sector == 'SPY':
+        ax.plot(lags / trading_days_per_year, corr_matrix[ticker],
+                 color=sector_colors[sector], alpha=0.9, linewidth=1, label=sector)
+    else:
+        ax.plot(lags / trading_days_per_year, corr_matrix[ticker],
+                 color=sector_colors[sector], alpha=0.9, linewidth=1, label=sector)
 
 ax.plot(lags / trading_days_per_year, avg_corr,
-         color='black', linewidth=2.5, label='Cross-asset average')
+         color='black', linewidth=2.5, label='Promedio de sectores', linestyle='--')
 
 ax.axhline(0, color='gray', linewidth=0.8, linestyle='--')
 
 # Sector legend via proxy handles (avoid one entry per ticker)
-from matplotlib.lines import Line2D
-sector_handles = [Line2D([0], [0], color=c, lw=2, label=s) for s, c in sector_colors.items()]
-sector_handles.append(Line2D([0], [0], color='black', lw=2.5, label='Cross-asset average'))
-ax.legend(handles=sector_handles, loc='best')
+# from matplotlib.lines import Line2D
+# sector_handles = [Line2D([0], [0], color=c, lw=2, label=s) for s, c in sector_colors.items()]
+# sector_handles.append(Line2D([0], [0], color='black', lw=2.5, label='Promedio de sectores'))
+# ax.legend(handles=sector_handles, loc='best')
+ax.legend(loc='best', fontsize=9)
 
-ax.set_xlabel('Lag = Lookback = Lookahead (years)')
-ax.set_ylabel('Spearman Rank Correlation (momentum vs. forward return)')
-ax.set_title('Momentum–Forward Return Correlation vs. Lag, by Sector')
+ax.set_xlabel('Ventana de Momentum (años)')
+ax.set_ylabel('Corr. de Pearson (Mom vs Fut)')
+# ax.set_title('Momentum–Forward Return Correlation vs. Lag, by Sector')
 plt.tight_layout()
 plt.show()
 
 # %%
-for lag in [10, 50, 252]:
-    mom = log_ret.rolling(lag).sum()
-    fut_ret = log_ret.shift(-lag).rolling(lag).sum()
-    valid_idx = ~(mom.isna() | fut_ret.isna())
-    print(f"Lag {lag}: n_valid = {valid_idx.sum()}, "
-          f"mom range [{mom[valid_idx].min():.3f}, {mom[valid_idx].max():.3f}], "
-          f"fut_ret range [{fut_ret[valid_idx].min():.3f}, {fut_ret[valid_idx].max():.3f}]")

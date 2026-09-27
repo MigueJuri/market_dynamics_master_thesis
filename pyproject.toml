@@ -8,7 +8,10 @@ dependencies = [
     "numpy>=1.24.0",
     "pandas>=2.0.0",
     "scipy>=1.10.0",
-    "matplotlib>=3.7.0"
+    "matplotlib>=3.7.0",
+    "yfinance>=1.7.0",
+    "seaborn>=0.13.2",
+    "statsmodels>=0.15.0",
 ]
 
 [project.optional-dependencies]
