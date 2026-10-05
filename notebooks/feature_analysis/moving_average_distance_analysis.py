@@ -22,8 +22,16 @@
 # donde :math:`\log \overline{P}_{t,\tau_p}` es la media (simple o
 # exponencial) de los últimos :math:`\tau_p` logaritmos de precio.  En la
 # matriz de correlación, :math:`\tau_p` juega el rol del lookback (eje
-# horizontal) y :math:`\tau_f` el del lookahead (eje vertical, siempre
-# retorno futuro acumulado).
+# horizontal) y :math:`\tau_f` el del lookahead.
+#
+# Para que los valores sean comparables entre regímenes de precios, el
+# target también se mide en términos relativos a la misma media
+# histórica:
+#
+# .. math:: y_t(\tau_p, \tau_f) = \log P_{t+\tau_f} - \log \overline{P}_{t,\tau_p}
+#
+# La media sólo usa información disponible en :math:`t`, por lo que no
+# introduce lookahead bias.
 
 # %%
 from pathlib import Path
@@ -44,6 +52,7 @@ from feature_analysis.functions import (
     apply_window, compute_correlation_matrix, plot_correlation_matrix,
     compute_cross_sectional_correlation, plot_cross_sectional_curves,
     plot_scatter_grid, plot_feature_boxplots,
+    future_distance_to_moving_average,
 )
 
 # %%
@@ -65,9 +74,10 @@ log_ret = log_returns(price)
 # variantes de la característica y para alimentar ``compute_correlation_matrix``.
 log_price = np.log(price)
 
-# Para usar ``log_price`` como ``feature_series`` y los retornos como
-# ``target_series`` dentro de ``compute_correlation_matrix``, ambos deben
-# compartir índice.  ``log_ret_aligned`` deja un NaN en la primera fecha.
+# Para usar ``log_price`` como ``feature_series`` y ``target_series``
+# dentro de ``compute_correlation_matrix``, ambos deben compartir índice.
+# ``log_ret_aligned`` deja un NaN en la primera fecha y sólo se usa
+# para mantener compatibilidad con cálculos que no usan target relativo.
 log_ret_aligned = log_price - np.log(price.shift(1))
 
 print(f"Ticker          : {TICKER}")
@@ -106,11 +116,16 @@ feature_lags = [50, 189, 2 * TRADING_DAYS]
 ret_lags = [50, 189, 2 * TRADING_DAYS]
 
 feature_by_lag = {l: distance_feature(log_price, l) for l in feature_lags}
-target_by_lag = {l: log_ret.rolling(l).sum().shift(-l) for l in ret_lags}
+target_by_lag = {
+    l: future_distance_to_moving_average(
+        log_price, tau_p=l, tau_f=l, window_type=WINDOW_TYPE,
+    )
+    for l in ret_lags
+}
 
 plot_scatter_grid(
     feature_by_lag, target_by_lag,
-    feature_label="Distance to MA", target_label="Forward return",
+    feature_label="Distance to MA", target_label="Future distance to MA",
     feature_format=lambda k: f"{k}d", target_format=lambda k: f"{k}d",
 )
 
@@ -120,12 +135,14 @@ tau_p = 189
 tau_f = 189
 
 feat_series = distance_feature(log_price, tau_p)
-tgt_series = log_ret.rolling(tau_f).sum().shift(-tau_f)
+tgt_series = future_distance_to_moving_average(
+    log_price, tau_p=tau_p, tau_f=tau_f, window_type=WINDOW_TYPE,
+)
 
 pearson_corr = plot_feature_boxplots(
     feat_series, tgt_series,
     n_quantiles=5,
-    feature_name="distance to MA", target_name="forward return",
+    feature_name="distance to MA", target_name="future distance to MA",
     feature_window=tau_p, target_window=tau_f,
 )
 print(f"Pearson Correlation: {pearson_corr:.3f}")
@@ -135,22 +152,29 @@ print(f"Pearson Correlation: {pearson_corr:.3f}")
 #
 # ``feature_op='mean'`` aplica la media móvil sobre ``log_price``;
 # ``feature_transform`` la convierte en la distancia al restarla de la
-# serie original.  ``feature_window_type`` elige entre ventana fija y
-# exponencial.
+# serie original.  ``target_transform`` redefine el target como la
+# distancia futura a la misma media móvil histórica (calculada con la
+# misma ``τ_p`` que la característica), de modo que cada celda mide la
+# asociación entre ``log P_t - MA_t`` y ``log P_{t+τ_f} - MA_t``.  Esta
+# normalización hace los valores comparables entre regímenes de precios.
+# ``feature_window_type`` y ``target_window_type`` eligen entre ventana
+# fija y exponencial.
 
 dist_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
-    log_price, log_ret_aligned,
+    log_price, log_price,
     max_lookback=2 * TRADING_DAYS, max_lookahead=2 * TRADING_DAYS,
     steps=100, overlap=True,
     feature_op="mean",
     feature_window_type=WINDOW_TYPE,
     feature_transform=subtract_from_log_price,
-    target_op="sum", correlation="pearson",
+    target_transform=future_distance_to_moving_average,
+    target_window_type=WINDOW_TYPE,
+    correlation="pearson",
 )
 window_label = {"fixed": "SMA", "exponential": "EMA"}[WINDOW_TYPE]
 plot_correlation_matrix(
     dist_corr_matrix, lookbacks, lookaheads,
-    title=f"Distance-to-{window_label} → Forward Pearson Correlation",
+    title=f"Distance-to-{window_label} → Future Distance Pearson Correlation",
     xlabel=r"$\tau_p$ (MA window)", ylabel=r"$\tau_f$ (forward window)",
     cbar_label="Correlación de Pearson",
 )
@@ -194,12 +218,14 @@ lags = np.arange(step, max_lag + step, step)
 cross_corr, avg_corr = compute_cross_sectional_correlation(
     log_ret_df, lags,
     feature_df=log_price_df,
+    target_df=log_price_df,
     feature_op="mean",
     feature_window_type=WINDOW_TYPE,
     feature_transform=subtract_from_log_price,
-    target_op="sum",
+    target_transform=future_distance_to_moving_average,
+    target_window_type=WINDOW_TYPE,
     correlation="pearson", min_valid_n=50,
-    overlap=True, shift_lookahead_by_lookback=True,
+    overlap=True,
 )
 plot_cross_sectional_curves(
     cross_corr, avg_corr,

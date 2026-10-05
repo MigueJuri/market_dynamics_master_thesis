@@ -99,7 +99,28 @@ actualizaciones incrementales sin recalcular la historia completa.
   feature_df=None, ...)`
   Análogo al anterior, pero aplicado a un universo de activos.
   `feature_df` permite calcular la característica sobre precios
-  mientras el target se construye sobre retornos.
+  mientras el target se construye sobre retornos.  `target_df`
+  selecciona la fuente del objetivo (por defecto `log_returns_df`);
+  pasar `target_transform` lo redefine por completo, lo que permite
+  objetivos relativos que dependen del propio lookback (ver
+  `future_distance_to_moving_average`).
+
+* `compute_correlation_matrix(...)` y `compute_cross_sectional_correlation(...)`
+  aceptan `target_transform(series, tau_p, tau_f, **kwargs)` para
+  redefinir el target cuando depende de ambas ventanas (por ejemplo,
+  `log P_{t+τ_f} - MA_t(τ_p)`, la distancia futura a la media móvil
+  histórica).  Sin él, el objetivo por defecto es el retorno futuro
+  acumulado sobre `τ_f` (`target_op='sum'`).  `target_window_type`
+  y `target_ewm_adjust` se reenvían al callable.
+
+* `future_distance_to_moving_average(series, tau_p, tau_f,
+  window_type='fixed', ewm_adjust=False)` calcula
+  `log P_{t+τ_f} - MA_τ_p(log P)_t`, donde la media se construye
+  exclusivamente con información disponible en `t` (sin lookahead
+  bias).  Pensado para combinarse con `target_transform` en el
+  análisis de distancia a la MA, donde tanto la característica como
+  el target se miden en términos relativos a la misma media
+  histórica para que sean comparables entre regímenes de precios.
 
 ### Visualización
 

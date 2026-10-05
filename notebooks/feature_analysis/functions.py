@@ -132,6 +132,32 @@ def rolling_forward_window(series: pd.Series, window: int) -> pd.Series:
     return series.rolling(window).sum().shift(-window)
 
 
+def future_distance_to_moving_average(
+    source_series: pd.Series,
+    tau_p: float,
+    tau_f: int,
+    window_type: str = "fixed",
+    ewm_adjust: bool = False,
+) -> pd.Series:
+    """Distancia futura del log-precio a su media móvil histórica.
+
+    Devuelve la serie ``log P_{t + τ_f} - MA_{τ_p}(log P)_t``.
+
+    La media móvil se calcula exclusivamente con información disponible
+    en ``t`` (incluye ``log P_t``, nunca usa precios futuros), por lo
+    que no introduce lookahead bias.  El resultado queda alineado al
+    índice de ``source_series`` (anclado en ``t``).  ``window_type``
+    selecciona entre media fija y exponencial igual que
+    :func:`apply_window`.
+    """
+    future = source_series.shift(-int(tau_f))
+    moving = apply_window(
+        source_series, float(tau_p), "mean",
+        window_type=window_type, ewm_adjust=ewm_adjust,
+    )
+    return future - moving
+
+
 RollingOp = Union[str, Callable[[pd.Series], float]]
 
 
@@ -230,6 +256,9 @@ def compute_correlation_matrix(
     feature_window_type: str = "fixed",
     feature_transform: Optional[Callable[[pd.Series, pd.Series], pd.Series]] = None,
     target_op: RollingOp = "sum",
+    target_transform: Optional[Callable[..., pd.Series]] = None,
+    target_window_type: str = "fixed",
+    target_ewm_adjust: bool = False,
     correlation: str = "spearman",
     min_valid: int = 3,
     ewm_adjust: bool = False,
@@ -242,10 +271,13 @@ def compute_correlation_matrix(
 
     La característica se reduce sobre cada ventana de lookback con
     ``feature_op`` (``'sum'`` para momentum, ``'std'`` para volatilidad,
-    ``'mean'`` para drift promedio, etc.).  El objetivo siempre es el
-    retorno futuro acumulado sobre el lookahead (``target_op='sum'`` por
-    defecto, sin admitir ventanas exponenciales).  La métrica de
-    correlación puede ser ``'spearman'`` o ``'pearson'``.
+    ``'mean'`` para drift promedio, etc.).  El objetivo por defecto es el
+    retorno futuro acumulado sobre el lookahead (``target_op='sum'``,
+    ventana fija); cuando se pasa ``target_transform`` se sustituye por
+    un callable ``(series, tau_p, tau_f, **kwargs) -> pd.Series`` que
+    puede depender de ambas ventanas (p. ej. la distancia futura a la
+    media móvil histórica).  La métrica de correlación puede ser
+    ``'spearman'`` o ``'pearson'``.
 
     Si ``feature_windows`` o ``target_windows`` se proporcionan, se usan
     directamente; si no, se genera una rejilla con
@@ -262,6 +294,18 @@ def compute_correlation_matrix(
         Función ``(windowed, base) -> feature`` aplicada tras el rolling
         o ewm.  Útil para combinar la serie original con su media móvil,
         p. ej. ``lambda w, s: s - w`` para ``s - MA(s)``.
+    target_transform : callable, opcional
+        Si se indica, sustituye al objetivo por defecto por la salida de
+        ``target_transform(target_series, tau_p, tau_f,
+        window_type=target_window_type, ewm_adjust=target_ewm_adjust)``.
+        Útil cuando el target depende de ambas ventanas (p. ej.
+        :func:`future_distance_to_moving_average`).
+    target_window_type : {'fixed', 'exponential'}
+        Tipo de ventana pasado a ``target_transform`` si se usa; sólo
+        relevante si el callable lo consume.
+    target_ewm_adjust : bool
+        Corrección de sesgo de EWM pasada a ``target_transform`` si se
+        usa.
     ewm_adjust : bool
         Si es ``True`` aplica la corrección de sesgo de EWM; por defecto
         es ``False`` para permitir actualizaciones incrementales.
@@ -310,18 +354,32 @@ def compute_correlation_matrix(
             f"Correlación desconocida '{correlation}'. Usa 'spearman' o 'pearson'."
         )
 
-    for i, f in enumerate(lookaheads):
-        # El objetivo es siempre el retorno futuro acumulado sobre el
-        # lookahead; se mantiene como ventana fija.
-        fut = target_series.rolling(int(f)).sum().shift(-int(f))
+    # Caché del target por fila (target_op) o por celda (target_transform).
+    fut_cache: Dict[Tuple[int, int], pd.Series] = {}
 
+    for i, f in enumerate(lookaheads):
         for j in range(len(lookbacks)):
+            l_j = int(lookbacks[j])
+            f_i = int(f)
+            key = (i, j) if target_transform is not None else i
+            if key not in fut_cache:
+                if target_transform is None:
+                    fut_cache[key] = (
+                        target_series.rolling(f_i).sum().shift(-f_i)
+                    )
+                else:
+                    fut_cache[key] = target_transform(
+                        target_series, l_j, f_i,
+                        window_type=target_window_type,
+                        ewm_adjust=target_ewm_adjust,
+                    )
+            fut = fut_cache[key]
             feature = feature_cache[j]
-            l = int(lookbacks[j])
+
             valid_idx = ~(feature.isna() | fut.isna())
 
             if valid_idx.sum() > min_valid - 1:
-                shift_step = 1 if overlap else min(l, int(f))
+                shift_step = 1 if overlap else min(l_j, f_i)
                 valid_positions = np.where(valid_idx.values)[0][::shift_step]
                 x = feature.values[valid_positions]
                 y = fut.values[valid_positions]
@@ -335,6 +393,9 @@ def compute_correlation_matrix(
             n_bootstrap=n_bootstrap,
             alpha=bootstrap_alpha,
             seed=SEED if bootstrap_seed is None else bootstrap_seed,
+            target_transform=target_transform,
+            target_window_type=target_window_type,
+            target_ewm_adjust=target_ewm_adjust,
         )
 
     return corr_matrix, lookbacks, lookaheads
@@ -399,6 +460,9 @@ def _print_max_correlation_diagnostic(
     n_bootstrap: int,
     alpha: float,
     seed: Optional[int],
+    target_transform: Optional[Callable[..., pd.Series]] = None,
+    target_window_type: str = "fixed",
+    target_ewm_adjust: bool = False,
 ) -> None:
     """Imprime la celda con máximo |ρ|, sus τ y bootstrap con/sin overlap."""
     if np.all(np.isnan(corr_matrix)):
@@ -412,7 +476,14 @@ def _print_max_correlation_diagnostic(
     rho_matrix = float(corr_matrix[i_max, j_max])
 
     feature = feature_cache[j_max]
-    fut = target_series.rolling(int(tau_f)).sum().shift(-int(tau_f))
+    if target_transform is None:
+        fut = target_series.rolling(int(tau_f)).sum().shift(-int(tau_f))
+    else:
+        fut = target_transform(
+            target_series, tau_p, int(tau_f),
+            window_type=target_window_type,
+            ewm_adjust=target_ewm_adjust,
+        )
 
     def _extract(shift_step: int) -> Tuple[np.ndarray, np.ndarray]:
         valid_idx = ~(feature.isna() | fut.isna())
@@ -455,10 +526,14 @@ def compute_cross_sectional_correlation(
     log_returns_df: pd.DataFrame,
     windows: Sequence[int],
     feature_df: Optional[pd.DataFrame] = None,
+    target_df: Optional[pd.DataFrame] = None,
     feature_op: RollingOp = "sum",
     feature_window_type: str = "fixed",
     feature_transform: Optional[Callable[[pd.Series, pd.Series], pd.Series]] = None,
     target_op: RollingOp = "sum",
+    target_transform: Optional[Callable[..., pd.Series]] = None,
+    target_window_type: str = "fixed",
+    target_ewm_adjust: bool = False,
     correlation: str = "pearson",
     min_valid_n: int = 50,
     overlap: bool = False,
@@ -469,17 +544,18 @@ def compute_cross_sectional_correlation(
 
     Para cada activo de ``log_returns_df`` se calcula la correlación entre
     la característica móvil (``feature_op`` aplicada al input de la
-    característica) y el objetivo futuro (``target_op`` aplicada al input
-    del objetivo) para cada ventana de ``windows``.  El resultado se
-    devuelve como un ``DataFrame`` indexado por ventana con una columna
-    por activo, junto con el promedio cross-sectional.
+    característica) y el objetivo (``target_op`` por defecto, o
+    ``target_transform`` si se pasa) para cada ventana de ``windows``.
+    El resultado se devuelve como un ``DataFrame`` indexado por ventana
+    con una columna por activo, junto con el promedio cross-sectional.
 
     Parámetros
     ----------
     log_returns_df : pd.DataFrame
-        Series usadas como objetivo, con un activo por columna.  Por
-        convención son retornos (logarítmicos) porque el objetivo por
-        defecto es la suma de retornos futuros.
+        Series usadas como objetivo por defecto y como entrada de la
+        característica si ``feature_df`` es ``None``.  Por convención son
+        retornos (logarítmicos) porque el objetivo por defecto es la
+        suma de retornos futuros.
     windows : secuencia de int
         Ventanas (en sesiones) sobre las que se evalúa la predictibilidad.
     feature_df : pd.DataFrame, opcional
@@ -488,6 +564,12 @@ def compute_cross_sectional_correlation(
         característica se computa sobre precios (p. ej. distancia a la
         media móvil) y el objetivo sobre retornos.  Debe compartir
         columnas con ``log_returns_df``.
+    target_df : pd.DataFrame, opcional
+        Series usadas como input del objetivo.  Si es ``None`` (por
+        defecto) se reutiliza ``log_returns_df``; útil cuando el
+        objetivo depende de precios (p. ej. distancia futura a la media
+        móvil) y la característica también.  Debe compartir columnas con
+        ``log_returns_df``.
     feature_op, target_op : str o callable
         Reducciones móviles aplicadas a la característica y al objetivo.
     feature_window_type : {'fixed', 'exponential'}
@@ -496,6 +578,17 @@ def compute_cross_sectional_correlation(
     feature_transform : callable, opcional
         Función ``(windowed, base) -> feature`` aplicada tras el rolling
         o ewm de la característica.
+    target_transform : callable, opcional
+        Si se indica, sustituye al objetivo por defecto por la salida de
+        ``target_transform(target_source, window, window,
+        window_type=target_window_type, ewm_adjust=target_ewm_adjust)``.
+        Útil cuando el target depende del propio lookback (p. ej.
+        :func:`future_distance_to_moving_average`).
+    target_window_type : {'fixed', 'exponential'}
+        Tipo de ventana pasado a ``target_transform`` si se usa.
+    target_ewm_adjust : bool
+        Corrección de sesgo de EWM pasada a ``target_transform`` si se
+        usa.
     correlation : {'pearson', 'spearman'}
         Métrica de correlación.
     min_valid_n : int
@@ -503,10 +596,10 @@ def compute_cross_sectional_correlation(
     overlap : bool
         Si ``False``, las observaciones se submuestrean con paso ``window``.
     shift_lookahead_by_lookback : bool
-        Si ``True``, el objetivo comienza inmediatamente después de que
-        termina el lookback (``shift(-lag).rolling(lag).sum()``); si no, el
-        objetivo se calcula con la convención habitual
-        (``rolling_forward_window``).
+        Si ``True`` y no se usa ``target_transform``, el objetivo
+        comienza inmediatamente después de que termina el lookback
+        (``shift(-lag).rolling(lag).sum()``); si no, se calcula con la
+        convención habitual (``rolling_forward_window``).
     ewm_adjust : bool
         Si es ``True`` aplica la corrección de sesgo de EWM; por defecto
         es ``False`` para permitir actualizaciones incrementales.
@@ -517,21 +610,23 @@ def compute_cross_sectional_correlation(
         corr_func = stats.spearmanr
     else:
         raise ValueError(
-            f"Correlación desconocida '{correlation}'. Usa 'pearson' o 'spearson'."
+            f"Correlación desconocida '{correlation}'. Usa 'pearson' o 'spearman'."
         )
 
     if feature_df is None:
         feature_df = log_returns_df
+    if target_df is None:
+        target_df = log_returns_df
 
     corr_matrix = pd.DataFrame(index=list(windows),
                                 columns=list(log_returns_df.columns),
                                 dtype=float)
 
     for asset in log_returns_df.columns:
-        target_series = log_returns_df[asset].dropna()
-        if asset not in feature_df.columns:
+        if asset not in feature_df.columns or asset not in target_df.columns:
             continue
         feature_series = feature_df[asset].dropna()
+        target_source = target_df[asset].dropna()
         for window in windows:
             windowed = apply_window(
                 feature_series, float(window), feature_op,
@@ -541,12 +636,19 @@ def compute_cross_sectional_correlation(
                 feature = windowed
             else:
                 feature = feature_transform(windowed, feature_series)
-            if shift_lookahead_by_lookback:
-                target = target_series.shift(-window).rolling(window).sum()
+            if target_transform is None:
+                if shift_lookahead_by_lookback:
+                    target = target_source.shift(-window).rolling(window).sum()
+                else:
+                    target = _apply_rolling(target_source, window, target_op)
+                    if target_op == "sum":
+                        target = target.shift(-window)
             else:
-                target = _apply_rolling(target_series, window, target_op)
-                if target_op == "sum":
-                    target = target.shift(-window)
+                target = target_transform(
+                    target_source, window, window,
+                    window_type=target_window_type,
+                    ewm_adjust=target_ewm_adjust,
+                )
             valid_idx = ~(feature.isna() | target.isna())
             n_valid = int(valid_idx.sum())
             if n_valid >= min_valid_n:
