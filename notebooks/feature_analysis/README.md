@@ -107,7 +107,9 @@ actualizaciones incrementales sin recalcular la historia completa.
   Heatmap con ticks en fracciones de año.
 * `plot_scatter_grid(feature_by_window, target_by_window, ...)`
   Grilla de scatter feature × target para todas las combinaciones de
-  ventanas.
+  ventanas.  Por defecto cada punto se colorea por fecha (mismo
+  `cmap` y colorbar compartida en toda la rejilla); pasar
+  `color_by_date=False` para volver al coloreado uniforme.
 * `plot_feature_boxplots(feature, target, n_quantiles=5, x_axis="quantiles", ...)`
   Boxplot del target agrupado por la característica.  `x_axis`
   selecciona la discretización del eje X: `"quantiles"` (cuantiles

@@ -26,6 +26,7 @@ import os
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -625,14 +626,32 @@ def plot_scatter_grid(feature_by_window: Dict[int, pd.Series],
                        feature_format: Callable[[int], str] = str,
                        target_format: Callable[[int], str] = str,
                        figsize: Tuple[float, float] = (12.0, 10.0),
-                       scatter_kwargs: Optional[dict] = None) -> None:
+                       scatter_kwargs: Optional[dict] = None,
+                       color_by_date: bool = True,
+                       cmap: str = "viridis",
+                       date_format: str = "%Y") -> None:
     """Grilla de scatter feature × target para todas las combinaciones de ventanas.
 
     ``feature_by_window`` y ``target_by_window`` deben compartir índices (o,
     al menos, solapar en sus fechas).  Las claves determinan los rótulos de
     cada eje.
+
+    Si ``color_by_date`` es ``True`` (por defecto), cada punto se colorea
+    según su fecha con el ``cmap`` indicado y se añade una colorbar
+    compartida por toda la rejilla con marcas formateadas con
+    ``date_format`` (por defecto sólo el año).  El rango de colores se
+    computa una vez sobre la unión de fechas válidas de todos los
+    paneles, de modo que paneles distintos comparten escala.
+    ``scatter_kwargs`` puede ajustar el resto de propiedades del scatter
+    (``s``, ``alpha``, ...); ``c``, ``cmap``, ``vmin`` y ``vmax`` los
+    gestiona siempre la función.
     """
-    scatter_kwargs = scatter_kwargs or {"s": 8, "alpha": 0.25}
+    base_kwargs = {"s": 8, "alpha": 0.25}
+    extra_kwargs = {
+        k: v for k, v in (scatter_kwargs or {}).items()
+        if k not in {"c", "cmap", "vmin", "vmax"}
+    }
+    kwargs = {**base_kwargs, **extra_kwargs}
     feature_windows = list(feature_by_window.keys())
     target_windows = list(target_by_window.keys())
 
@@ -640,6 +659,24 @@ def plot_scatter_grid(feature_by_window: Dict[int, pd.Series],
                              figsize=figsize, sharex=False, sharey=False,
                              constrained_layout=True)
 
+    global_min, global_max = None, None
+    for fw in feature_windows:
+        for tw in target_windows:
+            common_idx = feature_by_window[fw].index.intersection(
+                target_by_window[tw].index,
+            )
+            if len(common_idx) == 0:
+                continue
+            if global_min is None or common_idx.min() < global_min:
+                global_min = common_idx.min()
+            if global_max is None or common_idx.max() > global_max:
+                global_max = common_idx.max()
+    if global_min is None:
+        return
+    vmin = mdates.date2num(global_min)
+    vmax = mdates.date2num(global_max)
+
+    first_scatter = None
     for i, tw in enumerate(target_windows):
         for j, fw in enumerate(feature_windows):
             ax = axes[i, j]
@@ -648,7 +685,19 @@ def plot_scatter_grid(feature_by_window: Dict[int, pd.Series],
                  target_by_window[tw].rename(target_label)],
                 axis=1,
             ).dropna()
-            ax.scatter(data.iloc[:, 0], data.iloc[:, 1], **scatter_kwargs)
+            if data.empty:
+                continue
+            if color_by_date:
+                scatter = ax.scatter(
+                    data.iloc[:, 0], data.iloc[:, 1],
+                    c=mdates.date2num(data.index),
+                    cmap=cmap, vmin=vmin, vmax=vmax,
+                    **kwargs,
+                )
+                if first_scatter is None:
+                    first_scatter = scatter
+            else:
+                ax.scatter(data.iloc[:, 0], data.iloc[:, 1], **kwargs)
             ax.axhline(0, color="black", lw=0.8, alpha=0.6)
             ax.axvline(0, color="black", lw=0.8, alpha=0.6)
             ax.set_title(
@@ -657,6 +706,13 @@ def plot_scatter_grid(feature_by_window: Dict[int, pd.Series],
             )
             ax.set_xlabel(f"{feature_label} {feature_format(fw)}")
             ax.set_ylabel(f"{target_label} {target_format(tw)}")
+
+    if color_by_date and first_scatter is not None:
+        cbar = fig.colorbar(first_scatter, ax=axes,
+                            fraction=0.025, pad=0.02)
+        cbar.ax.yaxis.set_major_formatter(mdates.DateFormatter(date_format))
+        cbar.set_label("Fecha")
+
     plt.show()
 
 
