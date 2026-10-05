@@ -677,6 +677,7 @@ def plot_scatter_grid(feature_by_window: Dict[int, pd.Series],
     vmax = mdates.date2num(global_max)
 
     first_scatter = None
+    last_row = len(target_windows) - 1
     for i, tw in enumerate(target_windows):
         for j, fw in enumerate(feature_windows):
             ax = axes[i, j]
@@ -700,12 +701,10 @@ def plot_scatter_grid(feature_by_window: Dict[int, pd.Series],
                 ax.scatter(data.iloc[:, 0], data.iloc[:, 1], **kwargs)
             ax.axhline(0, color="black", lw=0.8, alpha=0.6)
             ax.axvline(0, color="black", lw=0.8, alpha=0.6)
-            ax.set_title(
-                f"{feature_label} {feature_format(fw)} vs "
-                f"{target_label} {target_format(tw)}", fontsize=9,
-            )
-            ax.set_xlabel(f"{feature_label} {feature_format(fw)}")
-            ax.set_ylabel(f"{target_label} {target_format(tw)}")
+            if i == last_row:
+                ax.set_xlabel(f"{feature_label} {feature_format(fw)}")
+            if j == 0:
+                ax.set_ylabel(f"{target_label} {target_format(tw)}")
 
     if color_by_date and first_scatter is not None:
         cbar = fig.colorbar(first_scatter, ax=axes,
