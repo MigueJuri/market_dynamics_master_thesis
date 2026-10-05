@@ -625,7 +625,7 @@ def plot_scatter_grid(feature_by_window: Dict[int, pd.Series],
                        target_label: str = "Target",
                        feature_format: Callable[[int], str] = str,
                        target_format: Callable[[int], str] = str,
-                       figsize: Tuple[float, float] = (12.0, 10.0),
+                       figsize: Tuple[float, float] = (6.0, 5.0),
                        scatter_kwargs: Optional[dict] = None,
                        color_by_date: bool = True,
                        cmap: str = "viridis",
@@ -646,7 +646,7 @@ def plot_scatter_grid(feature_by_window: Dict[int, pd.Series],
     (``s``, ``alpha``, ...); ``c``, ``cmap``, ``vmin`` y ``vmax`` los
     gestiona siempre la función.
     """
-    base_kwargs = {"s": 8, "alpha": 0.25}
+    base_kwargs = {"s": 2, "alpha": 0.6}
     extra_kwargs = {
         k: v for k, v in (scatter_kwargs or {}).items()
         if k not in {"c", "cmap", "vmin", "vmax"}
