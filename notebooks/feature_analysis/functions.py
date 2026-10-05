@@ -715,7 +715,7 @@ def plot_feature_boxplots(feature: pd.Series,
             raise ValueError(
                 "No se pueden construir bins: la característica es constante."
             )
-        bin_labels = [f"{(lo + hi) / 2:g}"
+        bin_labels = [f"{(lo + hi) / 2:.2g}"
                       for lo, hi in zip(edges[:-1], edges[1:])]
         data["quantile"] = pd.cut(data[feature_name],
                                    bins=edges, include_lowest=True,

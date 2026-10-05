@@ -114,9 +114,10 @@ actualizaciones incrementales sin recalcular la historia completa.
   clásicos con etiquetas `Q1..Qn`, mismo número de observaciones por
   grupo, vía `pd.qcut`) o `"bins"` (intervalos de igual anchura sobre
   el rango del feature, vía `pd.cut`, con la etiqueta de cada grupo
-  mostrando el valor medio del intervalo).  En ambos casos
-  `n_quantiles` controla el número de grupos.  Devuelve la correlación
-  de Pearson sobre la muestra conjunta si `return_correlation=True`.
+  mostrando el valor medio del intervalo con hasta dos cifras
+  significativas).  En ambos casos `n_quantiles` controla el número
+  de grupos.  Devuelve la correlación de Pearson sobre la muestra
+  conjunta si `return_correlation=True`.
 * `plot_cross_sectional_curves(corr_matrix, avg_corr, ...)`
   Curvas por activo con promedio cross-sectional. Usa
   `marker="o"` para que el caso de una sola ventana no quede en
