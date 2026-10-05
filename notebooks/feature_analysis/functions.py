@@ -698,12 +698,11 @@ def plot_feature_boxplots(feature: pd.Series,
         axis=1,
     ).dropna()
 
-    labels = [f"Q{i + 1}" for i in range(n_quantiles)]
-    if n_quantiles >= 2:
-        labels[0] = "Q1\n(Lowest)"
-        labels[-1] = f"Q{n_quantiles}\n(Highest)"
-
     if x_axis == "quantiles":
+        labels = [f"Q{i + 1}" for i in range(n_quantiles)]
+        if n_quantiles >= 2:
+            labels[0] = "Q1\n(Lowest)"
+            labels[-1] = f"Q{n_quantiles}\n(Highest)"
         data["quantile"] = pd.qcut(data[feature_name],
                                     q=n_quantiles, labels=labels)
         x_label_suffix = f"{feature_name.capitalize()} Quantiles"
@@ -711,9 +710,19 @@ def plot_feature_boxplots(feature: pd.Series,
         f_min = float(data[feature_name].min())
         f_max = float(data[feature_name].max())
         edges = np.linspace(f_min, f_max, n_quantiles + 1)
+        edges = np.unique(edges)
+        if len(edges) < 2:
+            raise ValueError(
+                "No se pueden construir bins: la característica es constante."
+            )
+        bin_labels = [
+            f"[{lo:g}, {hi:g}]" if i == len(edges) - 2
+            else f"[{lo:g}, {hi:g})"
+            for i, (lo, hi) in enumerate(zip(edges[:-1], edges[1:]))
+        ]
         data["quantile"] = pd.cut(data[feature_name],
                                    bins=edges, include_lowest=True,
-                                   labels=labels)
+                                   labels=bin_labels)
         x_label_suffix = f"{feature_name.capitalize()} Bins"
 
     created_fig = ax is None
