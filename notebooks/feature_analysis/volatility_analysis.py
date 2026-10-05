@@ -13,16 +13,17 @@
 # ---
 
 # %%
-# # Análisis de Momentum
+# # Análisis de Volatilidad
 #
 # Este cuaderno aplica las funciones generales de ``feature_analysis/functions.py``
-# para cuantificar la predictibilidad del momentum sobre el ETF ``SPY``.
+# para cuantificar la predictibilidad de la volatilidad móvil sobre el ETF ``SPY``.
+# Se reutilizan ``compute_correlation_matrix``, ``plot_correlation_matrix`` y
+# ``plot_feature_boxplots`` parametrizando la operación móvil (``'std'``).
 
 # %%
 from pathlib import Path
 import sys
 
-# Permite ejecutar el archivo desde ``notebooks/`` o desde ``notebooks/feature_analysis/``.
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent
 if str(_ROOT) not in sys.path:
@@ -34,84 +35,75 @@ import matplotlib.pyplot as plt
 
 from feature_analysis.functions import (
     TICKER, START, END, TRADING_DAYS, DATA_DIR,
-    load_single_price, load_multiple_prices, log_returns, simple_returns,
+    load_single_price, load_multiple_prices, log_returns,
     compute_correlation_matrix, plot_correlation_matrix,
     compute_cross_sectional_correlation, plot_cross_sectional_curves,
     plot_scatter_grid, plot_feature_boxplots,
 )
 
 # %%
-# ## Carga de datos y retornos
+# ## Carga de datos y construcción de la característica
 price = load_single_price(TICKER, START, END, DATA_DIR)
 log_ret = log_returns(price)
-simple_ret = simple_returns(price)
 
 print(f"Ticker          : {TICKER}")
 print(f"Rango           : {price.index[0]:%Y-%m-%d} a {price.index[-1]:%Y-%m-%d}")
 print(f"Observaciones   : {len(price):,} precios  |  {len(log_ret):,} retornos")
-print(f"Precio inicial  : {price.iloc[0]:,.2f} USD")
-print(f"Precio final    : {price.iloc[-1]:,.2f} USD")
-print(f"Múltiplo total  : x{price.iloc[-1] / price.iloc[0]:,.1f}")
+
+
+def realised_volatility(log_returns_series: pd.Series, lag: int) -> pd.Series:
+    """Volatilidad móvil: desviación estándar sobre los últimos ``lag`` días."""
+    return log_returns_series.rolling(lag).std()
+
+
+vol_windows = [21, 63, 252]
 
 # %%
-# ## Construcción de la característica momentum
-momentum_lags = [50, 189, 2 * TRADING_DAYS]
-ret_to_predict_lags = [50, 189, 2 * TRADING_DAYS]
+# ## Scatter volatilidad vs retorno futuro (todas las combinaciones de ventanas)
+ret_windows = vol_windows
+vol_by_window = {w: realised_volatility(log_ret, w) for w in vol_windows}
 
+# Para el scatter usamos la suma de retornos futuros como objetivo.
+target_by_window = {w: log_ret.rolling(w).sum().shift(-w) for w in ret_windows}
 
-def momentum_feature(price: pd.Series, lag: int) -> pd.Series:
-    """Cumulative log-return over the past ``lag`` sessions (excluding today)."""
-    return np.log(price.shift(1)) - np.log(price.shift(lag + 1))
-
-
-def forward_return(price: pd.Series, lag: int) -> pd.Series:
-    """Cumulative log-return over the next ``lag`` sessions (excluding today)."""
-    return np.log(price.shift(-lag)) - np.log(price.shift(-1))
-
-
-momentum_by_lag = {m: momentum_feature(price, m) for m in momentum_lags}
-target_by_lag = {r: forward_return(price, r) for r in ret_to_predict_lags}
-
-# %%
-# ## Grilla de scatter momentum × retorno futuro
 plot_scatter_grid(
-    momentum_by_lag, target_by_lag,
-    feature_label="Momentum", target_label="Return",
+    vol_by_window, target_by_window,
+    feature_label="Volatility", target_label="Forward return",
     feature_format=lambda k: f"{k}d", target_format=lambda k: f"{k}d",
 )
 
 # %%
-# ## Análisis por cuantiles de momentum (ventana única)
-mom_k = 189
-ret_k = 189
+# ## Análisis por cuantiles de volatilidad (ventana única)
+vol_window = 63
+target_window = 63
 
-avg_momentum = (momentum_feature(price, mom_k) / mom_k) * TRADING_DAYS
-future_return = forward_return(price, ret_k)
+vol_series = realised_volatility(log_ret, vol_window)
+target_series = log_ret.rolling(target_window).sum().shift(-target_window)
 
 pearson_corr = plot_feature_boxplots(
-    avg_momentum, future_return,
+    vol_series, target_series,
     n_quantiles=5,
-    feature_name="momentum", target_name="future return",
-    feature_window=mom_k, target_window=ret_k,
+    feature_name="volatility", target_name="forward return",
+    feature_window=vol_window, target_window=target_window,
 )
-print(f"Pearson Correlation: {pearson_corr:.3f}")
+print(f"Pearson Correlation (vol → forward return): {pearson_corr:.3f}")
 
 # %%
-# ## Matriz general de correlación (momentum = suma móvil)
-mom_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
+# ## Matriz general de correlación (volatilidad = std móvil)
+vol_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
     log_ret, log_ret,
     max_lookback=2 * TRADING_DAYS, max_lookahead=2 * TRADING_DAYS,
     steps=100, overlap=True,
-    feature_op="sum", target_op="sum", correlation="pearson",
+    feature_op="std", target_op="sum", correlation="spearman",
 )
 plot_correlation_matrix(
-    mom_corr_matrix, lookbacks, lookaheads,
-    title="Momentum–Forward Pearson Correlation",
-    cbar_label="Correlación de Pearson",
+    vol_corr_matrix, lookbacks, lookaheads,
+    title="Volatility–Forward Spearman Correlation",
+    cbar_label="Correlación de Spearman",
 )
 
- # %%
-# ## Análisis cross-sectional de momentum por sector
+# %%
+# ## Análisis cross-sectional de volatilidad por sector
 sector_tickers = {
     "Tecnología": ["XLK"],
     "Comunicaciones": ["XLC"],
@@ -136,13 +128,13 @@ raw = load_multiple_prices(all_tickers)
 log_ret_df = np.log(raw / raw.shift(1)).dropna(how="all")
 
 trading_days_per_year = 252
-max_lag = int(1.5 * trading_days_per_year)   # keep below N/3 per earlier discussion
+max_lag = int(2 * trading_days_per_year)   # keep below N/3 per earlier discussion
 step = max_lag // 150  # Adjust step size for better resolution
 lags = np.arange(step, max_lag + step, step)
 
 cross_corr, avg_corr = compute_cross_sectional_correlation(
     log_ret_df, lags,
-    feature_op="sum", target_op="sum",
+    feature_op="std", target_op="sum",
     correlation="pearson", min_valid_n=50,
     overlap=True, shift_lookahead_by_lookback=True,
 )
@@ -152,3 +144,4 @@ plot_cross_sectional_curves(
     avg_label="Promedio de sectores",
     tau_to_yf=lambda L: 2 * L / TRADING_DAYS,
 )
+# %%
