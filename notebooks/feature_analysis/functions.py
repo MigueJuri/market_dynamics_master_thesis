@@ -158,6 +158,87 @@ def future_distance_to_moving_average(
     return future - moving
 
 
+def volatility_scaled_return(
+    returns: pd.Series,
+    window: int,
+    sigma_floor: float = 1e-12,
+    ddof: int = 1,
+) -> pd.Series:
+    r"""Retorno acumulado pasado escalado por la volatilidad pasada.
+
+    Para cada fecha ``t``:
+
+    .. math:: f_t = \frac{\sum_{k=1}^{w} r_{t-k}}
+                       {\operatorname{std}(r_{t-w}, \ldots, r_{t-1})}
+
+    La ventana del retorno y la de la volatilidad coinciden y se
+    calculan sobre ``returns.shift(1)``, de modo que no se incluye el
+    retorno del día ``t``.  ``sigma_floor`` evita divisiones por cero
+    cuando la volatilidad es nula.
+    """
+    shifted = returns.shift(1)
+    ret_sum = shifted.rolling(window).sum()
+    sigma = shifted.rolling(window, min_periods=window).std(ddof=ddof)
+    if sigma_floor is not None:
+        sigma = sigma.clip(lower=sigma_floor)
+    return ret_sum / sigma
+
+
+def future_return_over_past_volatility(
+    returns: pd.Series,
+    tau_p: float,
+    tau_f: int,
+    sigma_floor: float = 1e-12,
+    ddof: int = 1,
+    **_: object,
+) -> pd.Series:
+    r"""Retorno futuro escalado por la volatilidad histórica pasada.
+
+    Para cada fecha ``t``:
+
+    .. math:: y_t = \frac{\sum_{k=1}^{\tau_f} r_{t+k}}
+                       {\operatorname{std}(r_{t-\tau_p+1}, \ldots, r_{t-1})}
+
+    El denominador usa exclusivamente retornos hasta ``t-1`` (sin
+    lookahead bias).  ``sigma_floor`` evita divisiones por cero.
+    ``**_`` admite kwargs adicionales (``window_type``,
+    ``ewm_adjust``) para interoperar con
+    :func:`compute_correlation_matrix` y
+    :func:`compute_cross_sectional_correlation` como ``target_transform``.
+    """
+    shifted = returns.shift(1)
+    sigma = shifted.rolling(int(tau_p), min_periods=int(tau_p)).std(ddof=ddof)
+    fut_sum = returns.rolling(int(tau_f)).sum().shift(-int(tau_f))
+    if sigma_floor is not None:
+        sigma = sigma.clip(lower=sigma_floor)
+    return fut_sum / sigma
+
+
+def make_scaled_return_op(
+    sigma_floor: float = 1e-12,
+    ddof: int = 1,
+) -> Callable[[pd.Series], float]:
+    """Callable para usar como ``feature_op`` en ventanas fijas.
+
+    Recibe una ventana de retornos (ya desplazada para excluir ``r_t``)
+    y devuelve ``sum(window) / std(window)``.  Pensado para combinar con
+    :func:`compute_correlation_matrix` y
+    :func:`compute_cross_sectional_correlation` cuando la característica
+    es un retorno escalado por volatilidad.
+    """
+    def _op(window: pd.Series) -> float:
+        if len(window) == 0:
+            return np.nan
+        sigma = window.std(ddof=ddof)
+        if np.isnan(sigma) or sigma == 0:
+            return np.nan
+        if sigma_floor is not None and sigma < sigma_floor:
+            sigma = sigma_floor
+        return float(window.sum() / sigma)
+
+    return _op
+
+
 RollingOp = Union[str, Callable[[pd.Series], float]]
 
 
@@ -650,13 +731,18 @@ def compute_cross_sectional_correlation(
                     ewm_adjust=target_ewm_adjust,
                 )
             valid_idx = ~(feature.isna() | target.isna())
-            n_valid = int(valid_idx.sum())
+            valid_idx = valid_idx.fillna(False)
+            common_idx = feature.index.intersection(target.index)
+            common_idx = common_idx[valid_idx.reindex(common_idx,
+                                                      fill_value=False)]
+            n_valid = len(common_idx)
             if n_valid >= min_valid_n:
-                positions = np.where(valid_idx.values)[0]
+                x = feature.reindex(common_idx).to_numpy()
+                y = target.reindex(common_idx).to_numpy()
                 if not overlap:
-                    positions = positions[::max(1, window)]
-                x = feature.values[positions]
-                y = target.values[positions]
+                    step = max(1, window)
+                    x = x[::step]
+                    y = y[::step]
                 corr, _ = corr_func(x, y)
                 corr_matrix.loc[window, asset] = corr
 

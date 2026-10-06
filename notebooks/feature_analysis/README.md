@@ -122,6 +122,20 @@ actualizaciones incrementales sin recalcular la historia completa.
   el target se miden en términos relativos a la misma media
   histórica para que sean comparables entre regímenes de precios.
 
+* `volatility_scaled_return(returns, window, sigma_floor=1e-12,
+  ddof=1)` devuelve la serie `suma(retornos pasados) / std(retornos
+  pasados)`.  Los retornos se desplazan un día para no incluir `r_t`.
+  `sigma_floor` evita divisiones por cero.
+
+* `future_return_over_past_volatility(returns, tau_p, tau_f,
+  sigma_floor=1e-12, ddof=1)` calcula
+  `suma(retornos futuros) / std(retornos pasados de τ_p)`, donde la
+  volatilidad pasada se calcula sin usar información futura.
+
+* `make_scaled_return_op(sigma_floor=1e-12, ddof=1)` devuelve un
+  callable pensado para usar como `feature_op` en ventanas fijas:
+  recibe una ventana de retornos y devuelve `sum / std`.
+
 ### Visualización
 
 * `plot_correlation_matrix(matrix, lookbacks, lookaheads, ...)`
@@ -190,6 +204,29 @@ WINDOW_TYPE = "fixed"        # o "exponential"
   `feature_transform=lambda w, s: s - w`.
 * Eje $\tau_p$: ventana de la media móvil.
 * Análisis: `moving_average_distance_analysis.py`.
+
+### Momentum rescalado por volatilidad
+
+```text
+f_t(τ_p) = ( Σ_{k=1..τ_p} r_{t-k} ) / std( r_{t-τ_p..t-1} )
+
+y_t(τ_p, τ_f) = ( Σ_{k=1..τ_f} r_{t+k} ) / std( r_{t-τ_p+1..t-1} )
+```
+
+Característica tipo Sharpe Ratio: el retorno acumulado pasado se divide
+por su propia volatilidad para hacer comparables regímenes con
+distinta dispersión.  El target usa la **misma** volatilidad pasada
+para mantener la consistencia y evitar lookahead bias.  Tanto el
+numerador como el denominador usan información disponible en `t-1`,
+de modo que toda la fórmula está anclada a `t`.
+
+* Característica: `feature_op=make_scaled_return_op(...)` aplicada
+  sobre `log_ret.shift(1)`.
+* Target: `target_transform=future_return_over_past_volatility(...)`
+  sobre `log_ret`.
+* Eje $\tau_p$: ventana de lookback (volatilidad y momentum).
+* Eje $\tau_f$: ventana del retorno futuro.
+* Análisis: `momentum_volatility_analysis.py`.
 
 ---
 
