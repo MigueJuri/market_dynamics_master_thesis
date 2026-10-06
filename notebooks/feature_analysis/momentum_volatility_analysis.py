@@ -111,8 +111,8 @@ plot_scatter_grid(
 
 # %%
 # ## Análisis por cuantiles (ventana única)
-tau_p = 180
-tau_f = 100
+tau_p = 150
+tau_f = 170
 
 feat_series = sharpe_feature(log_ret, tau_p)
 tgt_series = sharpe_target(log_ret, tau_p=tau_p, tau_f=tau_f)
@@ -120,6 +120,7 @@ tgt_series = sharpe_target(log_ret, tau_p=tau_p, tau_f=tau_f)
 pearson_corr = plot_feature_boxplots(
     feat_series, tgt_series,
     n_quantiles=10,
+    x_axis = "bins",
     feature_name="momentum / vol", target_name="future return / vol",
     feature_window=tau_p, target_window=tau_f,
 )
@@ -137,7 +138,7 @@ print(f"Pearson Correlation: {pearson_corr:.3f}")
 sharpe_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
     log_ret.shift(1), log_ret,
     max_lookback=2 * TRADING_DAYS, max_lookahead=2 * TRADING_DAYS,
-    steps=300, overlap=True,
+    steps=100, overlap=True,
     feature_op=scaled_return_op,
     target_transform=future_return_over_past_volatility,
     target_window_type="fixed",
@@ -199,3 +200,6 @@ plot_cross_sectional_curves(
     avg_label="Promedio de sectores",
     tau_to_yf=lambda L: 2 * L / TRADING_DAYS,
 )
+
+# %%
+ 

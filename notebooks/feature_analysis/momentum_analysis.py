@@ -55,8 +55,8 @@ print(f"Múltiplo total  : x{price.iloc[-1] / price.iloc[0]:,.1f}")
 
 # %%
 # ## Construcción de la característica momentum
-momentum_lags = [50, 189, 2 * TRADING_DAYS]
-ret_to_predict_lags = [50, 189, 2 * TRADING_DAYS]
+momentum_lags = [TRADING_DAYS //4  , TRADING_DAYS //2 , 2 * TRADING_DAYS]
+ret_to_predict_lags = [TRADING_DAYS //4  , TRADING_DAYS //2 , 2 * TRADING_DAYS]
 
 
 def momentum_feature(price: pd.Series, lag: int) -> pd.Series:
@@ -74,24 +74,27 @@ target_by_lag = {r: forward_return(price, r) for r in ret_to_predict_lags}
 
 # %%
 # ## Grilla de scatter momentum × retorno futuro
+scale = 0.7
 plot_scatter_grid(
     momentum_by_lag, target_by_lag,
-    feature_label="Momentum", target_label="Return",
-    feature_format=lambda k: f"{k}d", target_format=lambda k: f"{k}d",
+    figsize=(12.0*scale, 10.0*scale),
+    feature_label="Momentum", target_label="Retorno Futuro",
+    feature_format=lambda k: rf"$\tau_p=${k/252:.2f} años", target_format=lambda k: rf"$\tau_f=${k/252:.2f} años",
 )
 
 # %%
 # ## Análisis por cuantiles de momentum (ventana única)
-mom_k = 189
-ret_k = 189
+mom_k = 180
+ret_k = 100
 
 avg_momentum = (momentum_feature(price, mom_k) / mom_k) * TRADING_DAYS
 future_return = forward_return(price, ret_k)
 
 pearson_corr = plot_feature_boxplots(
     avg_momentum, future_return,
-    n_quantiles=5,
-    feature_name="momentum", target_name="future return",
+    n_quantiles= 10,
+    x_axis = "quantiles",
+    feature_name="Momentum", target_name="Retorno futuro",
     feature_window=mom_k, target_window=ret_k,
 )
 print(f"Pearson Correlation: {pearson_corr:.3f}")
@@ -101,7 +104,7 @@ print(f"Pearson Correlation: {pearson_corr:.3f}")
 mom_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
     log_ret, log_ret,
     max_lookback=2 * TRADING_DAYS, max_lookahead=2 * TRADING_DAYS,
-    steps=100, overlap=True,
+    steps=300, overlap=True,
     feature_op="sum", target_op="sum", correlation="pearson",
 )
 plot_correlation_matrix(

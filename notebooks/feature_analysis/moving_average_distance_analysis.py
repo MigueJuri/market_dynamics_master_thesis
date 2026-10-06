@@ -131,8 +131,8 @@ plot_scatter_grid(
 
 # %%
 # ## Análisis por cuantiles (ventana única)
-tau_p = 189
-tau_f = 189
+tau_p = 6*252
+tau_f = 100
 
 feat_series = distance_feature(log_price, tau_p)
 tgt_series = future_distance_to_moving_average(
@@ -142,6 +142,7 @@ tgt_series = future_distance_to_moving_average(
 pearson_corr = plot_feature_boxplots(
     feat_series, tgt_series,
     n_quantiles=5,
+    x_axis = "bins",
     feature_name="distance to MA", target_name="future distance to MA",
     feature_window=tau_p, target_window=tau_f,
 )
@@ -162,7 +163,7 @@ print(f"Pearson Correlation: {pearson_corr:.3f}")
 
 dist_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
     log_price, log_price,
-    max_lookback=2 * TRADING_DAYS, max_lookahead=2 * TRADING_DAYS,
+    max_lookback=10 * TRADING_DAYS, max_lookahead=10 * TRADING_DAYS,
     steps=100, overlap=True,
     feature_op="mean",
     feature_window_type=WINDOW_TYPE,

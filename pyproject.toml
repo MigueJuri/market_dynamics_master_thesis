@@ -12,6 +12,7 @@ dependencies = [
     "yfinance>=1.7.0",
     "seaborn>=0.13.2",
     "statsmodels>=0.15.0",
+    "librosa>=0.11.0",
 ]
 
 [project.optional-dependencies]
