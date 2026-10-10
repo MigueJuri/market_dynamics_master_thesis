@@ -33,6 +33,7 @@ import pandas as pd
 import scipy.stats as stats
 import seaborn as sns
 import yfinance as yf
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 # =============================================================================
@@ -913,7 +914,8 @@ def plot_feature_boxplots(feature: pd.Series,
                           target_window: Optional[int] = None,
                           ax: Optional[plt.Axes] = None,
                           palette: str = "viridis",
-                          return_correlation: bool = True) -> Optional[float]:
+                          return_correlation: bool = True,
+                          show_cumulative: bool = False) -> Optional[float]:
     """Boxplot del objetivo agrupado por la característica.
 
     El eje X puede construirse de dos formas equivalentes:
@@ -926,6 +928,14 @@ def plot_feature_boxplots(feature: pd.Series,
       igual anchura en valor crudo.
 
     ``n_quantiles`` controla el número de grupos en ambos casos.
+
+    Si ``show_cumulative`` es ``True``, añade debajo del boxplot la
+    función de distribución acumulada empírica (ECDF) de la
+    característica, permitiendo ver la frecuencia con la que aparecen
+    los distintos valores del feature.  La ECDF usa los valores
+    crudos del feature, no las etiquetas de cuantiles o bins, ya que
+    la frecuencia por cuantil es aproximadamente uniforme y poco
+    informativa.
 
     Si ``return_correlation`` es ``True`` devuelve la correlación de
     Pearson entre ``feature`` y ``target`` sobre la muestra conjunta; si
@@ -944,11 +954,11 @@ def plot_feature_boxplots(feature: pd.Series,
     if x_axis == "quantiles":
         labels = [f"Q{i + 1}" for i in range(n_quantiles)]
         if n_quantiles >= 2:
-            labels[0] = "Q1\n(Lowest)"
-            labels[-1] = f"Q{n_quantiles}\n(Highest)"
+            labels[0] = "Q1\n(Más bajo)"
+            labels[-1] = f"Q{n_quantiles}\n(Más Alto)"
         data["quantile"] = pd.qcut(data[feature_name],
                                     q=n_quantiles, labels=labels)
-        x_label_suffix = f"{feature_name.capitalize()} Quantiles"
+        x_label_suffix = f"{feature_name.capitalize()} cuantiles"
     else:
         f_min = float(data[feature_name].min())
         f_max = float(data[feature_name].max())
@@ -963,26 +973,55 @@ def plot_feature_boxplots(feature: pd.Series,
         data["quantile"] = pd.cut(data[feature_name],
                                    bins=edges, include_lowest=True,
                                    labels=bin_labels)
-        x_label_suffix = f"{feature_name.capitalize()} Bins"
-
-    created_fig = ax is None
-    if created_fig:
-        fig, ax = plt.subplots(figsize=(8, 6))
-
-    sns.boxplot(data=data, x="quantile", y=target_name, ax=ax,
-                palette=palette, width=0.6, fliersize=3)
-    ax.axhline(0, color="black", lw=1, ls="--", alpha=0.7)
+        x_label_suffix = f"{feature_name.capitalize()}"
 
     fw_str = f"({feature_window}d) " if feature_window is not None else ""
     tw_str = f"({target_window}d) " if target_window is not None else ""
-    ax.set_title(f"{feature_name.capitalize()} {fw_str}vs {target_name} {tw_str}",
-                 fontsize=12)
-    ax.set_xlabel(f"{x_label_suffix} {fw_str}".strip())
-    ax.set_ylabel(f"{target_name} {tw_str}".strip())
+    y_label = f"{target_name} {tw_str}".strip()
+    x_label_full = f"{x_label_suffix} {fw_str}".strip()
 
-    if created_fig:
-        plt.tight_layout()
-        plt.show()
+    if show_cumulative:
+        created_fig = ax is None
+        if created_fig:
+            fig, ax_box = plt.subplots(figsize=(6, 4.5))
+        else:
+            ax_box = ax
+        divider = make_axes_locatable(ax_box)
+        ax_ecdf = divider.append_axes("bottom", size="30%", pad=0.15)
+
+        sns.boxplot(data=data, x="quantile", y=target_name, ax=ax_box,
+                    palette=palette, width=0.6, fliersize=3)
+        ax_box.axhline(0, color="black", lw=1, ls="--", alpha=0.7)
+        ax_box.set_xlabel("")
+        ax_box.set_ylabel(y_label)
+
+        sorted_feat = data[feature_name].dropna().sort_values().to_numpy()
+        ecdf_y = np.arange(1, len(sorted_feat) + 1) / len(sorted_feat)
+        ax_ecdf.plot(sorted_feat, ecdf_y, color="C0", lw=1.5)
+        ax_ecdf.set_ylim(0.0, 1.05)
+        ax_ecdf.set_xlim(sorted_feat[0], sorted_feat[-1])
+        ax_ecdf.set_xlabel(
+            f"{feature_name.capitalize()} (CDF) {fw_str}".strip()
+        )
+        ax_ecdf.set_ylabel("Frecuencia acum.")
+
+        if created_fig:
+            plt.tight_layout()
+            plt.show()
+    else:
+        created_fig = ax is None
+        if created_fig:
+            fig, ax = plt.subplots(figsize=(6, 3))
+
+        sns.boxplot(data=data, x="quantile", y=target_name, ax=ax,
+                    palette=palette, width=0.6, fliersize=3)
+        ax.axhline(0, color="black", lw=1, ls="--", alpha=0.7)
+        ax.set_xlabel(x_label_full)
+        ax.set_ylabel(y_label)
+
+        if created_fig:
+            plt.tight_layout()
+            plt.show()
 
     if return_correlation:
         return data[feature_name].corr(data[target_name])

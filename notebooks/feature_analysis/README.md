@@ -145,7 +145,7 @@ actualizaciones incrementales sin recalcular la historia completa.
   ventanas.  Por defecto cada punto se colorea por fecha (mismo
   `cmap` y colorbar compartida en toda la rejilla); pasar
   `color_by_date=False` para volver al coloreado uniforme.
-* `plot_feature_boxplots(feature, target, n_quantiles=5, x_axis="quantiles", ...)`
+* `plot_feature_boxplots(feature, target, n_quantiles=5, x_axis="quantiles", show_cumulative=False, ...)`
   Boxplot del target agrupado por la característica.  `x_axis`
   selecciona la discretización del eje X: `"quantiles"` (cuantiles
   clásicos con etiquetas `Q1..Qn`, mismo número de observaciones por
@@ -153,8 +153,11 @@ actualizaciones incrementales sin recalcular la historia completa.
   el rango del feature, vía `pd.cut`, con la etiqueta de cada grupo
   mostrando el valor medio del intervalo con hasta dos cifras
   significativas).  En ambos casos `n_quantiles` controla el número
-  de grupos.  Devuelve la correlación de Pearson sobre la muestra
-  conjunta si `return_correlation=True`.
+  de grupos.  Si `show_cumulative=True`, añade debajo del boxplot la
+  ECDF del feature para inspeccionar la frecuencia de los valores
+  (la ECDF usa los valores crudos, no las etiquetas de los grupos).
+  Devuelve la correlación de Pearson sobre la muestra conjunta si
+  `return_correlation=True`.
 * `plot_cross_sectional_curves(corr_matrix, avg_corr, ...)`
   Curvas por activo con promedio cross-sectional. Usa
   `marker="o"` para que el caso de una sola ventana no quede en
