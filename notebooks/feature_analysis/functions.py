@@ -987,12 +987,15 @@ def plot_feature_boxplots(feature: pd.Series,
         else:
             ax_box = ax
         divider = make_axes_locatable(ax_box)
-        ax_ecdf = divider.append_axes("bottom", size="30%", pad=0.15)
+        ax_ecdf = divider.append_axes("bottom", size="30%", pad=0.2)
 
         sns.boxplot(data=data, x="quantile", y=target_name, ax=ax_box,
                     palette=palette, width=0.6, fliersize=3)
         ax_box.axhline(0, color="black", lw=1, ls="--", alpha=0.7)
-        ax_box.set_xlabel("")
+        # Hide los tick labels del boxplot pero conservamos la etiqueta
+        # del eje X, que aparecerá entre el boxplot y la ECDF.
+        ax_box.tick_params(labelbottom=False)
+        ax_box.set_xlabel(x_label_full)
         ax_box.set_ylabel(y_label)
 
         sorted_feat = data[feature_name].dropna().sort_values().to_numpy()
@@ -1000,9 +1003,6 @@ def plot_feature_boxplots(feature: pd.Series,
         ax_ecdf.plot(sorted_feat, ecdf_y, color="C0", lw=1.5)
         ax_ecdf.set_ylim(0.0, 1.05)
         ax_ecdf.set_xlim(sorted_feat[0], sorted_feat[-1])
-        ax_ecdf.set_xlabel(
-            f"{feature_name.capitalize()} (CDF) {fw_str}".strip()
-        )
         ax_ecdf.set_ylabel("Frecuencia acum.")
 
         if created_fig:

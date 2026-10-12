@@ -156,8 +156,10 @@ actualizaciones incrementales sin recalcular la historia completa.
   de grupos.  Si `show_cumulative=True`, añade debajo del boxplot la
   ECDF del feature para inspeccionar la frecuencia de los valores
   (la ECDF usa los valores crudos, no las etiquetas de los grupos).
-  Devuelve la correlación de Pearson sobre la muestra conjunta si
-  `return_correlation=True`.
+  En ese caso la etiqueta del eje X aparece una sola vez, entre el
+  boxplot y la ECDF, y los tick labels del boxplot quedan ocultos
+  para no duplicar información.  Devuelve la correlación de Pearson
+  sobre la muestra conjunta si `return_correlation=True`.
 * `plot_cross_sectional_curves(corr_matrix, avg_corr, ...)`
   Curvas por activo con promedio cross-sectional. Usa
   `marker="o"` para que el caso de una sola ventana no quede en
