@@ -39,23 +39,33 @@ from pathlib import Path
 import sys
 
 _HERE = Path(__file__).resolve().parent
-_ROOT = _HERE.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+_ROOT = _HERE.parents[1]  # raíz del repositorio (``thesis/``)
+_SRC = _ROOT / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from feature_analysis.functions import (
-    TICKER, START, END, TRADING_DAYS, DATA_DIR,
-    load_single_price, load_multiple_prices, log_returns,
-    compute_correlation_matrix, plot_correlation_matrix,
-    compute_cross_sectional_correlation, plot_cross_sectional_curves,
-    plot_scatter_grid, plot_feature_boxplots,
-    volatility_scaled_return, future_return_over_past_volatility,
-    make_scaled_return_op,
+from thesis.config import DATA_DIR, END, START, TICKER, TRADING_DAYS
+from thesis.market_data import load_multiple_prices, load_single_price
+from thesis.plotting import (
+    plot_correlation_matrix,
+    plot_cross_sectional_curves,
+    plot_feature_boxplots,
+    plot_scatter_grid,
 )
+from thesis.correlation import (
+    compute_correlation_matrix,
+    compute_cross_sectional_correlation,
+)
+from thesis.features import (
+    future_return_over_past_volatility,
+    make_scaled_return_op,
+    volatility_scaled_return,
+)
+from thesis.timeseries import log_returns
 
 # %%
 # ## Carga de datos y retornos

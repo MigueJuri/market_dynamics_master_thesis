@@ -38,22 +38,29 @@ from pathlib import Path
 import sys
 
 _HERE = Path(__file__).resolve().parent
-_ROOT = _HERE.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+_ROOT = _HERE.parents[1]  # raíz del repositorio (``thesis/``)
+_SRC = _ROOT / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from feature_analysis.functions import (
-    TICKER, START, END, TRADING_DAYS, DATA_DIR,
-    load_single_price, load_multiple_prices, log_returns,
-    apply_window, compute_correlation_matrix, plot_correlation_matrix,
-    compute_cross_sectional_correlation, plot_cross_sectional_curves,
-    plot_scatter_grid, plot_feature_boxplots,
-    future_distance_to_moving_average,
+from thesis.config import DATA_DIR, END, START, TICKER, TRADING_DAYS
+from thesis.market_data import load_multiple_prices, load_single_price
+from thesis.plotting import (
+    plot_correlation_matrix,
+    plot_cross_sectional_curves,
+    plot_feature_boxplots,
+    plot_scatter_grid,
 )
+from thesis.correlation import (
+    compute_correlation_matrix,
+    compute_cross_sectional_correlation,
+)
+from thesis.features import future_distance_to_moving_average
+from thesis.timeseries import apply_window, log_returns, rolling_forward_window
 
 # %%
 # ## Parámetro del análisis
@@ -131,19 +138,23 @@ plot_scatter_grid(
 
 # %%
 # ## Análisis por cuantiles (ventana única)
-tau_p = 6*252
-tau_f = 100
+tau_p = 180
+tau_f = 160
 
 feat_series = distance_feature(log_price, tau_p)
-tgt_series = future_distance_to_moving_average(
-    log_price, tau_p=tau_p, tau_f=tau_f, window_type=WINDOW_TYPE,
-)
+# tgt_series = future_distance_to_moving_average(
+#     log_price, tau_p=tau_p, tau_f=tau_f, window_type=WINDOW_TYPE,
+# )
+
+
+tgt_series = log_price.shift(-tau_f) - log_price.shift(-1)
 
 pearson_corr = plot_feature_boxplots(
     feat_series, tgt_series,
-    n_quantiles=5,
+    n_quantiles=10,
     x_axis = "bins",
-    feature_name="distance to MA", target_name="future distance to MA",
+    show_cumulative=True, 
+    feature_name="Distancia a MA", target_name="Retorno futuro",
     feature_window=tau_p, target_window=tau_f,
 )
 print(f"Pearson Correlation: {pearson_corr:.3f}")
@@ -160,15 +171,15 @@ print(f"Pearson Correlation: {pearson_corr:.3f}")
 # normalización hace los valores comparables entre regímenes de precios.
 # ``feature_window_type`` y ``target_window_type`` eligen entre ventana
 # fija y exponencial.
-
+fut_ret = log_price - log_price.shift(1)
 dist_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
-    log_price, log_price,
-    max_lookback=10 * TRADING_DAYS, max_lookahead=10 * TRADING_DAYS,
+    log_price, fut_ret,
+    max_lookback=2 * TRADING_DAYS, max_lookahead=2 * TRADING_DAYS,
     steps=100, overlap=True,
     feature_op="mean",
     feature_window_type=WINDOW_TYPE,
     feature_transform=subtract_from_log_price,
-    target_transform=future_distance_to_moving_average,
+    # target_transform=future_distance_to_moving_average,
     target_window_type=WINDOW_TYPE,
     correlation="pearson",
 )
@@ -234,3 +245,4 @@ plot_cross_sectional_curves(
     avg_label="Promedio de sectores",
     tau_to_yf=lambda L: 2 * L / TRADING_DAYS,
 )
+# %%

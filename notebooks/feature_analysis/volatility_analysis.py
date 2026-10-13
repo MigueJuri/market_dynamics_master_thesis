@@ -25,21 +25,28 @@ from pathlib import Path
 import sys
 
 _HERE = Path(__file__).resolve().parent
-_ROOT = _HERE.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+_ROOT = _HERE.parents[1]  # raíz del repositorio (``thesis/``)
+_SRC = _ROOT / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from feature_analysis.functions import (
-    TICKER, START, END, TRADING_DAYS, DATA_DIR,
-    load_single_price, load_multiple_prices, log_returns,
-    compute_correlation_matrix, plot_correlation_matrix,
-    compute_cross_sectional_correlation, plot_cross_sectional_curves,
-    plot_scatter_grid, plot_feature_boxplots,
+from thesis.config import DATA_DIR, END, START, TICKER, TRADING_DAYS
+from thesis.market_data import load_multiple_prices, load_single_price
+from thesis.plotting import (
+    plot_correlation_matrix,
+    plot_cross_sectional_curves,
+    plot_feature_boxplots,
+    plot_scatter_grid,
 )
+from thesis.correlation import (
+    compute_correlation_matrix,
+    compute_cross_sectional_correlation,
+)
+from thesis.timeseries import log_returns
 
 # %%
 # ## Carga de datos y construcción de la característica
@@ -92,7 +99,7 @@ print(f"Pearson Correlation (vol → forward return): {pearson_corr:.3f}")
 # ## Matriz general de correlación (volatilidad = std móvil)
 vol_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
     log_ret, log_ret,
-    max_lookback=2 * TRADING_DAYS, max_lookahead=2 * TRADING_DAYS,
+    max_lookback=1 * TRADING_DAYS, max_lookahead=2 * TRADING_DAYS,
     steps=100, overlap=True,
     feature_op="std", target_op="sum", correlation="spearman",
 )
