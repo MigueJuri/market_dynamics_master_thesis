@@ -20,24 +20,57 @@ horizontal representa $\tau_p$ (lookback) y el vertical $\tau_f$
 ```text
 notebooks/feature_analysis/
 ├── README.md                          ← este archivo
-├── functions.py                       ← utilidades generales
 ├── momentum_analysis.py               ← análisis de momentum
 ├── volatility_analysis.py             ← análisis de volatilidad
+├── momentum_volatility_analysis.py    ← momentum rescalado por volatilidad
 └── moving_average_distance_analysis.py ← análisis de distancia a la MA
 ```
 
-`functions.py` no ejecuta análisis al importarse: sólo define
-utilidades. Cada análisis es un cuaderno Jupytext (`# %%`) que puede
-ejecutarse celda a celda.
+Las utilidades comunes viven en `src/thesis/` (paquete Python del
+repositorio) y se importan desde cada cuaderno. Cada análisis es un
+cuaderno Jupytext (`# %%`) que puede ejecutarse celda a celda.
 
 ---
+
+## Paquete `src/thesis`
+
+```text
+src/thesis/
+├── __init__.py        ← exporta los símbolos más frecuentes
+├── config.py          ← constantes globales (fechas, ticker, directorios, estilo)
+├── market_data.py     ← descarga de precios y caché CSV
+├── timeseries.py      ─ retornos, ventanas móviles (fijas/exponenciales)
+├── features.py        ─ características y targets específicos
+├── correlation.py     ─ estimadores de correlación (temporal y cross-sectional)
+└── plotting.py        ─ visualizaciones reutilizables
+```
+
+La manera recomendada de usarlo desde un notebook situado en
+`notebooks/feature_analysis/` es añadir `src/` al path e importar los
+módulos que se necesiten:
+
+```python
+from pathlib import Path
+import sys
+
+_HERE = Path(__file__).resolve().parent
+_ROOT = _HERE.parents[1]  # raíz del repositorio
+_SRC = _ROOT / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+from thesis.config import DATA_DIR, END, START, TICKER, TRADING_DAYS
+from thesis.market_data import load_single_price
+from thesis.correlation import compute_correlation_matrix
+from thesis.plotting import plot_correlation_matrix
+```
 
 ## Datos
 
 Los precios se descargan con `yfinance` y se persisten como CSV en la
 carpeta `data/` del directorio principal del proyecto. La ruta se
-resuelve a partir de la ubicación de `functions.py`, por lo que es
-independiente del directorio de trabajo.
+resuelve a partir de la ubicación de `src/thesis/config.py`, por lo que
+es independiente del directorio de trabajo.
 
 | Variable    | Valor por defecto | Significado                          |
 | ----------- | ----------------- | ------------------------------------ |
@@ -56,21 +89,23 @@ entorno `THESIS_DATA_DIR` antes de ejecutar el cuaderno.
 
 ### Carga y series
 
-* `load_single_price(ticker, start, end, cache_dir, refresh) -> pd.Series`
+Estas funciones se encuentran ahora en `src/thesis/`:
+
+* `thesis.market_data.load_single_price(ticker, start, end, cache_dir, refresh) -> pd.Series`
   Precio de cierre ajustado con caché CSV local.
-* `load_multiple_prices(tickers, ...) -> pd.DataFrame`
+* `thesis.market_data.load_multiple_prices(tickers, ...) -> pd.DataFrame`
   Descarga varios tickers, persiste cada CSV y devuelve un frame
   combinado por fecha.
-* `log_returns(price)` y `simple_returns(price)`
+* `thesis.timeseries.log_returns(price)` y `thesis.timeseries.simple_returns(price)`
   Retornos diarios (logarítmico y simple) sin el primer valor.
-* `rolling_forward_window(series, window)`
+* `thesis.timeseries.rolling_forward_window(series, window)`
   Suma de los próximos `window` valores, anclada en `t`.
 
-### Ventanas: `apply_window`
+### Ventanas: `thesis.timeseries.apply_window`
 
 `apply_window(series, window, operation, window_type="fixed",
-ewm_adjust=False, min_periods=None)` unifica el cálculo de reducciones
-sobre ventanas fijas o exponenciales:
+ewm_adjust=False, min_periods=None)` (en `src/thesis/timeseries.py`)
+unifica el cálculo de reducciones sobre ventanas fijas o exponenciales:
 
 | `window_type` | Implementación                  | Operaciones admitidas                  | Callables |
 | ------------- | ------------------------------- | -------------------------------------- | --------- |
@@ -83,7 +118,7 @@ actualizaciones incrementales sin recalcular la historia completa.
 
 ### Estimadores
 
-* `compute_correlation_matrix(feature_series, target_series, ...)`
+* `thesis.correlation.compute_correlation_matrix(feature_series, target_series, ...)`
   Matriz de correlación $\tau_p \times \tau_f$.
 
   * `feature_op` define la operación móvil sobre la característica.
@@ -95,7 +130,7 @@ actualizaciones incrementales sin recalcular la historia completa.
     lookahead (`log_returns.rolling(τ_f).sum().shift(-τ_f)`), nunca
     una media exponencial.
 
-* `compute_cross_sectional_correlation(log_returns_df, windows,
+* `thesis.correlation.compute_cross_sectional_correlation(log_returns_df, windows,
   feature_df=None, ...)`
   Análogo al anterior, pero aplicado a un universo de activos.
   `feature_df` permite calcular la característica sobre precios
@@ -103,7 +138,7 @@ actualizaciones incrementales sin recalcular la historia completa.
   selecciona la fuente del objetivo (por defecto `log_returns_df`);
   pasar `target_transform` lo redefine por completo, lo que permite
   objetivos relativos que dependen del propio lookback (ver
-  `future_distance_to_moving_average`).
+  `thesis.features.future_distance_to_moving_average`).
 
 * `compute_correlation_matrix(...)` y `compute_cross_sectional_correlation(...)`
   aceptan `target_transform(series, tau_p, tau_f, **kwargs)` para
@@ -113,7 +148,7 @@ actualizaciones incrementales sin recalcular la historia completa.
   acumulado sobre `τ_f` (`target_op='sum'`).  `target_window_type`
   y `target_ewm_adjust` se reenvían al callable.
 
-* `future_distance_to_moving_average(series, tau_p, tau_f,
+* `thesis.features.future_distance_to_moving_average(series, tau_p, tau_f,
   window_type='fixed', ewm_adjust=False)` calcula
   `log P_{t+τ_f} - MA_τ_p(log P)_t`, donde la media se construye
   exclusivamente con información disponible en `t` (sin lookahead
@@ -122,21 +157,23 @@ actualizaciones incrementales sin recalcular la historia completa.
   el target se miden en términos relativos a la misma media
   histórica para que sean comparables entre regímenes de precios.
 
-* `volatility_scaled_return(returns, window, sigma_floor=1e-12,
+* `thesis.features.volatility_scaled_return(returns, window, sigma_floor=1e-12,
   ddof=1)` devuelve la serie `suma(retornos pasados) / std(retornos
   pasados)`.  Los retornos se desplazan un día para no incluir `r_t`.
   `sigma_floor` evita divisiones por cero.
 
-* `future_return_over_past_volatility(returns, tau_p, tau_f,
+* `thesis.features.future_return_over_past_volatility(returns, tau_p, tau_f,
   sigma_floor=1e-12, ddof=1)` calcula
   `suma(retornos futuros) / std(retornos pasados de τ_p)`, donde la
   volatilidad pasada se calcula sin usar información futura.
 
-* `make_scaled_return_op(sigma_floor=1e-12, ddof=1)` devuelve un
+* `thesis.features.make_scaled_return_op(sigma_floor=1e-12, ddof=1)` devuelve un
   callable pensado para usar como `feature_op` en ventanas fijas:
   recibe una ventana de retornos y devuelve `sum / std`.
 
 ### Visualización
+
+Todas en `src/thesis/plotting.py`:
 
 * `plot_correlation_matrix(matrix, lookbacks, lookaheads, ...)`
   Heatmap con ticks en fracciones de año.
@@ -306,14 +343,14 @@ y los gráficos se actualizan automáticamente.
 ### Calcular la matriz manualmente
 
 ```python
-from feature_analysis.functions import (
-    compute_correlation_matrix, plot_correlation_matrix,
-    load_single_price, log_returns,
-)
+from thesis.market_data import load_single_price
+from thesis.timeseries import log_returns
+from thesis.correlation import compute_correlation_matrix
+from thesis.plotting import plot_correlation_matrix
 
 price = load_single_price("SPY")
 log_price = np.log(price)
-log_ret = (log_price - np.log(price.shift(1))).iloc[1:]
+log_ret = log_returns(price)
 
 m, lb, lf = compute_correlation_matrix(
     log_price, log_ret,
@@ -380,16 +417,23 @@ llega un dato a la vez.
 ```bash
 # Compilar todos los módulos
 python -m py_compile \
-    notebooks/feature_analysis/functions.py \
+    src/thesis/config.py \
+    src/thesis/market_data.py \
+    src/thesis/timeseries.py \
+    src/thesis/features.py \
+    src/thesis/correlation.py \
+    src/thesis/plotting.py \
     notebooks/feature_analysis/momentum_analysis.py \
     notebooks/feature_analysis/volatility_analysis.py \
+    notebooks/feature_analysis/momentum_volatility_analysis.py \
     notebooks/feature_analysis/moving_average_distance_analysis.py
 
 # Smoke test aislado (no descarga datos)
 python - <<'PY'
 import sys, numpy as np, pandas as pd
-sys.path.insert(0, 'notebooks')
-from feature_analysis.functions import apply_window, compute_correlation_matrix
+sys.path.insert(0, 'src')
+from thesis.timeseries import apply_window
+from thesis.correlation import compute_correlation_matrix
 
 rng = np.random.default_rng(0)
 price = pd.Series(np.exp(np.cumsum(rng.normal(0, 0.01, 2000))))
