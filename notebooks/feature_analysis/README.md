@@ -42,7 +42,8 @@ src/thesis/
 ├── timeseries.py      ─ retornos, ventanas móviles (fijas/exponenciales)
 ├── features.py        ─ características y targets específicos
 ├── correlation.py     ─ estimadores de correlación (temporal y cross-sectional)
-└── plotting.py        ─ visualizaciones reutilizables
+├── plotting.py        ─ visualizaciones reutilizables
+└── event_labeling.py  ─ etiquetado de eventos y triple barrera
 ```
 
 La manera recomendada de usarlo desde un notebook situado en
@@ -170,6 +171,25 @@ actualizaciones incrementales sin recalcular la historia completa.
 * `thesis.features.make_scaled_return_op(sigma_floor=1e-12, ddof=1)` devuelve un
   callable pensado para usar como `feature_op` en ventanas fijas:
   recibe una ventana de retornos y devuelve `sum / std`.
+
+### Etiquetado de eventos (triple barrera)
+
+En `src/thesis/event_labeling.py`:
+
+* `get_ewma_crossover_events(close, fast_span, slow_span, burn_in)`
+  Detecta cruces entre dos EWMA y devuelve un DataFrame con la señal
+  (+1 alcista, -1 bajista).
+* `ewma_volatility_target(returns, span, min_target)`
+  Calcula la volatilidad EWM diaria para usar como target de barrera.
+* `add_vertical_barrier(t_events, close_index, num_bars)`
+  Crea barreras verticales a ``num_bars`` barras de cada evento.
+* `apply_barriers(close, events, pt_sl)`
+  Encuentra el primer toque de profit-take y stop-loss para cada evento.
+* `get_events(close, t_events, pt_sl, trgt, min_ret, t1, side)`
+  Construye la tabla completa de eventos triple barrera con etiqueta
+  (+1 PT, -1 SL, 0 vertical).
+* `compute_overlap_weights(labeled)`
+  Pesos de solapamiento entre ventanas de eventos (AFML §4.3).
 
 ### Visualización
 
@@ -423,10 +443,12 @@ python -m py_compile \
     src/thesis/features.py \
     src/thesis/correlation.py \
     src/thesis/plotting.py \
+    src/thesis/event_labeling.py \
     notebooks/feature_analysis/momentum_analysis.py \
     notebooks/feature_analysis/volatility_analysis.py \
     notebooks/feature_analysis/momentum_volatility_analysis.py \
-    notebooks/feature_analysis/moving_average_distance_analysis.py
+    notebooks/feature_analysis/moving_average_distance_analysis.py \
+    notebooks/trend_following_strategy/Trend_Following_Strategy_v2.py
 
 # Smoke test aislado (no descarga datos)
 python - <<'PY'
