@@ -129,13 +129,15 @@ def apply_barriers(
     close: pd.Series,
     events: pd.DataFrame,
     pt_sl: Sequence[float],
+    return_type: str = "simple",
 ) -> pd.DataFrame:
     """Calcula el primer toque de profit-take y stop-loss para cada evento.
 
     Parámetros
     ----------
     close : pd.Series
-        Serie de precios de cierre.
+        Serie de precios de cierre o, si ``return_type='log'``, serie de
+        log-precios.
     events : pd.DataFrame
         Tabla de eventos con columnas ``t1`` (barrera vertical),
         ``trgt`` (target de volatilidad) y ``side`` (+1 largo, -1 corto).
@@ -143,6 +145,14 @@ def apply_barriers(
         Multiplicadores simétricos ``[pt, sl]`` del target para definir
         las barreras.  Un valor ``<= 0`` desactiva la barrera
         correspondiente.
+    return_type : {'simple', 'log'}
+        Tipo de retorno usado para las barreras.  Con ``'simple'`` se
+        interpreta ``close`` como precio y se calcula
+        ``(path / entry - 1) * side``.  Con ``'log'`` se interpreta
+        ``close`` como log-precio y se calcula
+        ``(path - entry) * side``; ``trgt`` debe entonces ser la
+        volatilidad de retornos logarítmicos, obteniendo barreras
+        simétricas en el espacio logarítmico.
 
     Devuelve
     --------
@@ -150,6 +160,11 @@ def apply_barriers(
         DataFrame con columnas ``pt`` y ``sl`` (timestamps de primer
         toque, ``NaT`` si no se toca).
     """
+    if return_type not in {"simple", "log"}:
+        raise ValueError(
+            f"return_type debe ser 'simple' o 'log', se recibió '{return_type}'."
+        )
+
     out = pd.DataFrame(
         index=events.index,
         columns=["pt", "sl"],
@@ -174,7 +189,10 @@ def apply_barriers(
             continue
 
         entry = path.iloc[0]
-        rets = (path.iloc[1:] / entry - 1.0) * ev["side"]
+        if return_type == "simple":
+            rets = (path.iloc[1:] / entry - 1.0) * ev["side"]
+        else:
+            rets = (path.iloc[1:] - entry) * ev["side"]
 
         if pt_sl[0] > 0:
             hit = rets[rets >= pt_sl[0] * ev["trgt"]]
@@ -199,13 +217,14 @@ def get_events(
     min_ret: float,
     t1: pd.Series,
     side: pd.Series,
+    return_type: str = "simple",
 ) -> pd.DataFrame:
     """Construye la tabla de eventos con etiqueta triple barrera.
 
     Parámetros
     ----------
     close : pd.Series
-        Serie de precios de cierre.
+        Serie de precios de cierre o log-precios (según ``return_type``).
     t_events : pd.Index o secuencia
         Instantes de entrada de los eventos.
     pt_sl : secuencia de dos floats
@@ -218,6 +237,8 @@ def get_events(
         Barrera vertical indexada por evento.
     side : pd.Series
         Dirección de la señal (+1 largo, -1 corto) indexada por evento.
+    return_type : {'simple', 'log'}
+        Ver :func:`apply_barriers`.
 
     Devuelve
     --------
@@ -237,7 +258,7 @@ def get_events(
     ev["trgt"] = trgt_
     ev["side"] = side.reindex(ev.index).fillna(1.0)
 
-    hits = apply_barriers(close, ev, pt_sl)
+    hits = apply_barriers(close, ev, pt_sl, return_type=return_type)
 
     # t_hit = earliest of {t1, pt, sl}
     candidates = pd.concat([ev["t1"], hits["pt"], hits["sl"]], axis=1)

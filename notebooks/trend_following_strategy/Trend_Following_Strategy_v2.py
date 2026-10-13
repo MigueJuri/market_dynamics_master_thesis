@@ -33,9 +33,9 @@ _SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from thesis.config import DATA_DIR, TICKER, TRADING_DAYS
+from thesis.config import DATA_DIR, TICKER
 from thesis.market_data import load_single_price
-from thesis.timeseries import simple_returns
+from thesis.timeseries import log_returns
 from thesis.event_labeling import (
     add_vertical_barrier,
     compute_overlap_weights,
@@ -51,39 +51,50 @@ from thesis.event_labeling import (
 
 price = load_single_price(TICKER, cache_dir=DATA_DIR)
 close = price.astype(float)
+log_close = np.log(close)
+log_ret = log_returns(close)   # retornos logarítmicos diarios
 
 print(f"Loaded {len(close):,} bars  |  {close.index[0].date()} → {close.index[-1].date()}")
 
 
 # %%
 # ── Parameters ────────────────────────────────────────────────────────────
-FAST_SPAN = 10
-SLOW_SPAN = 60
+FAST_SPAN = 40
+SLOW_SPAN = 160
 BURN_IN   = SLOW_SPAN          # discard early EWMA transient
 
-# Detectamos los eventos de cruce EWMA usando la función reutilizable.
+# Detectamos los eventos de cruce EWMA sobre el log-precio.
+# Esto hace que las medias sean proporcionales al nivel de precios y los
+# cruces sean simétricos en términos porcentuales.
 events_cross = get_ewma_crossover_events(
-    close, fast_span=FAST_SPAN, slow_span=SLOW_SPAN, burn_in=BURN_IN,
+    log_close, fast_span=FAST_SPAN, slow_span=SLOW_SPAN, burn_in=BURN_IN,
 )
 print(f"Crossover events detected: {len(events_cross)}")
 print(f"  Bullish (+1): {(events_cross['side'] == 1).sum()}")
 print(f"  Bearish (-1): {(events_cross['side'] == -1).sum()}")
 
 # ── Quick diagnostic plot ─────────────────────────────────────────────────
-fast_full = close.ewm(span=FAST_SPAN, adjust=False).mean()
-slow_full = close.ewm(span=SLOW_SPAN, adjust=False).mean()
+fast_log = log_close.ewm(span=FAST_SPAN, adjust=False).mean()
+slow_log = log_close.ewm(span=SLOW_SPAN, adjust=False).mean()
+
+# Convertimos las medias logarítmicas a escala de precios para dibujarlas
+# junto al precio original; el eje Y usa escala logarítmica.
+fast_price = np.exp(fast_log)
+slow_price = np.exp(slow_log)
 
 fig, ax = plt.subplots(figsize=(14, 5))
-ax.plot(close.index, close,     label='Close',            color='steelblue', lw=0.8, alpha=0.7)
-ax.plot(fast_full.index, fast_full, label=f'EWMA fast ({FAST_SPAN})', color='orange',   lw=1.2)
-ax.plot(slow_full.index, slow_full, label=f'EWMA slow ({SLOW_SPAN})', color='green',    lw=1.2)
+ax.plot(close.index, close, label='Close', color='steelblue', lw=0.8, alpha=0.7)
+ax.plot(fast_price.index, fast_price, label=f'EWMA log fast ({FAST_SPAN})', color='orange', lw=1.2)
+ax.plot(slow_price.index, slow_price, label=f'EWMA log slow ({SLOW_SPAN})', color='green', lw=1.2)
 
 bull = events_cross[events_cross['side'] ==  1]
 bear = events_cross[events_cross['side'] == -1]
 ax.scatter(bull.index, close.loc[bull.index], marker='^', color='limegreen', s=60, zorder=5, label='Bullish X')
 ax.scatter(bear.index, close.loc[bear.index], marker='v', color='red',       s=60, zorder=5, label='Bearish X')
 
-ax.set_title('EWMA Crossover Events')
+ax.set_title('EWMA Crossover Events on Log-Price (log scale)')
+ax.set_ylabel('Price (USD, log scale)')
+ax.set_yscale('log')
 ax.legend(fontsize=8)
 plt.tight_layout()
 plt.show()
@@ -97,14 +108,15 @@ VOL_SPAN   = 20            # EWM span for daily volatility estimate
 NUM_BARS   = 63           # vertical barrier width (bars)
 
 # ── Daily EWMA volatility as the barrier target ───────────────────────────
-daily_ret = simple_returns(close)
-trgt = ewma_volatility_target(daily_ret, span=VOL_SPAN)
+# La volatilidad objetivo se calcula sobre retornos logarítmicos para que
+# las barreras PT/SL sean simétricas en el espacio logarítmico.
+trgt = ewma_volatility_target(log_ret, span=VOL_SPAN)
 
 # ── Vertical barrier: t1[i] = timestamp NUM_BARS bars after event i ───────
 tEvents = events_cross.index
 t1 = add_vertical_barrier(tEvents, close.index, NUM_BARS)
 
-print(f"Volatility target — median: {trgt.median():.4f}  "
+print(f"Log-volatility target — median: {trgt.median():.4f}  "
       f"| mean: {trgt.mean():.4f}")
 print(f"Vertical barrier: {NUM_BARS} bars")
 
@@ -114,13 +126,14 @@ print(f"Vertical barrier: {NUM_BARS} bars")
 side_series = events_cross['side'].astype(float)
 
 labeled = get_events(
-    close    = close,
-    t_events = tEvents,
-    pt_sl    = PT_SL,
-    trgt     = 5 * trgt,
-    min_ret  = MIN_RET,
-    t1       = t1,
-    side     = side_series,
+    close       = log_close,   # log-precios para barreras simétricas logarítmicas
+    t_events    = tEvents,
+    pt_sl       = PT_SL,
+    trgt        = 5 * trgt,
+    min_ret     = MIN_RET,
+    t1          = t1,
+    side        = side_series,
+    return_type = "log",
 )
 
 print(f"Labeled events: {len(labeled)}")
@@ -150,11 +163,18 @@ position = marker.where(signal_series != 0).ffill().fillna(0).astype(int)
 entry_pos = position.shift(1).fillna(0).astype(int)
 
 # ── Returns ───────────────────────────────────────────────────────────────
-price_ret    = close.pct_change().fillna(0)
-strategy_ret = entry_pos * price_ret
+# Los retornos de la estrategia se calculan en el espacio logarítmico para
+# coherencia con la construcción de señales y barreras, y luego se convierten
+# a retornos simples para la acumulación y los prints.
+strategy_log_ret = entry_pos * log_ret
+strategy_ret = np.expm1(strategy_log_ret)
 
-cum_strat  = (1 + strategy_ret).cumprod()
-cum_bh     = (1 + price_ret).cumprod()
+# Buy & hold en términos logarítmicos, convertido a simples.
+bh_log_ret = log_ret
+bh_ret = np.expm1(bh_log_ret)
+
+cum_strat = (1 + strategy_ret).cumprod()
+cum_bh    = (1 + bh_ret).cumprod()
 
 total_strat = cum_strat.iloc[-1] - 1
 total_bh    = cum_bh.iloc[-1]    - 1
@@ -170,12 +190,14 @@ fig, axes = plt.subplots(2, 1, figsize=(14, 9),
 
 # ── Top panel: price + EWMA + events ─────────────────────────────────────
 ax = axes[0]
-fast_full = close.ewm(span=FAST_SPAN, adjust=False).mean()
-slow_full = close.ewm(span=SLOW_SPAN, adjust=False).mean()
+fast_log = log_close.ewm(span=FAST_SPAN, adjust=False).mean()
+slow_log = log_close.ewm(span=SLOW_SPAN, adjust=False).mean()
+fast_price = np.exp(fast_log)
+slow_price = np.exp(slow_log)
 
-ax.plot(close.index,     close,     lw=0.7, color='steelblue', alpha=0.8, label='Close')
-ax.plot(fast_full.index, fast_full, lw=1.2, color='orange',    label=f'EWMA({FAST_SPAN})')
-ax.plot(slow_full.index, slow_full, lw=1.2, color='green',     label=f'EWMA({SLOW_SPAN})')
+ax.plot(close.index, close, lw=0.7, color='steelblue', alpha=0.8, label='Close')
+ax.plot(fast_price.index, fast_price, lw=1.2, color='orange', label=f'EWMA log({FAST_SPAN})')
+ax.plot(slow_price.index, slow_price, lw=1.2, color='green', label=f'EWMA log({SLOW_SPAN})')
 
 # Shade background by active long position.
 in_long = False
@@ -206,7 +228,8 @@ long_patch = mpatches.Patch(color='limegreen', alpha=0.3, label='Long period')
 ax.legend(handles=[pt_patch, sl_patch, vb_patch, long_patch] +
           ax.get_legend_handles_labels()[0][:3], fontsize=7)
 ax.set_title('Price, EWMA Crossovers, and Triple-Barrier Outcomes')
-ax.set_ylabel('Price')
+ax.set_ylabel('Price (USD, log scale)')
+ax.set_yscale('log')
 
 # ── Bottom panel: equity curves ───────────────────────────────────────────
 ax2 = axes[1]
@@ -215,6 +238,7 @@ ax2.plot(cum_bh.index,    cum_bh,    label='Buy & Hold',  color='steelblue',  lw
 ax2.axhline(1.0, color='black', lw=0.6, ls=':')
 ax2.set_title('Equity Curves (no transaction costs)')
 ax2.set_ylabel('Cumulative Return')
+ax2.set_yscale('log')
 ax2.legend(fontsize=8)
 
 plt.tight_layout()
@@ -315,3 +339,5 @@ print(labeled['label'].value_counts()
 print()
 print("Weight distribution (quantiles):")
 print(weights.quantile([0.10, 0.25, 0.50, 0.75, 0.90]).round(4))
+
+# %%
