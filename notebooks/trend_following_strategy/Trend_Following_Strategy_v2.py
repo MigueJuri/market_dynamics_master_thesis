@@ -33,7 +33,7 @@ _SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from thesis.config import DATA_DIR, TICKER
+from thesis.config import DATA_DIR, TICKER, TRADING_DAYS
 from thesis.market_data import load_single_price
 from thesis.timeseries import log_returns
 from thesis.event_labeling import (
@@ -246,35 +246,77 @@ plt.show()
 
 
 # %%
-# # Geometric daily conversion
-# rf_daily = (1 + 0.03)**(1/252) - 1
-# # Calculate excess returns
-# strategy_excess_ret = strategy_ret - rf_daily
-# bh_excess_ret = price_ret - rf_daily
+# %%
+# ── Annualized risk / return metrics ──────────────────────────────────────
+# Tasa libre de riesgo anualizada (3 % anual) convertida a retorno logarítmico
+# diario para mantener la coherencia con el espacio en el que se calculan
+# los retornos de la estrategia.
+ANNUAL_RF = 0.03
+rf_log_daily = np.log1p(ANNUAL_RF) / TRADING_DAYS
 
-# # Calculate Sharpe (using the original series for std to be computationally strict,
-# # explicitly defining ddof=1 for a sample statistic)
-# sharpe_strat = (strategy_excess_ret.mean() / strategy_ret.std(ddof=1)) * np.sqrt(252)
-# sharpe_bh = (bh_excess_ret.mean() / price_ret.std(ddof=1)) * np.sqrt(252)
+# Excesos de retorno en el espacio logarítmico.
+strategy_excess_log = strategy_log_ret - rf_log_daily
+bh_excess_log       = bh_log_ret       - rf_log_daily
 
-# fig, ax = plt.subplots(1, 1, figsize=(10, 5.625))
-# set_figure_style()
+# Convertimos a retornos simples para el cálculo de Sharpe (media/std sobre
+# muestras diarias) y aplicamos la corrección de Bessel (ddof=1).
+strategy_excess_simple = np.expm1(strategy_excess_log)
+bh_excess_simple       = np.expm1(bh_excess_log)
 
-# ax.plot(cum_strat.index, cum_strat, label=f'Estrategia (SR: {sharpe_strat:.4f})', lw=1.2, color = 'darkorange')
-# ax.plot(cum_bh.index,    cum_bh,    label=f'Buy & Hold (SR: {sharpe_bh:.4f})', lw=1.0, color = 'steelblue', alpha=0.7)
-# ax.set_title('Curvas de Capital (sin costos de transacción)')
-# ax.set_ylabel('Retorno Acumulado')
-# ax.legend(fontsize=8)
+sharpe_strat = (
+    strategy_excess_simple.mean() / strategy_excess_simple.std(ddof=1)
+) * np.sqrt(TRADING_DAYS)
+sharpe_bh = (
+    bh_excess_simple.mean() / bh_excess_simple.std(ddof=1)
+) * np.sqrt(TRADING_DAYS)
 
-# plt.tight_layout()
+# Rentabilidad anualizada (CAGR) a partir del retorno total compuesto.
+n_days = (close.index[-1] - close.index[0]).days
+n_years = n_days / 365.25
+ann_strat = (1 + total_strat) ** (1 / n_years) - 1 if n_years > 0 else np.nan
+ann_bh    = (1 + total_bh)    ** (1 / n_years) - 1 if n_years > 0 else np.nan
 
+# Volatilidad anualizada sobre retornos simples diarios.
+vol_strat = strategy_ret.std(ddof=1) * np.sqrt(TRADING_DAYS)
+vol_bh    = bh_ret.std(ddof=1)       * np.sqrt(TRADING_DAYS)
 
+# Maximum drawdown sobre la curva de capital.
+def _max_drawdown(equity: pd.Series) -> float:
+    running_max = equity.cummax()
+    return float((equity / running_max - 1.0).min())
 
+max_dd_strat = _max_drawdown(cum_strat)
+max_dd_bh    = _max_drawdown(cum_bh)
 
+print(f"Period                       : {close.index[0].date()} → "
+      f"{close.index[-1].date()}  ({n_years:.2f} years)")
+print(f"Risk-free (annual)            : {ANNUAL_RF:.2%}")
+print()
+print(f"{'Metric':<28}{'Strategy':>14}{'Buy & Hold':>14}")
+print("-" * 56)
+print(f"{'Total return':<28}{total_strat:>+14.2%}{total_bh:>+14.2%}")
+print(f"{'Annualized return (CAGR)':<28}{ann_strat:>+14.2%}{ann_bh:>+14.2%}")
+print(f"{'Annualized volatility':<28}{vol_strat:>14.2%}{vol_bh:>14.2%}")
+print(f"{'Sharpe ratio (ann., rf=3%)':<28}{sharpe_strat:>14.4f}{sharpe_bh:>14.4f}")
+print(f"{'Max drawdown':<28}{max_dd_strat:>14.2%}{max_dd_bh:>14.2%}")
+print(f"{'Number of position changes':<28}{int(n_trades):>14d}{'-':>14s}")
 
-# print(f"\nSharpe Ratios (annualized):")
-# print(f"  Strategy:     {sharpe_strat:.4f}")
-# print(f"  Buy & Hold:   {sharpe_bh:.4f}")
+# ── Annualized equity curves plot ─────────────────────────────────────────
+fig, ax = plt.subplots(figsize=(10, 5.625))
+ax.plot(cum_strat.index, cum_strat,
+        label=f'Strategy (SR: {sharpe_strat:.2f}, CAGR: {ann_strat:.2%})',
+        lw=1.2, color='darkorange')
+ax.plot(cum_bh.index, cum_bh,
+        label=f'Buy & Hold (SR: {sharpe_bh:.2f}, CAGR: {ann_bh:.2%})',
+        lw=1.0, color='steelblue', alpha=0.7)
+ax.axhline(1.0, color='black', lw=0.6, ls=':')
+ax.set_title('Equity Curves (no transaction costs)')
+ax.set_ylabel('Cumulative Return')
+ax.set_yscale('log')
+ax.legend(fontsize=8)
+plt.tight_layout()
+plt.show()
+
 
 # %% [markdown]
 # To understand them, we first define the outcomes based on the Confusion Matrix:True Positive (TP): The meta-model said "Bet" ($ŷ=1$), and the primary signal hit the profit target ($y=1$).False Positive (FP): The meta-model said "Bet" ($ŷ=1$), but the primary signal hit the stop-loss or timed out ($y=0$).False Negative (FN): The meta-model said "No Bet" ($ŷ=0$), but the primary signal would have hit the profit target ($y=1$).True Negative (TN): The meta-model said "No Bet" ($ŷ=0$), and the primary signal indeed failed ($y=0$).1. Precision (The Reliability)Precision answers: "Of all the trades the meta-model told me to take, how many were actually winners?"In finance, precision is often the most critical metric because it directly relates to your hit rate and the avoidance of losing trades.$$Precision = \frac{TP}{TP + FP}$$High Precision: Means you have very few "False Alarms." When the model says to trade, it is usually right.Low Precision: Means you are taking many trades that end up hitting the stop-loss.2. Recall (The Coverage)Recall answers: "Of all the potential winning opportunities the primary model generated, how many did the meta-model actually catch?"Recall measures your "opportunity capture."$$Recall = \frac{TP}{TP + FN}$$High Recall: Means you are not "missing out" on many winners. You are betting on most of the signals that would have been profitable.Low Recall: Means your filter is very strict. You might be skipping many profitable trades to ensure that the ones you do take are safe.3. F1-Score (The Balance)The F1-Score is the harmonic mean of Precision and Recall. It provides a single number to measure the performance of your filter by penalizing extreme values of either metric.$$F1 = 2 \cdot \frac{Precision \times Recall}{Precision + Recall}$$Why use it? If you have a model with 100% Precision but it only takes 1 trade a year (0.01% Recall), the model is practically useless for generating returns. Conversely, if you take every trade (100% Recall) bu...
