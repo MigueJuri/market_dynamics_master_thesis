@@ -82,18 +82,18 @@ slow_log = log_close.ewm(span=SLOW_SPAN, adjust=False).mean()
 fast_price = np.exp(fast_log)
 slow_price = np.exp(slow_log)
 
-fig, ax = plt.subplots(figsize=(14, 5))
-ax.plot(close.index, close, label='Close', color='steelblue', lw=0.8, alpha=0.7)
-ax.plot(fast_price.index, fast_price, label=f'EWMA log fast ({FAST_SPAN})', color='orange', lw=1.2)
-ax.plot(slow_price.index, slow_price, label=f'EWMA log slow ({SLOW_SPAN})', color='green', lw=1.2)
+fig, ax = plt.subplots(figsize=(6, 3), dpi = 300)
+ax.plot(close.index, close, label='Precio', color='steelblue', lw=0.8, alpha=0.7)
+ax.plot(fast_price.index, fast_price, label=f'EWMA corta ({FAST_SPAN})', color='orange', lw=1)
+ax.plot(slow_price.index, slow_price, label=f'EWMA larga ({SLOW_SPAN})', color='green', lw=1.2, alpha=0.9)
 
 bull = events_cross[events_cross['side'] ==  1]
 bear = events_cross[events_cross['side'] == -1]
-ax.scatter(bull.index, close.loc[bull.index], marker='^', color='limegreen', s=60, zorder=5, label='Bullish X')
-ax.scatter(bear.index, close.loc[bear.index], marker='v', color='red',       s=60, zorder=5, label='Bearish X')
+ax.scatter(bull.index, close.loc[bull.index], marker='^', color='limegreen', s=30, zorder=5, label='Señal de compra')
+ax.scatter(bear.index, close.loc[bear.index], marker='v', color='red',       s=30, zorder=5, label='Señal de venta')
 
-ax.set_title('EWMA Crossover Events on Log-Price (log scale)')
-ax.set_ylabel('Price (USD, log scale)')
+# ax.set_title('EWMA Crossover Events on Log-Price (log scale)')
+ax.set_ylabel('Price (USD, escala log)')
 ax.set_yscale('log')
 ax.legend(fontsize=8)
 plt.tight_layout()
@@ -302,24 +302,88 @@ print(f"{'Max drawdown':<28}{max_dd_strat:>14.2%}{max_dd_bh:>14.2%}")
 print(f"{'Number of position changes':<28}{int(n_trades):>14d}{'-':>14s}")
 
 # ── Annualized equity curves plot ─────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(10, 5.625))
+fig, ax = plt.subplots(figsize=(6, 3), dpi=300)
 ax.plot(cum_strat.index, cum_strat,
-        label=f'Strategy (SR: {sharpe_strat:.2f}, CAGR: {ann_strat:.2%})',
+        label=f'Estrategia (SR: {sharpe_strat:.2f}, CAGR: {ann_strat:.2%})',
         lw=1.2, color='darkorange')
 ax.plot(cum_bh.index, cum_bh,
-        label=f'Buy & Hold (SR: {sharpe_bh:.2f}, CAGR: {ann_bh:.2%})',
+        label=f'Comprar y mantener (SR: {sharpe_bh:.2f}, CAGR: {ann_bh:.2%})',
         lw=1.0, color='steelblue', alpha=0.7)
 ax.axhline(1.0, color='black', lw=0.6, ls=':')
-ax.set_title('Equity Curves (no transaction costs)')
-ax.set_ylabel('Cumulative Return')
+# ax.set_title('Equity Curves (no transaction costs)')
+ax.set_ylabel('Retorno acumulado')
 ax.set_yscale('log')
 ax.legend(fontsize=8)
 plt.tight_layout()
 plt.show()
 
 
-# %% [markdown]
-# To understand them, we first define the outcomes based on the Confusion Matrix:True Positive (TP): The meta-model said "Bet" ($ŷ=1$), and the primary signal hit the profit target ($y=1$).False Positive (FP): The meta-model said "Bet" ($ŷ=1$), but the primary signal hit the stop-loss or timed out ($y=0$).False Negative (FN): The meta-model said "No Bet" ($ŷ=0$), but the primary signal would have hit the profit target ($y=1$).True Negative (TN): The meta-model said "No Bet" ($ŷ=0$), and the primary signal indeed failed ($y=0$).1. Precision (The Reliability)Precision answers: "Of all the trades the meta-model told me to take, how many were actually winners?"In finance, precision is often the most critical metric because it directly relates to your hit rate and the avoidance of losing trades.$$Precision = \frac{TP}{TP + FP}$$High Precision: Means you have very few "False Alarms." When the model says to trade, it is usually right.Low Precision: Means you are taking many trades that end up hitting the stop-loss.2. Recall (The Coverage)Recall answers: "Of all the potential winning opportunities the primary model generated, how many did the meta-model actually catch?"Recall measures your "opportunity capture."$$Recall = \frac{TP}{TP + FN}$$High Recall: Means you are not "missing out" on many winners. You are betting on most of the signals that would have been profitable.Low Recall: Means your filter is very strict. You might be skipping many profitable trades to ensure that the ones you do take are safe.3. F1-Score (The Balance)The F1-Score is the harmonic mean of Precision and Recall. It provides a single number to measure the performance of your filter by penalizing extreme values of either metric.$$F1 = 2 \cdot \frac{Precision \times Recall}{Precision + Recall}$$Why use it? If you have a model with 100% Precision but it only takes 1 trade a year (0.01% Recall), the model is practically useless for generating returns. Conversely, if you take every trade (100% Recall) bu...
+# %%
+# ── Strategy vs. Buy & Hold: relative performance ─────────────────────────
+# Diferencia absoluta de las curvas de capital.  ``cum_strat - cum_bh`` mide
+# el "exceso de wealth" generado por la estrategia sobre buy & hold; un valor
+# positivo indica que la estrategia va por delante y un valor negativo, que
+# queda rezagada respecto al índice.
+relative_diff = cum_strat - cum_bh
+
+# Diferencia logarítmica equivalente: ``log(strat) - log(bh)``.  Es
+# aproximadamente la diferencia de retornos compuestos vista en escala
+# aditiva, y resulta más natural cuando las curvas abarcan varios órdenes de
+# magnitud.
+relative_log = np.log(cum_strat) - np.log(cum_bh)
+
+# Indicadores resumen del desempeño relativo.
+final_diff   = float(relative_diff.iloc[-1])
+mean_diff    = float(relative_diff.mean())
+max_diff     = float(relative_diff.max())
+min_diff     = float(relative_diff.min())
+positive_pct = float((relative_diff > 0).mean())
+
+print("Strategy − Buy & Hold (wealth difference)")
+print("-" * 56)
+print(f"  Final excess wealth  : {final_diff:+.2f}")
+print(f"  Mean excess wealth   : {mean_diff:+.2f}")
+print(f"  Max excess wealth    : {max_diff:+.2f}")
+print(f"  Min excess wealth    : {min_diff:+.2f}")
+print(f"  % of bars ahead      : {positive_pct:.2%}")
+
+# ── Plot: relative equity difference ──────────────────────────────────────
+fig, axes = plt.subplots(2, 1, figsize=(12, 7),
+                         gridspec_kw={'height_ratios': [2, 1]},
+                         sharex=True)
+
+ax = axes[0]
+ax.plot(relative_diff.index, relative_diff, color='darkorange', lw=1.0,
+        label='Strategy − Buy & Hold')
+ax.axhline(0.0, color='black', lw=0.6, ls=':')
+ax.fill_between(relative_diff.index, relative_diff, 0.0,
+                where=relative_diff >= 0, color='limegreen', alpha=0.25,
+                label='Strategy ahead')
+ax.fill_between(relative_diff.index, relative_diff, 0.0,
+                where=relative_diff < 0, color='red', alpha=0.25,
+                label='Buy & Hold ahead')
+ax.set_title('Strategy vs. Buy & Hold — Wealth Difference')
+ax.set_ylabel('Cum. wealth difference')
+ax.legend(loc='best', fontsize=8)
+
+ax2 = axes[1]
+ax2.plot(relative_log.index, relative_log, color='steelblue', lw=1.0,
+         label='log(Strategy) − log(Buy & Hold)')
+ax2.axhline(0.0, color='black', lw=0.6, ls=':')
+ax2.fill_between(relative_log.index, relative_log, 0.0,
+                 where=relative_log >= 0, color='limegreen', alpha=0.25)
+ax2.fill_between(relative_log.index, relative_log, 0.0,
+                 where=relative_log < 0, color='red', alpha=0.25)
+ax2.set_title('Strategy vs. Buy & Hold — Logarithmic Difference')
+ax2.set_ylabel('log(wealth ratio)')
+ax2.set_xlabel('Date')
+ax2.legend(loc='best', fontsize=8)
+
+plt.tight_layout()
+plt.show()
+
+
+# %% [markd
 
 # %%
 # ── Overlap-weighted F1 ───────────────────────────────────────────────────
