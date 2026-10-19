@@ -45,11 +45,11 @@ import pandas as pd
 
 from thesis.config import DATA_DIR, END, START
 from thesis.pair_trading import (
+    cached_ksg_mi_matrix,
     evaluate_cluster_sector_alignment,
     filter_duplicate_issuers,
     get_sp500_constituents,
     hierarchical_clustering,
-    ksg_mi_matrix,
     load_log_returns,
     mi_distance,
     sector_average_matrix,
@@ -87,7 +87,11 @@ print(f"Sectores GICS presentes: {n_clusters}")
 
 # %%
 # ## Información mutua KSG sobre el universo completo
-mi_matrix = ksg_mi_matrix(returns_full, k_neighbors=3)
+# ``cached_ksg_mi_matrix`` persiste la matriz en ``data/pair_trading/mi/ksg/``
+# con un hash determinista de fechas, activos, número de observaciones y
+# contenido de los retornos.  Reejecuciones idénticas recuperan el resultado
+# sin volver a calcular el estimador KSG (O(N²) en el número de activos).
+mi_matrix = cached_ksg_mi_matrix(returns_full, k_neighbors=3)
 top_20_pairs = top_pairs(mi_matrix, n=20, issuer_map=issuer_map)
 
 print("\nTop 20 pares por Información Mutua KSG:")

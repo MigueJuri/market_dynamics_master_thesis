@@ -9,9 +9,14 @@ descarga cacheada de precios, en ``thesis.timeseries`` para retornos y en
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import re
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 
@@ -37,6 +42,9 @@ from thesis.market_data import load_multiple_prices
 WIKIPEDIA_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
 }
+
+
+KSG_CACHE_VERSION = "v1"
 
 
 # =============================================================================
@@ -457,6 +465,132 @@ def ksg_mi_matrix(
             mi[i, j] = sym
             mi[j, i] = sym
     return pd.DataFrame(mi, index=assets, columns=assets)
+
+
+# =============================================================================
+# Caché de matrices costosas
+# =============================================================================
+
+
+def _hash_returns(returns: pd.DataFrame) -> str:
+    """Hash determinista (sha256) del contenido de los retornos."""
+    arr = np.ascontiguousarray(returns.to_numpy(dtype=np.float64))
+    digest = hashlib.sha256(arr.tobytes()).hexdigest()
+    return digest[:16]
+
+
+def _ksg_cache_key(
+    returns: pd.DataFrame,
+    k_neighbors: int,
+    seed: int,
+) -> dict:
+    """Metadatos usados como clave de caché del KSG MI."""
+    index = pd.DatetimeIndex(returns.index)
+    return {
+        "version": KSG_CACHE_VERSION,
+        "estimator": "ksg",
+        "k_neighbors": int(k_neighbors),
+        "seed": int(seed),
+        "start": str(index.min().date()) if len(index) else "",
+        "end": str(index.max().date()) if len(index) else "",
+        "n_obs": int(returns.shape[0]),
+        "n_assets": int(returns.shape[1]),
+        "assets": list(map(str, returns.columns)),
+        "returns_hash": _hash_returns(returns),
+    }
+
+
+def _ksg_cache_filename(meta: dict) -> str:
+    """Nombre determinista del archivo de caché."""
+    h = hashlib.sha256(repr(sorted(meta.items())).encode()).hexdigest()
+    return (
+        f"ksg_k{meta['k_neighbors']}_seed{meta['seed']}"
+        f"_{meta['n_assets']}x{meta['n_obs']}_{h[:12]}.pkl"
+    )
+
+
+def cached_ksg_mi_matrix(
+    returns: pd.DataFrame,
+    k_neighbors: int = 3,
+    seed: int = SEED,
+    cache_dir: Path | None = None,
+    force: bool = False,
+) -> pd.DataFrame:
+    """Matriz MI KSG con caché en disco bajo ``cache_dir``.
+
+    Si ya existe una matriz calculada con los mismos parámetros y los mismos
+    datos, se carga directamente sin volver a calcular el estimador KSG.  La
+    caché se invalida automáticamente al cambiar:
+
+    - las fechas o el número de observaciones;
+    - los activos o el hash del contenido;
+    - ``k_neighbors`` o ``seed``;
+    - la versión del esquema de caché.
+
+    Parameters
+    ----------
+    returns : pd.DataFrame
+        Retornos limpios con índice temporal y un ticker por columna.
+    k_neighbors : int
+        Parámetro ``k`` del estimador KSG.
+    seed : int
+        Semilla aleatoria del estimador.
+    cache_dir : Path, opcional
+        Carpeta de caché.  Por defecto ``DATA_DIR / 'pair_trading' / 'mi' / 'ksg'``.
+    force : bool
+        Si es ``True`` recalcula y sobrescribe la entrada de caché existente.
+    """
+    if returns is None or returns.empty:
+        raise ValueError("El DataFrame de retornos está vacío.")
+    clean = returns.dropna(how="any")
+    if clean.empty:
+        raise ValueError("No quedan observaciones tras limpiar NaN.")
+
+    if cache_dir is None:
+        cache_dir = DATA_DIR / "pair_trading" / "mi" / "ksg"
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    meta = _ksg_cache_key(clean, k_neighbors, seed)
+    matrix_path = cache_dir / _ksg_cache_filename(meta)
+    meta_path = matrix_path.with_suffix(".json")
+
+    if matrix_path.exists() and meta_path.exists() and not force:
+        try:
+            with meta_path.open("r", encoding="utf-8") as fh:
+                stored = json.load(fh)
+            if all(stored.get(k) == v for k, v in meta.items()):
+                cached = pd.read_pickle(matrix_path)
+                if (
+                    list(cached.index) == meta["assets"]
+                    and list(cached.columns) == meta["assets"]
+                ):
+                    print(
+                        f"[caché] Matriz MI KSG cargada desde {matrix_path.name} "
+                        f"({meta['n_assets']}×{meta['n_assets']})"
+                    )
+                    return cached
+        except (OSError, json.JSONDecodeError, ValueError):
+            pass
+
+    matrix = ksg_mi_matrix(clean, k_neighbors=k_neighbors, seed=seed)
+
+    payload = {**meta, "created_at": datetime.now(timezone.utc).isoformat()}
+    with tempfile.NamedTemporaryFile(
+        delete=False, dir=cache_dir, suffix=".pkl.tmp",
+    ) as tmp_matrix, tempfile.NamedTemporaryFile(
+        delete=False, dir=cache_dir, suffix=".json.tmp", mode="w",
+    ) as tmp_meta:
+        pd.to_pickle(matrix, tmp_matrix.name)
+        json.dump(payload, tmp_meta, indent=2, sort_keys=True)
+        tmp_meta.flush()
+        os.replace(tmp_matrix.name, str(matrix_path))
+        os.replace(tmp_meta.name, str(meta_path))
+
+    print(
+        f"[caché] Matriz MI KSG guardada en {matrix_path.relative_to(cache_dir)}"
+    )
+    return matrix
 
 
 def top_pairs(
