@@ -349,3 +349,85 @@ def plot_cross_sectional_curves(
     ax.legend(loc="best", fontsize=9)
     plt.tight_layout()
     plt.show()
+
+
+# =============================================================================
+# Pair trading
+# =============================================================================
+
+
+def plot_ou_process(
+    spread: pd.Series,
+    ou_params,
+    figsize: Tuple[float, float] = (14.0, 7.0),
+) -> None:
+    """Spread con bandas de equilibrio ``±k·sigma_eq`` del proceso OU.
+
+    Parameters
+    ----------
+    spread : pd.Series
+        Serie del spread estacionario ``Z_t``.
+    ou_params : thesis.pair_trading.OUParameters
+        Salida de :func:`thesis.pair_trading.fit_ou_process`.
+    """
+    mu = ou_params.mu
+    sigma_eq = ou_params.sigma_eq
+    half_life = ou_params.half_life
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    ax.plot(spread.index, spread.values, color="darkblue",
+            linewidth=1.5, label="Spread (Z_t)")
+    ax.axhline(mu, color="black", linestyle="-", linewidth=2,
+               label=f"Equilibrio (μ = {mu:.4f})")
+
+    bands = (("±1σ", sigma_eq, "green", 0.20),
+             ("±2σ", 2 * sigma_eq, "orange", 0.15),
+             ("±3σ", 3 * sigma_eq, "red", 0.10))
+    for label, width, color, alpha in bands:
+        ax.fill_between(spread.index, mu - width, mu + width,
+                        color=color, alpha=alpha, label=f"{label} (±{width:.4f})")
+        ax.axhline(mu + width, color=color, linestyle="--",
+                   linewidth=1, alpha=0.7)
+        ax.axhline(mu - width, color=color, linestyle="--",
+                   linewidth=1, alpha=0.7)
+
+    ax.set_xlabel("Fecha")
+    ax.set_ylabel("Spread")
+    ax.set_title(
+        f"Proceso de Ornstein-Uhlenbeck\n(Half-Life: {half_life:.2f} sesiones)",
+        fontweight="bold",
+    )
+    ax.legend(loc="best")
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_pair_prices(
+    prices: pd.DataFrame,
+    ticker_a: str,
+    ticker_b: str,
+    figsize: Tuple[float, float] = (14.0, 9.0),
+) -> None:
+    """Compara precios crudos y normalizados de un par de activos."""
+    if prices.empty:
+        print("No hay precios para graficar. Verifica los tickers o el rango.")
+        return
+
+    fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
+
+    prices[[ticker_a, ticker_b]].plot(ax=axes[0], linewidth=1.6)
+    axes[0].set_title(f"Precios ajustados: {ticker_a} vs {ticker_b}")
+    axes[0].set_ylabel("Precio (USD)")
+    axes[0].grid(alpha=0.3)
+
+    normalized = prices[[ticker_a, ticker_b]] / prices.iloc[0]
+    normalized.plot(ax=axes[1], linewidth=1.6)
+    axes[1].set_title("Precios normalizados (Base = 1 al inicio)")
+    axes[1].set_ylabel("Precio normalizado")
+    axes[1].set_xlabel("Fecha")
+    axes[1].grid(alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
