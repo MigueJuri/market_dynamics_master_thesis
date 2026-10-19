@@ -352,6 +352,184 @@ def plot_cross_sectional_curves(
 
 
 # =============================================================================
+# Evaluación sectorial de clusters
+# =============================================================================
+
+
+def plot_cluster_sector_heatmap(
+    contingency: pd.DataFrame,
+    figsize: Tuple[float, float] = (10, 7),
+    cmap: str = "Blues",
+    title: str = "Sectores vs clusters",
+) -> None:
+    """Heatmap de conteos sector × cluster.
+
+    Se espera una tabla de contingencia que aún incluya las filas
+    ``cluster_size`` y ``cluster_purity``; la función las descarta
+    automáticamente.
+    """
+    data = contingency.drop(
+        index=["cluster_size", "cluster_purity"], errors="ignore"
+    ).astype(int)
+    fig, ax = plt.subplots(figsize=figsize)
+    sns.heatmap(data, annot=True, fmt="d", cmap=cmap, cbar=True, ax=ax)
+    ax.set_title(title, fontweight="bold")
+    ax.set_xlabel("Cluster")
+    ax.set_ylabel("Sector GICS")
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_cluster_sector_composition(
+    contingency: pd.DataFrame,
+    figsize: Tuple[float, float] = (10, 6),
+    palette: str = "tab20",
+    title: str = "Composición sectorial por cluster",
+) -> None:
+    """Barras apiladas al 100 % con la composición sectorial de cada cluster."""
+    data = contingency.drop(
+        index=["cluster_size", "cluster_purity"], errors="ignore"
+    )
+    shares = data.div(data.sum(axis=0), axis=1).T
+
+    fig, ax = plt.subplots(figsize=figsize)
+    shares.plot(
+        kind="barh",
+        stacked=True,
+        ax=ax,
+        colormap=palette,
+        edgecolor="white",
+        linewidth=0.5,
+    )
+    ax.set_xlim(0, 1)
+    ax.set_xlabel("Proporción del cluster")
+    ax.set_ylabel("Cluster")
+    ax.set_title(title, fontweight="bold")
+    ax.legend(
+        bbox_to_anchor=(1.05, 1.0),
+        loc="upper left",
+        title="Sector",
+    )
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_cluster_sector_summary(
+    per_cluster: pd.DataFrame,
+    figsize: Tuple[float, float] = (12, 4.5),
+) -> None:
+    """Gráficas de pureza, entropía normalizada y HHI por cluster."""
+    fig, axes = plt.subplots(1, 3, figsize=figsize)
+
+    per_cluster.plot(
+        y="purity",
+        kind="bar",
+        ax=axes[0],
+        color="C0",
+        legend=False,
+    )
+    axes[0].set_ylim(0, 1)
+    axes[0].set_title("Pureza sectorial")
+    axes[0].set_ylabel("Pureza")
+
+    per_cluster.plot(
+        y="norm_entropy",
+        kind="bar",
+        ax=axes[1],
+        color="C1",
+        legend=False,
+    )
+    axes[1].set_ylim(0, 1)
+    axes[1].set_title("Entropía normalizada")
+    axes[1].set_ylabel("Entropía normalizada")
+
+    per_cluster.plot(
+        y="hhi",
+        kind="bar",
+        ax=axes[2],
+        color="C2",
+        legend=False,
+    )
+    axes[2].set_ylim(0, 1)
+    axes[2].set_title("HHI sectorial")
+    axes[2].set_ylabel("HHI")
+
+    for ax in axes:
+        ax.tick_params(axis="x", rotation=0)
+        ax.grid(axis="y", alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_sector_reordered_matrix(
+    matrix: pd.DataFrame,
+    sector_labels: pd.Series,
+    cluster_labels: Optional[pd.Series] = None,
+    cmap: str = "inferno",
+    figsize: Tuple[float, float] = (10, 9),
+    title: str = "Matriz ordenada por sector",
+    cbar_label: str = "Valor",
+) -> None:
+    """Muestra la matriz con bandas sectoriales y sin etiquetas de ticker.
+
+    Si se proporciona ``cluster_labels``, también dibuja separadores entre
+    clusters dentro de cada sector.
+    """
+    common = matrix.index.intersection(sector_labels.index)
+    if cluster_labels is not None:
+        common = common.intersection(cluster_labels.index)
+
+    if len(common) == 0:
+        print("No hay activos comunes para ordenar.")
+        return
+
+    sub_sectors = sector_labels.reindex(common)
+    sectors = sorted(sub_sectors.unique())
+
+    order: list[str] = []
+    if cluster_labels is not None:
+        sub_clusters = cluster_labels.reindex(common)
+        for sector in sectors:
+            sector_tickers = sub_sectors[sub_sectors == sector].index.tolist()
+            sector_clusters = sub_clusters.reindex(sector_tickers)
+            ordered = sector_clusters.sort_values().index.tolist()
+            order.extend(ordered)
+    else:
+        for sector in sectors:
+            order.extend(sub_sectors[sub_sectors == sector].index.tolist())
+
+    ordered_matrix = matrix.reindex(index=order, columns=order)
+
+    fig, ax = plt.subplots(figsize=figsize)
+    im = ax.imshow(ordered_matrix, cmap=cmap, interpolation="nearest")
+    ax.set_title(title, fontweight="bold")
+    fig.colorbar(im, ax=ax, label=cbar_label)
+
+    # Límites entre sectores
+    sector_boundaries = []
+    for i in range(1, len(order)):
+        if sub_sectors.loc[order[i]] != sub_sectors.loc[order[i - 1]]:
+            sector_boundaries.append(i)
+
+    for b in sector_boundaries:
+        ax.axhline(b - 0.5, color="black", linewidth=2)
+        ax.axvline(b - 0.5, color="black", linewidth=2)
+
+    # Límites entre clusters
+    if cluster_labels is not None:
+        for i in range(1, len(order)):
+            if sub_clusters.loc[order[i]] != sub_clusters.loc[order[i - 1]]:
+                ax.axhline(i - 0.5, color="white", linewidth=1, linestyle="--")
+                ax.axvline(i - 0.5, color="white", linewidth=1, linestyle="--")
+
+    ax.set_xticks([])
+    ax.set_yticks([])
+    plt.tight_layout()
+    plt.show()
+
+
+# =============================================================================
 # Pair trading
 # =============================================================================
 

@@ -21,17 +21,17 @@
 #
 # $$\rho_{X,Y} = \frac{\mathrm{Cov}(X,Y)}{\sigma_X\, \sigma_Y}$$
 #
-# Este notebook replica exactamente el flujo del cuaderno de Información
-# Mutua: mismo universo, mismo rango temporal, mismo clustering y misma
-# visualización, para que ambas métricas sean comparables.
+# Este notebook replica el flujo del cuaderno de Información Mutua: mismo
+# universo, mismo rango temporal, mismo número de clusters (uno por sector
+# GICS), y la misma evaluación sectorial, para que ambas métricas sean
+# comparables.
 #
 # 1. Universo S&P 500 completo con ``START:END``.
 # 2. Matriz de correlación de Pearson.
 # 3. Top 20 pares por correlación.
-# 4. Clustering jerárquico de Ward (k = 3) sobre la distancia
-#    ``sqrt(1 - ρ)``.
-# 5. Matriz reordenada por hojas y gráfico con fronteras de clúster.
-# 6. Animación de la correlación rolling sobre el sub-manifold reducido.
+# 4. Clustering jerárquico de Ward con tantos clusters como sectores.
+# 5. Evaluación de la calidad sectorial del clustering.
+# 6. Visualización de matrices, composición sectorial y animación rolling.
 
 # %%
 import sys
@@ -50,32 +50,60 @@ from matplotlib import animation
 from thesis.config import DATA_DIR, END, START
 from thesis.pair_trading import (
     correlation_distance,
+    evaluate_cluster_sector_alignment,
+    get_sp500_constituents,
     get_sp500_tickers_by_sector,
     hierarchical_clustering,
     load_log_returns,
+    sector_average_matrix,
     top_pairs,
+)
+from thesis.plotting import (
+    plot_cluster_sector_composition,
+    plot_cluster_sector_heatmap,
+    plot_cluster_sector_summary,
+    plot_sector_reordered_matrix,
 )
 
 # %%
-# ## Universo y retornos
+# ## Universo, retornos y sector GICS de cada activo
 tickers_sp500 = get_sp500_tickers_by_sector("all")
 print(f"Tamaño del universo S&P 500: {len(tickers_sp500)} activos")
 
+constituents = get_sp500_constituents()
+constituents = constituents[constituents["Symbol"].isin(tickers_sp500)]
+sector_map = constituents.set_index("Symbol")["GICS Sector"]
+
 returns_full = load_log_returns(tickers_sp500, START, END, DATA_DIR)
 print(f"Retornos cargados: {returns_full.shape[0]} sesiones × {returns_full.shape[1]} activos")
+
+# Alineamos sector con los tickers que finalmente tienen datos
+available_sectors = sector_map.reindex(returns_full.columns).dropna()
+n_clusters = available_sectors.nunique()
+print(f"Sectores GICS presentes: {n_clusters}")
 
 # %%
 # ## Correlación de Pearson sobre el universo completo
 corr_matrix = returns_full.corr(method="pearson")
 top_20_pairs = top_pairs(corr_matrix, n=20)
 
-print("Top 20 pares por correlación de Pearson:")
+print("\nTop 20 pares por correlación de Pearson:")
 for rank, (t1, t2, val) in enumerate(top_20_pairs, 1):
     print(f"{rank:>3}. {t1} - {t2} : {val:.4f}")
 
 # %%
-# ## Clustering jerárquico de Ward sobre la distancia sqrt(1 - ρ)
-n_clusters = 3
+# ## Tabla de pares principales con sector y cluster
+top_pairs_df = pd.DataFrame(
+    top_20_pairs,
+    columns=["ticker_a", "ticker_b", "pearson"],
+)
+top_pairs_df["sector_a"] = top_pairs_df["ticker_a"].map(available_sectors)
+top_pairs_df["sector_b"] = top_pairs_df["ticker_b"].map(available_sectors)
+print("\nTop 20 pares con sector:")
+print(top_pairs_df.to_string(index=False))
+
+# %%
+# ## Clustering jerárquico de Ward con k = número de sectores
 distance_pearson = correlation_distance(corr_matrix, use_sqrt=True)
 cluster_labels, leaf_order = hierarchical_clustering(
     distance_pearson, n_clusters=n_clusters,
@@ -87,33 +115,69 @@ clusters = pd.Series(cluster_labels, index=corr_matrix.columns, name="cluster")
 print(f"\nClustering jerárquico de Ward (k = {n_clusters}):")
 for cid in sorted(clusters.unique()):
     members = clusters.index[clusters == cid].tolist()
-    print(f"  Cluster {cid}: {members}")
+    print(f"  Cluster {cid}: {members[:10]}{'...' if len(members) > 10 else ''}")
 
 # %%
-# ## Visualización de la matriz de correlación reordenada
+# ## Evaluación de la calidad sectorial del clustering
+report = evaluate_cluster_sector_alignment(clusters, available_sectors)
+
+print("\nMétricas globales de alineación sectorial:")
+print(f"  Purity ponderada        : {report.weighted_purity:.4f}")
+print(f"  Entropía normalizada    : {report.normalized_entropy:.4f}")
+print(f"  HHI medio               : {report.mean_hhi:.4f}")
+print(f"  Adjusted Rand Index     : {report.ari:.4f}")
+print(f"  Adjusted Mutual Info    : {report.ami:.4f}")
+print(f"  Homogeneity             : {report.homogeneity:.4f}")
+print(f"  Completeness            : {report.completeness:.4f}")
+print(f"  V-measure               : {report.v_measure:.4f}")
+
+print("\nMétricas por cluster:")
+print(report.per_cluster.to_string())
+
+# %%
+# ## Visualización sectorial
+plot_cluster_sector_heatmap(
+    report.contingency,
+    title=f"Sectores vs clusters (Pearson, k = {n_clusters})",
+)
+
+plot_cluster_sector_composition(
+    report.contingency,
+    title=f"Composición sectorial por cluster (Pearson, k = {n_clusters})",
+)
+
+plot_cluster_sector_summary(report.per_cluster)
+
+# %%
+# ## Matriz de correlación ordenada por sector (sin etiquetas de ticker)
+plot_sector_reordered_matrix(
+    corr_matrix,
+    sector_labels=available_sectors,
+    cluster_labels=clusters,
+    cmap="coolwarm",
+    title="Correlación Pearson ordenada por sector y cluster",
+    cbar_label="Correlación de Pearson",
+)
+
+# %%
+# ## Matriz promedio sector × sector
+sector_corr = sector_average_matrix(corr_matrix, available_sectors, operation="mean")
+
 fig, ax = plt.subplots(figsize=(10, 8))
-im = ax.imshow(corr_ordered, cmap="coolwarm", interpolation="nearest",
+im = ax.imshow(sector_corr, cmap="coolwarm", interpolation="nearest",
                vmin=-1, vmax=1)
-ax.set_title("Correlación de Pearson — hojas ordenadas por clustering Ward")
-ax.set_xticks(range(len(labels_ordered)), labels_ordered, rotation=45)
-ax.set_yticks(range(len(labels_ordered)), labels_ordered)
-fig.colorbar(im, ax=ax, label="Correlación de Pearson")
-
-ordered_clusters = [int(clusters[t]) for t in labels_ordered]
-boundaries = [i for i in range(1, len(ordered_clusters))
-              if ordered_clusters[i] != ordered_clusters[i - 1]]
-for b in boundaries:
-    ax.axhline(b - 0.5, color="white", linewidth=2)
-    ax.axvline(b - 0.5, color="white", linewidth=2)
-
+ax.set_xticks(range(len(sector_corr.columns)), sector_corr.columns, rotation=45, ha="right")
+ax.set_yticks(range(len(sector_corr.index)), sector_corr.index)
+ax.set_title("Correlación Pearson promedio entre sectores GICS")
+fig.colorbar(im, ax=ax, label="Correlación media")
 plt.tight_layout()
 plt.show()
 
 # %%
-# ## Sub-manifold reducido para la animación rolling
+# ## Correlación rolling (animación) sobre el sub-manifold reducido
 surviving_nodes = sorted({t1 for t1, _, _ in top_20_pairs}
                          | {t2 for _, t2, _ in top_20_pairs})
-print(f"\nSub-manifold: {len(surviving_nodes)} activos")
+print(f"\nSub-manifold para animación: {len(surviving_nodes)} activos")
 print(f"Tickers: {surviving_nodes}")
 
 returns_rolling = load_log_returns(
@@ -125,8 +189,6 @@ distance_static = correlation_distance(corr_static, use_sqrt=True)
 _, static_order = hierarchical_clustering(distance_static, n_clusters=n_clusters)
 static_labels = corr_static.columns[static_order]
 
-# %%
-# ## Correlación rolling (animación)
 WINDOW_SIZE = 126
 STEP_SIZE = 5
 

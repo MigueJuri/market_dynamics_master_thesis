@@ -21,6 +21,13 @@ import statsmodels.api as sm
 from scipy.cluster.hierarchy import fcluster, leaves_list, linkage
 from scipy.spatial.distance import squareform
 from sklearn.feature_selection import mutual_info_regression
+from sklearn.metrics import (
+    adjusted_mutual_info_score,
+    adjusted_rand_score,
+    completeness_score,
+    homogeneity_score,
+    v_measure_score,
+)
 from statsmodels.tsa.stattools import adfuller
 
 from thesis.config import DATA_DIR, END, SEED, START
@@ -36,6 +43,25 @@ WIKIPEDIA_HEADERS = {
 # =============================================================================
 
 
+def get_sp500_constituents() -> pd.DataFrame:
+    """Scrapea la tabla completa de constituyentes del S&P 500.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columnas ``Symbol`` (normalizado para ``yfinance``) y ``GICS Sector``.
+    """
+    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    response = requests.get(url, headers=WIKIPEDIA_HEADERS, timeout=15)
+    if response.status_code != 200:
+        raise ConnectionError(f"HTTP Error: {response.status_code}")
+
+    df = pd.read_html(StringIO(response.text))[0]
+    df = df[["Symbol", "GICS Sector"]].copy()
+    df["Symbol"] = df["Symbol"].str.replace(".", "-", regex=False)
+    return df
+
+
 def get_sp500_tickers_by_sector(target_sector: str = "Energy") -> list[str]:
     """Scrapea los constituyentes del S&P 500 y los filtra por sector GICS.
 
@@ -48,18 +74,12 @@ def get_sp500_tickers_by_sector(target_sector: str = "Energy") -> list[str]:
     Returns
     -------
     list[str]
-        Tickers compatibles con ``yfinance`` (los puntos se sustituyen por
-        guiones).
+        Tickers compatibles con ``yfinance``.
     """
-    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    response = requests.get(url, headers=WIKIPEDIA_HEADERS, timeout=15)
-    if response.status_code != 200:
-        raise ConnectionError(f"HTTP Error: {response.status_code}")
-
-    df = pd.read_html(StringIO(response.text))[0]
+    df = get_sp500_constituents()
 
     if target_sector.lower() == "all":
-        return df["Symbol"].str.replace(".", "-", regex=False).tolist()
+        return df["Symbol"].tolist()
 
     available = df["GICS Sector"].unique()
     if target_sector not in available:
@@ -67,11 +87,7 @@ def get_sp500_tickers_by_sector(target_sector: str = "Energy") -> list[str]:
             f"Sector '{target_sector}' no encontrado. Sectores válidos: {available}"
         )
 
-    return (
-        df.loc[df["GICS Sector"] == target_sector, "Symbol"]
-        .str.replace(".", "-", regex=False)
-        .tolist()
-    )
+    return df.loc[df["GICS Sector"] == target_sector, "Symbol"].tolist()
 
 
 def load_log_returns(
@@ -364,6 +380,209 @@ def top_pairs(
                 pairs.append((cols[i], cols[j], float(val)))
     pairs.sort(key=lambda t: t[2], reverse=not ascending)
     return pairs[:n]
+
+
+# =============================================================================
+# Evaluación sectorial de clusters
+# =============================================================================
+
+
+def align_cluster_sector_labels(
+    cluster_labels: pd.Series,
+    sector_labels: pd.Series,
+) -> tuple[pd.Series, pd.Series]:
+    """Alinea series de cluster y sector por ticker y devuelve pares limpios.
+
+    Parameters
+    ----------
+    cluster_labels : pd.Series
+        Índice = ticker, valores = etiqueta de clúster.
+    sector_labels : pd.Series
+        Índice = ticker, valores = sector GICS.
+
+    Returns
+    -------
+    tuple[pd.Series, pd.Series]
+        Ambas series indexadas por los tickers comunes, excluyendo ``NaN``.
+    """
+    common = cluster_labels.index.intersection(sector_labels.index)
+    cl = cluster_labels.reindex(common)
+    se = sector_labels.reindex(common)
+    valid = cl.notna() & se.notna()
+    return cl[valid], se[valid]
+
+
+def cluster_sector_purity(
+    cluster_labels: pd.Series,
+    sector_labels: pd.Series,
+) -> pd.DataFrame:
+    """Tabla de contingencia y pureza por clúster.
+
+    Returns
+    -------
+    pd.DataFrame
+        Filas = sectores, columnas = clusters, con una fila extra
+        ``cluster_purity`` que indica la proporción del sector dominante.
+    """
+    cl, se = align_cluster_sector_labels(cluster_labels, sector_labels)
+    contingency = pd.crosstab(se, cl)
+    cluster_sizes = contingency.sum(axis=0)
+    dominant_counts = contingency.max(axis=0)
+    purity = (dominant_counts / cluster_sizes).fillna(0)
+    contingency.loc["cluster_size"] = cluster_sizes
+    contingency.loc["cluster_purity"] = purity
+    return contingency
+
+
+def normalized_entropy(series: pd.Series) -> float:
+    """Entropía de una variable categórica normalizada por el log del número de categorías."""
+    counts = series.value_counts(normalize=True)
+    if len(counts) <= 1:
+        return 0.0
+    entropy = -np.sum(counts * np.log(counts + np.finfo(float).eps))
+    return float(entropy / np.log(len(counts)))
+
+
+def hhi(series: pd.Series) -> float:
+    """Índice Herfindahl-Hirschman de concentración."""
+    shares = series.value_counts(normalize=True)
+    return float(np.sum(shares ** 2))
+
+
+@dataclass(frozen=True)
+class ClusterSectorReport:
+    """Resultados de la evaluación de clusters contra sectores GICS."""
+
+    contingency: pd.DataFrame
+    per_cluster: pd.DataFrame
+    weighted_purity: float
+    normalized_entropy: float
+    mean_hhi: float
+    ari: float
+    ami: float
+    homogeneity: float
+    completeness: float
+    v_measure: float
+
+
+def evaluate_cluster_sector_alignment(
+    cluster_labels: pd.Series,
+    sector_labels: pd.Series,
+) -> ClusterSectorReport:
+    """Evalúa qué tan bien los clusters reflejan la estructura sectorial.
+
+    Parameters
+    ----------
+    cluster_labels : pd.Series
+        Índice = ticker, valores = etiqueta de clúster.
+    sector_labels : pd.Series
+        Índice = ticker, valores = sector GICS.
+
+    Returns
+    -------
+    ClusterSectorReport
+        Contingencia, métricas por clúster y métricas globales.
+    """
+    cl, se = align_cluster_sector_labels(cluster_labels, sector_labels)
+    if cl.empty:
+        raise ValueError("No hay tickers comunes entre clusters y sectores.")
+
+    contingency = cluster_sector_purity(cl, se)
+
+    cluster_ids = sorted(cl.unique())
+    sizes = []
+    purities = []
+    entropies = []
+    hhis = []
+    dominant_sectors = []
+
+    for cid in cluster_ids:
+        cluster_mask = cl == cid
+        sector_slice = se[cluster_mask]
+        size = int(cluster_mask.sum())
+        sizes.append(size)
+        dominant = sector_slice.mode()
+        dominant_sectors.append(dominant.iloc[0] if not dominant.empty else "N/A")
+        purities.append(float(contingency.loc["cluster_purity", cid]))
+        entropies.append(normalized_entropy(sector_slice))
+        hhis.append(hhi(sector_slice))
+
+    per_cluster = pd.DataFrame(
+        {
+            "cluster": cluster_ids,
+            "size": sizes,
+            "dominant_sector": dominant_sectors,
+            "purity": purities,
+            "norm_entropy": entropies,
+            "hhi": hhis,
+        }
+    ).set_index("cluster")
+
+    weighted_purity = float(np.average(purities, weights=sizes))
+    mean_entropy = float(np.average(entropies, weights=sizes))
+    mean_hhi_val = float(np.average(hhis, weights=sizes))
+
+    ari = float(adjusted_rand_score(se, cl))
+    ami = float(adjusted_mutual_info_score(se, cl))
+    homogeneity = float(homogeneity_score(se, cl))
+    completeness = float(completeness_score(se, cl))
+    v_measure = float(v_measure_score(se, cl))
+
+    return ClusterSectorReport(
+        contingency=contingency,
+        per_cluster=per_cluster,
+        weighted_purity=weighted_purity,
+        normalized_entropy=mean_entropy,
+        mean_hhi=mean_hhi_val,
+        ari=ari,
+        ami=ami,
+        homogeneity=homogeneity,
+        completeness=completeness,
+        v_measure=v_measure,
+    )
+
+
+def sector_average_matrix(
+    matrix: pd.DataFrame,
+    sector_labels: pd.Series,
+    operation: str = "mean",
+) -> pd.DataFrame:
+    """Agrega una matriz de activos a una matriz sector × sector.
+
+    Parameters
+    ----------
+    matrix : pd.DataFrame
+        Matriz cuadrada con tickers en índice y columnas.
+    sector_labels : pd.Series
+        Serie ticker → sector.
+    operation : {"mean", "median", "min", "max"}
+        Reducción aplicada dentro de cada bloque sectorial.
+    """
+    common = matrix.index.intersection(sector_labels.index).intersection(
+        matrix.columns
+    )
+    if len(common) == 0:
+        raise ValueError("No hay tickers comunes entre la matriz y los sectores.")
+
+    sub_matrix = matrix.loc[common, common]
+    sub_sectors = sector_labels.reindex(common)
+
+    sectors = sorted(sub_sectors.unique())
+    out = pd.DataFrame(np.nan, index=sectors, columns=sectors)
+
+    func = getattr(np, operation)
+    for s_i in sectors:
+        idx_i = sub_sectors.index[sub_sectors == s_i]
+        for s_j in sectors:
+            idx_j = sub_sectors.index[sub_sectors == s_j]
+            block = sub_matrix.loc[idx_i, idx_j].to_numpy().ravel()
+            block = block[~np.isnan(block)]
+            if s_i == s_j:
+                # Excluir la diagonal dentro del bloque diagonal
+                block = block[block < 1.0 - 1e-12]
+            if len(block) > 0:
+                out.loc[s_i, s_j] = float(func(block))
+    return out
 
 
 def hierarchical_clustering(

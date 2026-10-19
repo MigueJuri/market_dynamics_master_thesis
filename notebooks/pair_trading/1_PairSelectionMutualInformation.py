@@ -13,23 +13,22 @@
 # ---
 
 # %% [markdown]
-# # Selección de Pares vía Información Mutua
+# # Selección de Pares vía Información Mutua (KSG)
 #
-# La correlación de Pearson sólo captura dependencias lineales.  Para
-# encontrar pares cointegrados usamos **Información Mutua** (MI), que
-# detecta también acoplamientos no lineales:
+# Para encontrar pares cointegrados usamos **Información Mutua** estimada
+# con el método de Kraskov-Stögbauer-Grassberger (KSG), que detecta
+# acoplamientos tanto lineales como no lineales:
 #
 # $$I(X;Y) = \sum_{y \in Y} \sum_{x \in X} p(x,y) \log \frac{p(x,y)}{p(x)\,p(y)}$$
 #
-# El flujo es paralelo al notebook de Pearson: mismo universo, mismo
-# rango temporal, mismo número de clusters y misma visualización.
+# Flujo del notebook:
 #
 # 1. Universo S&P 500 completo con ``START:END``.
-# 2. Matriz MI gaussiana sobre todo el universo (criba rápida O(N²)).
+# 2. Matriz MI KSG sobre todo el universo.
 # 3. Top 20 pares por MI.
-# 4. Clustering jerárquico de Ward (k = 3) sobre la distancia MI.
-# 5. Matriz reordenada por hojas y gráfico con fronteras de clúster.
-# 6. Validación con estimador KSG sobre el sub-manifold reducido.
+# 4. Clustering jerárquico de Ward con tantos clusters como sectores GICS.
+# 5. Evaluación de la calidad sectorial del clustering.
+# 6. Visualización de matrices y composición sectorial.
 
 # %%
 import sys
@@ -46,131 +45,132 @@ import pandas as pd
 
 from thesis.config import DATA_DIR, END, START
 from thesis.pair_trading import (
-    gaussian_mi_matrix,
+    evaluate_cluster_sector_alignment,
+    get_sp500_constituents,
     get_sp500_tickers_by_sector,
     hierarchical_clustering,
     ksg_mi_matrix,
     load_log_returns,
     mi_distance,
+    sector_average_matrix,
     top_pairs,
+)
+from thesis.plotting import (
+    plot_cluster_sector_composition,
+    plot_cluster_sector_heatmap,
+    plot_cluster_sector_summary,
+    plot_sector_reordered_matrix,
 )
 
 # %%
-# ## Universo y retornos
+# ## Universo, retornos y sector GICS de cada activo
 tickers_sp500 = get_sp500_tickers_by_sector("all")
 print(f"Tamaño del universo S&P 500: {len(tickers_sp500)} activos")
+
+constituents = get_sp500_constituents()
+constituents = constituents[constituents["Symbol"].isin(tickers_sp500)]
+sector_map = constituents.set_index("Symbol")["GICS Sector"]
 
 returns_full = load_log_returns(tickers_sp500, START, END, DATA_DIR)
 print(f"Retornos cargados: {returns_full.shape[0]} sesiones × {returns_full.shape[1]} activos")
 
-# %%
-# ## Información mutua gaussiana sobre el universo completo
-# Para series gaussianas ``MI = -1/2 · log(1 - ρ²)``.  Es O(N²) sin
-# búsqueda de vecinos, así que escala al S&P 500 completo.
-mi_gaussian = gaussian_mi_matrix(returns_full)
-top_20_pairs = top_pairs(mi_gaussian, n=20)
+# Alineamos sector con los tickers que finalmente tienen datos
+available_sectors = sector_map.reindex(returns_full.columns).dropna()
+n_clusters = available_sectors.nunique()
+print(f"Sectores GICS presentes: {n_clusters}")
 
-print("Top 20 pares por Información Mutua gaussiana:")
+# %%
+# ## Información mutua KSG sobre el universo completo
+mi_matrix = ksg_mi_matrix(returns_full, k_neighbors=3)
+top_20_pairs = top_pairs(mi_matrix, n=20)
+
+print("\nTop 20 pares por Información Mutua KSG:")
 for rank, (t1, t2, val) in enumerate(top_20_pairs, 1):
     print(f"{rank:>3}. {t1} - {t2} : {val:.4f} nats")
 
 # %%
-# ## Clustering jerárquico de Ward sobre la distancia MI
-n_clusters = 3
-distance_gaussian = mi_distance(mi_gaussian)
-cluster_labels, leaf_order = hierarchical_clustering(
-    distance_gaussian, n_clusters=n_clusters,
+# ## Tabla de pares principales con sector y cluster
+top_pairs_df = pd.DataFrame(
+    top_20_pairs,
+    columns=["ticker_a", "ticker_b", "mi"],
 )
-labels_ordered = mi_gaussian.columns[leaf_order]
-mi_ordered = mi_gaussian.loc[labels_ordered, labels_ordered]
+top_pairs_df["sector_a"] = top_pairs_df["ticker_a"].map(available_sectors)
+top_pairs_df["sector_b"] = top_pairs_df["ticker_b"].map(available_sectors)
+print("\nTop 20 pares con sector:")
+print(top_pairs_df.to_string(index=False))
 
-clusters = pd.Series(cluster_labels, index=mi_gaussian.columns, name="cluster")
+# %%
+# ## Clustering jerárquico de Ward con k = número de sectores
+distance_matrix = mi_distance(mi_matrix)
+cluster_labels, leaf_order = hierarchical_clustering(
+    distance_matrix, n_clusters=n_clusters,
+)
+labels_ordered = mi_matrix.columns[leaf_order]
+mi_ordered = mi_matrix.loc[labels_ordered, labels_ordered]
+
+clusters = pd.Series(cluster_labels, index=mi_matrix.columns, name="cluster")
 print(f"\nClustering jerárquico de Ward (k = {n_clusters}):")
 for cid in sorted(clusters.unique()):
     members = clusters.index[clusters == cid].tolist()
-    print(f"  Cluster {cid}: {members}")
+    print(f"  Cluster {cid}: {members[:10]}{'...' if len(members) > 10 else ''}")
 
 # %%
-# ## Visualización de la matriz MI reordenada
-fig, ax = plt.subplots(figsize=(10, 8))
-im = ax.imshow(mi_ordered, cmap="inferno", interpolation="nearest")
-ax.set_title("Información Mutua gaussiana — hojas ordenadas por clustering Ward")
-ax.set_xticks(range(len(labels_ordered)), labels_ordered, rotation=45)
-ax.set_yticks(range(len(labels_ordered)), labels_ordered)
-fig.colorbar(im, ax=ax, label="MI (nats)")
+# ## Evaluación de la calidad sectorial del clustering
+report = evaluate_cluster_sector_alignment(clusters, available_sectors)
 
-ordered_clusters = [int(clusters[t]) for t in labels_ordered]
-boundaries = [i for i in range(1, len(ordered_clusters))
-              if ordered_clusters[i] != ordered_clusters[i - 1]]
-for b in boundaries:
-    ax.axhline(b - 0.5, color="white", linewidth=2)
-    ax.axvline(b - 0.5, color="white", linewidth=2)
+print("\nMétricas globales de alineación sectorial:")
+print(f"  Purity ponderada        : {report.weighted_purity:.4f}")
+print(f"  Entropía normalizada    : {report.normalized_entropy:.4f}")
+print(f"  HHI medio               : {report.mean_hhi:.4f}")
+print(f"  Adjusted Rand Index     : {report.ari:.4f}")
+print(f"  Adjusted Mutual Info    : {report.ami:.4f}")
+print(f"  Homogeneity             : {report.homogeneity:.4f}")
+print(f"  Completeness            : {report.completeness:.4f}")
+print(f"  V-measure               : {report.v_measure:.4f}")
 
-plt.tight_layout()
-plt.show()
+print("\nMétricas por cluster:")
+print(report.per_cluster.to_string())
 
 # %%
-# ## Validación KSG sobre el sub-manifold reducido
-# Aplicamos el estimador KSG (k-NN) sobre los tickers supervivientes del
-# top-20 para validar los acoplamientos sin la hipótesis gaussiana.
-surviving_nodes = sorted({t1 for t1, _, _ in top_20_pairs}
-                         | {t2 for _, t2, _ in top_20_pairs})
-
-# Excluir tickers duplicados (ej. GOOGL/GOOG) que yfinance no resuelve igual
-KSG_EXCLUDE = ("GOOGL", "FOXA", "NWSA")
-ksg_tickers = [t for t in surviving_nodes if t not in KSG_EXCLUDE]
-print(f"\nSub-manifold KSG: {len(ksg_tickers)} activos")
-print(f"Tickers: {ksg_tickers}")
-
-returns_ksg = load_log_returns(ksg_tickers, "2020-01-01", END, DATA_DIR)
-
-mi_ksg = ksg_mi_matrix(returns_ksg, k_neighbors=3)
-
-distance_ksg = mi_distance(mi_ksg)
-cluster_labels_ksg, leaf_order_ksg = hierarchical_clustering(
-    distance_ksg, n_clusters=n_clusters,
+# ## Visualización sectorial
+plot_cluster_sector_heatmap(
+    report.contingency,
+    title=f"Sectores vs clusters (MI KSG, k = {n_clusters})",
 )
-labels_ksg_ordered = mi_ksg.columns[leaf_order_ksg]
-mi_ksg_ordered = mi_ksg.loc[labels_ksg_ordered, labels_ksg_ordered]
 
-clusters_ksg = pd.Series(cluster_labels_ksg, index=mi_ksg.columns, name="cluster")
-print(f"\nClustering KSG (k = {n_clusters}):")
-for cid in sorted(clusters_ksg.unique()):
-    members = clusters_ksg.index[clusters_ksg == cid].tolist()
-    print(f"  Cluster {cid}: {members}")
+plot_cluster_sector_composition(
+    report.contingency,
+    title=f"Composición sectorial por cluster (MI KSG, k = {n_clusters})",
+)
 
-top_ksg_pairs = top_pairs(mi_ksg, n=20)
-print("\nTop 20 pares por MI KSG continua:")
-for rank, (t1, t2, val) in enumerate(top_ksg_pairs, 1):
-    print(f"{rank:>3}. {t1} - {t2}: {val:.4f}")
+plot_cluster_sector_summary(report.per_cluster)
 
 # %%
-# ## Visualización de la matriz KSG reordenada
-fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+# ## Matriz MI ordenada por sector (sin etiquetas de ticker)
+plot_sector_reordered_matrix(
+    mi_matrix,
+    sector_labels=available_sectors,
+    cluster_labels=clusters,
+    cmap="inferno",
+    title="MI KSG ordenada por sector y cluster",
+    cbar_label="MI (nats)",
+)
 
-im0 = axes[0].imshow(mi_ksg_ordered, cmap="inferno", interpolation="nearest")
-axes[0].set_title("KSG — hojas ordenadas por clustering")
-axes[0].set_xticks(range(len(labels_ksg_ordered)), labels_ksg_ordered, rotation=45)
-axes[0].set_yticks(range(len(labels_ksg_ordered)), labels_ksg_ordered)
-fig.colorbar(im0, ax=axes[0], label="MI (nats)")
+# %%
+# ## Matriz promedio sector × sector
+sector_mi = sector_average_matrix(mi_matrix, available_sectors, operation="mean")
 
-im1 = axes[1].imshow(mi_ksg_ordered, cmap="inferno", interpolation="nearest")
-ordered_clusters_ksg = [int(clusters_ksg[t]) for t in labels_ksg_ordered]
-boundaries_ksg = [i for i in range(1, len(ordered_clusters_ksg))
-                  if ordered_clusters_ksg[i] != ordered_clusters_ksg[i - 1]]
-for b in boundaries_ksg:
-    axes[1].axhline(b - 0.5, color="white", linewidth=2)
-    axes[1].axvline(b - 0.5, color="white", linewidth=2)
-axes[1].set_title(f"KSG — fronteras de clustering Ward (k = {n_clusters})")
-axes[1].set_xticks(range(len(labels_ksg_ordered)), labels_ksg_ordered, rotation=45)
-axes[1].set_yticks(range(len(labels_ksg_ordered)), labels_ksg_ordered)
-fig.colorbar(im1, ax=axes[1], label="MI (nats)")
-
+fig, ax = plt.subplots(figsize=(10, 8))
+im = ax.imshow(sector_mi, cmap="inferno", interpolation="nearest")
+ax.set_xticks(range(len(sector_mi.columns)), sector_mi.columns, rotation=45, ha="right")
+ax.set_yticks(range(len(sector_mi.index)), sector_mi.index)
+ax.set_title("MI KSG promedio entre sectores GICS")
+fig.colorbar(im, ax=ax, label="MI media (nats)")
 plt.tight_layout()
 plt.show()
 
 # %%
-# ## Símbolos finales del top 20 KSG
-final_symbols = sorted({t1 for t1, _, _ in top_ksg_pairs}
-                       | {t2 for _, t2, _ in top_ksg_pairs})
+# ## Símbolos finales del top 20
+final_symbols = sorted({t1 for t1, _, _ in top_20_pairs}
+                       | {t2 for _, t2, _ in top_20_pairs})
 print(final_symbols)
