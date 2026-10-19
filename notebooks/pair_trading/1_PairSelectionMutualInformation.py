@@ -15,18 +15,43 @@
 # %% [markdown]
 # # Selección de Pares vía Información Mutua (KSG)
 #
-# Para encontrar pares cointegrados usamos **Información Mutua** estimada
-# con el método de Kraskov-Stögbauer-Grassberger (KSG), que detecta
-# acoplamientos tanto lineales como no lineales:
+# ## ¿Por qué MI en lugar de correlación?
 #
-# $$I(X;Y) = \sum_{y \in Y} \sum_{x \in X} p(x,y) \log \frac{p(x,y)}{p(x)\,p(y)}$$
+# La **correlación de Pearson** sólo captura dependencia *lineal*.  Dos
+# series pueden tener correlación más fuerte (un valor bajo) y aun así
+# estar acopladas de forma no lineal (por ejemplo, $Y = f(X)$ monótona).
+# La **Información Mutua** (MI) detecta dependencias estadísticas
+# generales:
 #
-# Flujo del notebook:
+# $$I(X;Y) = \sum_{y \in Y} \sum_{x \in X}
+#   p(x,y)\, \log \frac{p(x,y)}{p(x)\,p(y)}$$
+#
+# $I(X;Y) = 0$ si y sólo si $X$ e $Y$ son independientes.
+#
+# ## El estimador KSG (k-NN)
+#
+# Para datos continuos no podemos estimar $p(x,y)$ mediante
+# histogramas sin sesgo de discretización.  Usamos el estimador de
+# **Kraskov-Stögbauer-Grassberger (KSG)**, basado en k-vecinos
+# cercanos.  Las ideas clave son:
+#
+# - Para cada punto, se busca la distancia al k-ésimo vecino en el
+#   espacio conjunto y en cada marginal.
+# - La diferencia entre conteos de vecinos en el espacio conjunto y
+#   en los marginales aproxima el logaritmo de la densidad conjunta
+#   dividido por el producto de marginales.
+# - Se promedia sobre todos los puntos y se simetriza estimando
+#   $MI(X,Y)$ y $MI(Y,X)$ por separado.
+#
+# El parámetro ``k_neighbors=3`` controla el balance sesgo-varianza:
+# valores más bajos reducen el sesgo pero aumentan la varianza.
+#
+# ## Flujo del notebook
 #
 # 1. Universo S&P 500 completo con ``START:END``.
-# 2. Matriz MI KSG sobre todo el universo.
-# 3. Top 20 pares por MI.
-# 4. Clustering jerárquico de Ward con tantos clusters como sectores GICS.
+# 2. Matriz MI KSG sobre todo el universo (calculada y cacheada).
+# 3. Top 20 pares por MI, filtrando emisores del mismo grupo.
+# 4. Clustering jerárquico de Ward con tantos clusters como sectores.
 # 5. Evaluación de la calidad sectorial del clustering.
 # 6. Visualización de matrices y composición sectorial.
 
@@ -64,9 +89,12 @@ from thesis.plotting import (
 
 # %%
 # ## Universo, retornos y sector GICS de cada activo
-# ``filter_duplicate_issuers`` elimina una clase de acción por emisor
-# (ej. ``GOOGL``/``GOOG`` o ``FOXA``/``FOX``) antes de descargar datos y
-# calcular la matriz MI, evitando evaluar pares inválidos.
+#
+# ``filter_duplicate_issuers`` normaliza el nombre del valor (elimina
+# sufijos como ``Class A``, ``Inc.``, ``Corp.``, etc.) y elimina una
+# clase de acción por emisor (ej. ``GOOGL``/``GOOG`` o
+# ``FOXA``/``FOX``) **antes** de descargar datos y calcular la matriz
+# MI.  Esto evita evaluar pares inválidos y reduce el coste del KSG.
 constituents, removed = filter_duplicate_issuers(get_sp500_constituents())
 tickers_sp500 = constituents["Symbol"].tolist()
 print(f"Tamaño del universo S&P 500: {len(tickers_sp500)} activos únicos")
@@ -87,10 +115,17 @@ print(f"Sectores GICS presentes: {n_clusters}")
 
 # %%
 # ## Información mutua KSG sobre el universo completo
-# ``cached_ksg_mi_matrix`` persiste la matriz en ``data/pair_trading/mi/ksg/``
-# con un hash determinista de fechas, activos, número de observaciones y
-# contenido de los retornos.  Reejecuciones idénticas recuperan el resultado
-# sin volver a calcular el estimador KSG (O(N²) en el número de activos).
+#
+# ``cached_ksg_mi_matrix`` persiste la matriz en
+# ``data/pair_trading/mi/ksg/`` con un hash determinista de fechas,
+# activos, número de observaciones y contenido de los retornos.
+# Reejecuciones idénticas recuperan el resultado sin volver a
+# calcular el estimador KSG (O(N²) en el número de activos).
+#
+# Cada par ``(i, j)`` se estima dos veces (``mi_xy`` y ``mi_yx``) y
+# se simetriza como la media, mitigando asimetrías numéricas de la
+# búsqueda k-NN.  Series con varianza cero se omiten y la diagonal
+# queda vacía.
 mi_matrix = cached_ksg_mi_matrix(returns_full, k_neighbors=3)
 top_20_pairs = top_pairs(mi_matrix, n=20, issuer_map=issuer_map)
 
@@ -100,6 +135,9 @@ for rank, (t1, t2, val) in enumerate(top_20_pairs, 1):
 
 # %%
 # ## Tabla de pares principales con sector y cluster
+#
+# Cada par lleva el sector GICS de ambos miembros.  Esto permite
+# identificar combinaciones inter-sectoriales o intra-sectoriales.
 top_pairs_df = pd.DataFrame(
     top_20_pairs,
     columns=["ticker_a", "ticker_b", "mi"],
@@ -111,6 +149,14 @@ print(top_pairs_df.to_string(index=False))
 
 # %%
 # ## Clustering jerárquico de Ward con k = número de sectores
+#
+# ``mi_distance`` convierte MI en distancia restando el máximo:
+# $d_{ij} = \max(MI) - MI_{ij}$.  Activos con MI alta quedan
+# cercanos; activos independientes quedan lejos.
+#
+# El método de **Ward** minimiza el incremento de varianza al fusionar
+# clusters.  El número de clusters se fija igual al número de sectores
+# GICS presentes para hacer la evaluación sectorial 1-a-1.
 distance_matrix = mi_distance(mi_matrix)
 cluster_labels, leaf_order = hierarchical_clustering(
     distance_matrix, n_clusters=n_clusters,
@@ -126,6 +172,11 @@ for cid in sorted(clusters.unique()):
 
 # %%
 # ## Evaluación de la calidad sectorial del clustering
+#
+# Mide cuánto se parece el clustering a la partición oficial por
+# sectores GICS.  Las métricas se imprimen primero en formato global
+# y después desglosadas por cluster.  No son una medida absoluta de
+# calidad financiera: evalúan **alineación con la taxonomía GICS**.
 report = evaluate_cluster_sector_alignment(clusters, available_sectors)
 
 print("\nMétricas globales de alineación sectorial:")
@@ -143,6 +194,12 @@ print(report.per_cluster.to_string())
 
 # %%
 # ## Visualización sectorial
+#
+# Tres vistas complementarias:
+# - **Heatmap**: cuántos activos de cada sector caen en cada cluster.
+# - **Composición apilada**: porcentaje del cluster ocupado por cada
+#   sector (útil para comparar clusters de distinto tamaño).
+# - **Resumen**: purity, entropía normalizada y HHI por cluster.
 plot_cluster_sector_heatmap(
     report.contingency,
     title=f"Sectores vs clusters (MI KSG, k = {n_clusters})",
@@ -157,6 +214,12 @@ plot_cluster_sector_summary(report.per_cluster)
 
 # %%
 # ## Matriz MI ordenada por sector (sin etiquetas de ticker)
+#
+# La matriz se reordena agrupando activos por sector y, dentro de cada
+# sector, por cluster.  Se eliminan las etiquetas individuales de
+# ticker (ilegibles con ≈500 activos) y se dibujan líneas gruesas
+# negras en las fronteras entre sectores.  Permite ver si la MI es
+# alta dentro de cada sector y baja entre sectores.
 plot_sector_reordered_matrix(
     mi_matrix,
     sector_labels=available_sectors,
@@ -168,6 +231,12 @@ plot_sector_reordered_matrix(
 
 # %%
 # ## Matriz promedio sector × sector
+#
+# ``sector_average_matrix`` agrega la matriz de activos a una matriz
+# sector × sector usando la media (omitiendo la diagonal dentro del
+# bloque).  Valores altos en la diagonal confirman acoplamiento
+# intra-sectorial; valores altos fuera de la diagonal indican
+# dependencias inter-sectoriales.
 sector_mi = sector_average_matrix(mi_matrix, available_sectors, operation="mean")
 
 fig, ax = plt.subplots(figsize=(10, 8))
@@ -181,6 +250,10 @@ plt.show()
 
 # %%
 # ## Símbolos finales del top 20
+#
+# Lista única de tickers que aparecen en el top-20.  Estos son los
+# candidatos a estudiar en `PairTrading.py` para el análisis del
+# spread y el modelo OU.
 final_symbols = sorted({t1 for t1, _, _ in top_20_pairs}
                        | {t2 for _, t2, _ in top_20_pairs})
 print(final_symbols)

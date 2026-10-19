@@ -55,11 +55,18 @@ KSG_CACHE_VERSION = "v1"
 def get_sp500_constituents() -> pd.DataFrame:
     """Scrapea la tabla completa de constituyentes del S&P 500.
 
+    Descarga ``https://en.wikipedia.org/wiki/List_of_S%26P_500_companies`` y
+    devuelve un ``DataFrame`` con la composición actual del índice.  El nombre
+    del valor (``Security``) se conserva para que ``filter_duplicate_issuers``
+    pueda detectar emisores con varias clases de acción (ej. ``GOOGL``/
+    ``GOOG``).
+
     Returns
     -------
     pd.DataFrame
-        Columnas ``Symbol`` (normalizado para ``yfinance``), ``Security``
-        (nombre del valor según la tabla oficial) y ``GICS Sector``.
+        Columnas ``Symbol`` (normalizado para ``yfinance``: puntos
+        reemplazados por guiones), ``Security`` (nombre del valor) y
+        ``GICS Sector``.
     """
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
     response = requests.get(url, headers=WIKIPEDIA_HEADERS, timeout=15)
@@ -73,7 +80,18 @@ def get_sp500_constituents() -> pd.DataFrame:
 
 
 def _issuer_key(security: str) -> str:
-    """Normaliza el nombre de un valor para identificar emisores duplicados."""
+    """Normaliza el nombre de un valor para identificar emisores duplicados.
+
+    Pasos:
+    - minúsculas;
+    - eliminación de sufijos ``Class A``, ``Class B`` y ``Cl A``/``Cl B``;
+    - eliminación de sufijos corporativos (``Inc``, ``Corp``, ``Co``, etc.);
+    - sustitución de puntuación por espacios;
+    - recorte de espacios.
+
+    El resultado es una clave canónica que agrupa ``GOOGL Class A`` y
+    ``GOOG Class C`` bajo la misma raíz ``alphabet``.
+    """
     if not isinstance(security, str):
         return ""
     name = security.lower()
@@ -96,11 +114,21 @@ def _issuer_key(security: str) -> str:
 def filter_duplicate_issuers(
     constituents: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Filtra emisores con múltiples clases de acciones (ej. GOOGL/GOOG).
+    """Filtra emisores con múltiples clases de acciones (ej. ``GOOGL``/``GOOG``).
 
-    Mantiene una sola fila por emisor utilizando la primera aparición en la
-    tabla oficial (criterio determinista).  Excluye explícitamente pares de
-    emisores conocidos que ``yfinance`` no resuelve con símbolos idénticos.
+    Pasos:
+    1. Añade la columna ``Issuer`` usando ``_issuer_key`` sobre ``Security``.
+    2. Para cada emisor con más de un símbolo, conserva el primero de la
+       tabla oficial del S&P 500 (criterio determinista).
+    3. Devuelve la tabla con los símbolos restantes junto con la columna
+       ``Issuer`` y otra tabla con los símbolos descartados y su
+       representante.
+
+    En el S&P 500 actual (octubre 2026) se descartan:
+
+    - ``GOOG`` (representante ``GOOGL``, Alphabet)
+    - ``FOX``  (representante ``FOXA``, Fox Corporation)
+    - ``NWS``  (representante ``NWSA``, News Corp)
 
     Parameters
     ----------
@@ -110,10 +138,10 @@ def filter_duplicate_issuers(
     Returns
     -------
     tuple[pd.DataFrame, pd.DataFrame]
-        ``kept``: constituyentes filtrados con una fila por emisor y columna
-        extra ``Issuer``.
-        ``removed``: símbolos descartados y su símbolo representante
-        (una fila por símbolo).
+        ``kept``: constituyentes filtrados, una fila por emisor, con la
+        columna extra ``Issuer``.
+        ``removed``: símbolos descartados y su representante (una fila por
+        símbolo).
     """
     if "Security" not in constituents.columns:
         raise ValueError(
@@ -163,15 +191,15 @@ def get_sp500_tickers_by_sector(
         Nombre del sector GICS.  ``"all"`` devuelve todos los tickers sin
         filtrar (útil como universo completo).
     unique_issuers : bool
-        Si ``True``, elimina símbolos duplicados del mismo emisor (ej.
-        ``GOOGL``/``GOOG``).  Cuando se activa, devuelve además una tabla
-        ``DataFrame`` con los símbolos descartados y su representante.
+        Si ``True``, aplica :func:`filter_duplicate_issuers` antes de
+        devolver los tickers.  En este caso la función devuelve también
+        la tabla de símbolos descartados.
 
     Returns
     -------
     list[str] o tuple[list[str], pd.DataFrame]
         Tickers compatibles con ``yfinance``.  Si ``unique_issuers=True``
-        devuelve también la tabla de símbolos descartados.
+        devuelve una tupla ``(tickers, removed)``.
     """
     df = get_sp500_constituents()
 
@@ -200,9 +228,29 @@ def load_log_returns(
 ) -> pd.DataFrame:
     """Descarga precios ``Adj Close`` y devuelve los log-retornos limpios.
 
-    Reutiliza :func:`thesis.market_data.load_multiple_prices` para aprovechar
-    la caché CSV.  Tras alinear fechas, descarta tickers con menos de
-    ``min_valid_obs`` observaciones válidas y elimina filas con ``NaN``.
+    Reutiliza :func:`thesis.market_data.load_multiple_prices` para
+    aprovechar la caché CSV.  El log-retorno es
+    $r_t = \\log(P_t / P_{t-1})$.  Tras alinear fechas descarta tickers
+    con menos de ``min_valid_obs`` observaciones válidas y elimina filas
+    con ``NaN``.
+
+    Parameters
+    ----------
+    tickers : Sequence[str] | str
+        Lista de tickers (o un único ticker) compatible con ``yfinance``.
+    start, end : str
+        Fechas en formato ``"YYYY-MM-DD"``.
+    cache_dir : Path
+        Carpeta donde ``load_multiple_prices`` guarda la caché CSV.
+    refresh : bool
+        Si ``True``, fuerza la descarga aunque exista caché.
+    min_valid_obs : int
+        Mínimo de observaciones válidas para conservar un ticker.
+
+    Returns
+    -------
+    pd.DataFrame
+        Retornos logarítmicos con índice temporal y un ticker por columna.
     """
     if isinstance(tickers, str):
         tickers = [tickers]
@@ -234,17 +282,35 @@ def load_log_returns(
 
 @dataclass(frozen=True)
 class HedgeResult:
-    """Resultado de la regresión OLS log-lineal."""
+    """Resultado de la regresión OLS log-lineal ``log A = alpha + beta log B + epsilon``.
 
-    alpha: float
-    beta: float
-    r_squared: float
-    model: object
+    Attributes
+    ----------
+    alpha : float
+        Intercepto de la regresión.
+    beta : float
+        Coeficiente de hedge ratio.
+    r_squared : float
+        R² de la regresión.
+    model : statsmodels.regression.linear_model.RegressionResultsWrapper
+        Modelo completo para diagnósticos adicionales.
+    """
 
 
 @dataclass(frozen=True)
 class ADFResult:
-    """Resumen del test ADF aplicado al spread."""
+    """Resumen del test Augmented Dickey-Fuller aplicado al spread.
+
+    Attributes
+    ----------
+    statistic : float
+        Estadístico ADF.  Valores muy negativos rechazan la hipótesis nula
+        de raíz unitaria.
+    pvalue : float
+        P-value asociado al estadístico.
+    is_stationary : bool
+        ``True`` si ``pvalue < significance``.
+    """
 
     statistic: float
     pvalue: float
@@ -254,7 +320,22 @@ class ADFResult:
 def compute_hedge_ratio(
     log_a: pd.Series, log_b: pd.Series
 ) -> HedgeResult:
-    """Estima ``log(A) = alpha + beta * log(B) + epsilon`` por OLS."""
+    """Estima ``log(A) = alpha + beta * log(B) + epsilon`` por OLS.
+
+    El residuo de la regresión es el spread cointegrado candidato:
+    $\\varepsilon_t = \\log A_t - \\alpha - \\beta \\log B_t$.
+
+    Parameters
+    ----------
+    log_a, log_b : pd.Series
+        Series de log-precios alineadas por índice.
+
+    Returns
+    -------
+    HedgeResult
+        Estimaciones de ``alpha``, ``beta``, R² y el modelo de
+        ``statsmodels`` subyacente.
+    """
     data = pd.concat([log_a.rename("a"), log_b.rename("b")], axis=1).dropna()
     if data.empty:
         raise ValueError("No hay observaciones comunes para ajustar el hedge.")
@@ -269,7 +350,26 @@ def compute_hedge_ratio(
 
 
 def adf_test(spread: pd.Series, significance: float = 0.05) -> ADFResult:
-    """Test Augmented Dickey-Fuller sobre el spread."""
+    """Test Augmented Dickey-Fuller sobre el spread.
+
+    Contrasta la hipótesis nula de raíz unitaria en la serie
+    $\\Delta y_t = \\alpha + \\beta t + \\gamma y_{t-1} +
+    \\sum_i \\delta_i \\Delta y_{t-i} + \\varepsilon_t$.  Si el p-value
+    cae por debajo de ``significance`` el spread se considera
+    estacionario.
+
+    Parameters
+    ----------
+    spread : pd.Series
+        Serie del spread ``log(A) - (alpha + beta * log(B))``.
+    significance : float
+        Nivel de significancia (por defecto 0.05).
+
+    Returns
+    -------
+    ADFResult
+        Estadístico ADF, p-value y bandera ``is_stationary``.
+    """
     clean = spread.dropna()
     if clean.empty:
         raise ValueError("El spread no contiene observaciones válidas.")
@@ -290,7 +390,19 @@ def extract_and_construct_spread(
     cache_dir: Path = DATA_DIR,
     refresh: bool = False,
 ) -> tuple[pd.Series, float]:
-    """Descarga dos activos, ajusta el hedge ratio y devuelve el spread.
+    """Pipeline completo: descarga, hedge ratio, spread y diagnóstico ADF.
+
+    Pasos:
+    1. Descarga los precios ``Adj Close`` de los dos activos vía
+       :func:`thesis.market_data.load_multiple_prices`.
+    2. Calcula los log-precios $\\log A_t$ y $\\log B_t$.
+    3. Ajusta la OLS ``log A = alpha + beta * log B + epsilon`` y
+       construye el spread residual
+       $\\varepsilon_t = \\log A_t - \\alpha - \\beta \\log B_t$.
+    4. Aplica el test ADF sobre el spread.
+
+    Imprime por consola el hedge ratio, el R², el estadístico ADF y el
+    p-value.  Devuelve el spread y el coeficiente ``beta``.
 
     Returns
     -------
@@ -332,21 +444,51 @@ def extract_and_construct_spread(
 
 @dataclass(frozen=True)
 class OUParameters:
-    """Parámetros continuos del proceso de Ornstein-Uhlenbeck."""
+    """Parámetros continuos del proceso de Ornstein-Uhlenbeck.
 
-    theta: float
-    mu: float
-    sigma: float
-    half_life: float
-    sigma_eq: float
-    r_squared: float
+    Attributes
+    ----------
+    theta : float
+        Velocidad de reversión a la media (rigidez del muelle).
+    mu : float
+        Media de equilibrio del spread.
+    sigma : float
+        Volatilidad instantánea de los shocks.
+    half_life : float
+        Tiempo característico de reversión (en unidades de ``dt``).
+    sigma_eq : float
+        Desviación típica de la distribución estacionaria
+        $\\sigma / \\sqrt{2\\theta}$.
+    r_squared : float
+        R² del AR(1) usado para la calibración.
+    """
 
 
 def fit_ou_process(spread: pd.Series, dt: float = 1.0) -> OUParameters:
     """Ajusta un OU a un spread estacionario mediante AR(1) → OU.
 
-    El modelo discreto ``Z_t = a + b * Z_{t-1} + eps_t`` se traduce a los
-    parámetros continuos ``(theta, mu, sigma)`` asumiendo ``dt`` constante.
+    El modelo discreto ``Z_t = a + b * Z_{t-1} + eps_t`` se traduce a
+    los parámetros continuos ``(theta, mu, sigma)`` asumiendo ``dt``
+    constante:
+
+    - $\\theta = -\\log(b)/\\Delta t$
+    - $\\mu = a / (1 - b)$
+    - $\\sigma = \\sqrt{2\\theta\\,\\mathrm{Var}(\\varepsilon)/(1 - b^2)}$
+    - Vida media: $t_{1/2} = \\log 2 / \\theta$
+    - Desviación de equilibrio: $\\sigma_{eq} = \\sqrt{\\sigma^2/(2\\theta)}$
+
+    Parameters
+    ----------
+    spread : pd.Series
+        Serie del spread estacionario ``Z_t``.
+    dt : float
+        Paso temporal en las mismas unidades que ``half_life``
+        (1.0 para datos diarios).
+
+    Returns
+    -------
+    OUParameters
+        Parámetros continuos del OU ajustados y métricas auxiliares.
     """
     clean = spread.dropna().to_numpy()
     if clean.size < 3:
@@ -391,7 +533,31 @@ def simulate_ou_process(
     T: float,
     dt: float,
 ) -> np.ndarray:
-    """Simula una trayectoria del proceso de Ornstein-Uhlenbeck (Euler-Maruyama)."""
+    """Simula una trayectoria del proceso de Ornstein-Uhlenbeck.
+
+    Discretización Euler-Maruyama:
+
+    $$X_{t+\\Delta t} = X_t + \\theta(\\mu - X_t)\\,\\Delta t
+      + \\sigma\\,\\sqrt{\\Delta t}\\,Z_t,$$
+
+    donde $Z_t \\sim \\mathcal{N}(0, 1)$.
+
+    Parameters
+    ----------
+    theta, mu, sigma : float
+        Parámetros continuos del OU.
+    x0 : float
+        Valor inicial $X_0$.
+    T : float
+        Horizonte total en las mismas unidades que ``dt``.
+    dt : float
+        Paso de discretización.
+
+    Returns
+    -------
+    np.ndarray
+        Trayectoria simulada con ``T/dt`` puntos.
+    """
     n = int(T / dt)
     x = np.zeros(n)
     x[0] = x0
@@ -405,7 +571,32 @@ def simulate_ou_process(
 def simulate_gbm(
     s0: float, mu: float, sigma: float, T: float, dt: float
 ) -> np.ndarray:
-    """Simula un Movimiento Browniano Geométrico en escala lineal."""
+    """Simula un Movimiento Browniano Geométrico en escala lineal.
+
+    $$S_t = S_0 \\exp\\left[\\left(\\mu - \\tfrac{\\sigma^2}{2}\\right) t
+      + \\sigma\\,W_t\\right],$$
+
+    donde $W_t$ es un movimiento Browniano estándar acumulado
+    $\\sum_i \\sqrt{\\Delta t}\\,Z_i$.
+
+    Parameters
+    ----------
+    s0 : float
+        Precio inicial $S_0$.
+    mu : float
+        Drift anual del activo.
+    sigma : float
+        Volatilidad anual del activo.
+    T : float
+        Horizonte total en años.
+    dt : float
+        Paso de discretización en años (1/252 para datos diarios).
+
+    Returns
+    -------
+    np.ndarray
+        Serie de precios simulados con ``T/dt`` puntos.
+    """
     n = int(T / dt)
     t = np.linspace(0.0, T, n)
     w = np.cumsum(np.random.standard_normal(size=n)) * np.sqrt(dt)
@@ -421,7 +612,14 @@ def simulate_gbm(
 def gaussian_mi_matrix(returns: pd.DataFrame) -> pd.DataFrame:
     """Matriz de Información Mutua bajo hipótesis gaussiana.
 
-    Para retornos gaussianos la MI se reduce a ``-1/2 * log(1 - rho^2)``.
+    Para distribuciones gaussianas la MI se reduce a una transformación
+    monótona de la correlación de Pearson:
+
+    $$I(X;Y) = -\\tfrac{1}{2}\\,\\log\\bigl(1-\\rho^2\\bigr).$$
+
+    Por tanto es funcionalmente equivalente a la correlación y no
+    captura dependencias no lineales.  Se incluye por completitud y por
+    compatibilidad con versiones anteriores.
     """
     if returns.empty:
         raise ValueError("El DataFrame de retornos está vacío.")
@@ -434,7 +632,25 @@ def gaussian_mi_matrix(returns: pd.DataFrame) -> pd.DataFrame:
 def ksg_mi_matrix(
     returns: pd.DataFrame, k_neighbors: int = 3, seed: int = SEED
 ) -> pd.DataFrame:
-    """Matriz de Información Mutua con el estimador KSG (k-NN)."""
+    """Matriz de Información Mutua con el estimador KSG (k-NN).
+
+    Para cada par de activos $(X_i, X_j)$ se estiman dos valores
+    $\\widehat{MI}(X_i;X_j)$ y $\\widehat{MI}(X_j;X_i)$ y se devuelve
+    la media para mitigar asimetrías de la búsqueda k-NN.  Series con
+    varianza cero se omiten y la diagonal queda ``NaN``.
+
+    Coste: $\\mathcal{O}(N^2)$ estimaciones de pares.
+
+    Parameters
+    ----------
+    returns : pd.DataFrame
+        Retornos limpios (sin ``NaN``).
+    k_neighbors : int
+        Parámetro ``k`` del estimador (3 por defecto, balance sesgo-
+        varianza).
+    seed : int
+        Semilla aleatoria del estimador (afecta al jittering).
+    """
     if returns is None or returns.empty:
         raise ValueError("El DataFrame de retornos está vacío.")
 
@@ -668,11 +884,20 @@ def cluster_sector_purity(
 ) -> pd.DataFrame:
     """Tabla de contingencia y pureza por clúster.
 
+    La pureza de un cluster ``c`` se define como
+
+    $$\\mathrm{purity}(c) = \\frac{\\max_s\\, n_{c,s}}{n_c},$$
+
+    donde $n_{c,s}$ es el número de activos del sector ``s`` en el
+    cluster ``c``.  Toma valores en $[0, 1]$; cuanto más alto, más
+    homogéneo es el cluster en términos sectoriales.
+
     Returns
     -------
     pd.DataFrame
-        Filas = sectores, columnas = clusters, con una fila extra
-        ``cluster_purity`` que indica la proporción del sector dominante.
+        Filas = sectores, columnas = clusters.  Incluye dos filas
+        adicionales: ``cluster_size`` (número de activos del cluster) y
+        ``cluster_purity`` (pureza del cluster).
     """
     cl, se = align_cluster_sector_labels(cluster_labels, sector_labels)
     contingency = pd.crosstab(se, cl)
@@ -685,7 +910,15 @@ def cluster_sector_purity(
 
 
 def normalized_entropy(series: pd.Series) -> float:
-    """Entropía de una variable categórica normalizada por el log del número de categorías."""
+    """Entropía de Shannon normalizada por $\\log S$, donde $S$ es el
+    número de categorías observadas.
+
+    $$H_c = \\frac{-\\sum_s p(s|c)\\,\\log p(s|c)}{\\log S_c}.$$
+
+    Toma valores en $[0, 1]$.  $H_c = 0$ indica que el cluster contiene
+    un único sector; $H_c = 1$ indica que los sectores están
+    distribuidos uniformemente dentro del cluster.
+    """
     counts = series.value_counts(normalize=True)
     if len(counts) <= 1:
         return 0.0
@@ -694,25 +927,46 @@ def normalized_entropy(series: pd.Series) -> float:
 
 
 def hhi(series: pd.Series) -> float:
-    """Índice Herfindahl-Hirschman de concentración."""
+    """Índice Herfindahl-Hirschman de concentración sectorial.
+
+    $$\\mathrm{HHI}_c = \\sum_s p(s|c)^2.$$
+
+    Toma valores en $[1/S_c, 1]$; cuanto más alto, más concentrado está
+    el cluster en un único sector.  Equivale a una pureza de orden 2.
+    """
     shares = series.value_counts(normalize=True)
     return float(np.sum(shares ** 2))
 
 
 @dataclass(frozen=True)
 class ClusterSectorReport:
-    """Resultados de la evaluación de clusters contra sectores GICS."""
+    """Resultados de la evaluación de clusters contra sectores GICS.
 
-    contingency: pd.DataFrame
-    per_cluster: pd.DataFrame
-    weighted_purity: float
-    normalized_entropy: float
-    mean_hhi: float
-    ari: float
-    ami: float
-    homogeneity: float
-    completeness: float
-    v_measure: float
+    Attributes
+    ----------
+    contingency : pd.DataFrame
+        Tabla sector × cluster con filas extra ``cluster_size`` y
+        ``cluster_purity``.
+    per_cluster : pd.DataFrame
+        Métricas detalladas por cluster (tamaño, sector dominante, purity,
+        entropía normalizada, HHI).
+    weighted_purity : float
+        Pureza global ponderada por el tamaño de cada cluster.
+    normalized_entropy : float
+        Entropía sectorial media (ponderada por tamaño).
+    mean_hhi : float
+        HHI medio (ponderado por tamaño).
+    ari : float
+        Adjusted Rand Index.
+    ami : float
+        Adjusted Mutual Information.
+    homogeneity : float
+        $\\in [0, 1]$.  Cada cluster contiene un único sector.
+    completeness : float
+        $\\in [0, 1]$.  Cada sector queda concentrado en pocos clusters.
+    v_measure : float
+        Media armónica de homogeneity y completeness.
+    """
 
 
 def evaluate_cluster_sector_alignment(
@@ -720,6 +974,18 @@ def evaluate_cluster_sector_alignment(
     sector_labels: pd.Series,
 ) -> ClusterSectorReport:
     """Evalúa qué tan bien los clusters reflejan la estructura sectorial.
+
+    Combina métricas propias (purity, entropía normalizada, HHI) con
+    métricas estándar de clustering (``sklearn.metrics``):
+
+    - **Adjusted Rand Index (ARI)**: similitud entre asignaciones,
+      corregida por azar.  Rango $[-1, 1]$, donde $1$ indica coincidencia
+      perfecta.
+    - **Adjusted Mutual Information (AMI)**: información mutua entre
+      las dos particiones, normalizada por azar.  Rango $[0, 1]$.
+    - **Homogeneity**: cada cluster contiene principalmente un sector.
+    - **Completeness**: cada sector queda concentrado en pocos clusters.
+    - **V-measure**: media armónica de homogeneity y completeness.
 
     Parameters
     ----------
@@ -842,12 +1108,26 @@ def hierarchical_clustering(
 ) -> tuple[np.ndarray, list[int]]:
     """Clustering jerárquico de Ward sobre una matriz de distancias.
 
+    El método de Ward minimiza el incremento de varianza intra-cluster
+    al fusionar pares de clusters; es el más adecuado cuando la
+    distancia cumple la desigualdad triangular (como ``sqrt(1-rho)``
+    o las distancias euclidianas).
+
+    Parameters
+    ----------
+    distance_matrix : np.ndarray
+        Matriz cuadrada simétrica de distancias.
+    n_clusters : int
+        Número de clusters a extraer.
+    method : str
+        Método de linkage (por defecto ``"ward"``).
+
     Returns
     -------
     labels : np.ndarray
-        Etiquetas de clúster (1-indexadas, ``fcluster``).
+        Etiquetas de clúster 1-indexadas (``scipy.cluster.hierarchy.fcluster``).
     order : list[int]
-        Orden óptimo de las hojas (índices ``leaves_list``).
+        Orden óptimo de las hojas del dendrograma (``leaves_list``).
     """
     np.fill_diagonal(distance_matrix, 0.0)
     distance_matrix = np.clip(distance_matrix, 0, None)
@@ -861,7 +1141,12 @@ def hierarchical_clustering(
 def correlation_distance(
     corr: pd.DataFrame, use_sqrt: bool = True
 ) -> np.ndarray:
-    """Convierte una matriz de correlación en distancia para clustering."""
+    """Convierte una matriz de correlación en distancia para clustering.
+
+    Por defecto devuelve ``dist = sqrt(1 - rho)``.  Esta distancia
+    cumple la desigualdad triangular, requisito del método de Ward.
+    Con ``use_sqrt=False`` se devuelve simplemente ``1 - rho``.
+    """
     distance = 1.0 - corr.to_numpy()
     np.fill_diagonal(distance, 0.0)
     distance = np.clip(distance, 0, None)
@@ -875,8 +1160,14 @@ def mi_distance(
 ) -> np.ndarray:
     """Convierte una matriz de Información Mutua en distancia para clustering.
 
-    Si ``fill_value`` es ``None`` se utiliza el máximo valor de la matriz
-    para la diagonal (autodistancia nula tras la transformación).
+    Para activos con MI alta la distancia debe ser pequeña.  Usamos la
+    transformación
+
+    $$d_{ij} = \\max(MI) - MI_{ij},$$
+
+    donde el máximo se calcula sobre los valores válidos.  La diagonal
+    queda a 0 (autodistancia nula).  Si ``fill_value`` es ``None`` se
+    utiliza el máximo de la matriz.
     """
     if fill_value is None:
         fill_value = float(np.nanmax(mi_matrix.to_numpy()))

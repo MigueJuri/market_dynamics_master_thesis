@@ -15,23 +15,37 @@
 # %% [markdown]
 # # Selección de Pares vía Correlación de Pearson
 #
-# La **correlación de Pearson** mide la dependencia lineal entre dos
-# retornos.  Es la métrica más usada para encontrar pares candidatos,
-# aunque sólo captura relaciones estrictamente lineales:
+# ## Definición
 #
-# $$\rho_{X,Y} = \frac{\mathrm{Cov}(X,Y)}{\sigma_X\, \sigma_Y}$$
+# La **correlación de Pearson** entre dos retornos $r_i$ y $r_j$ es:
 #
-# Este notebook replica el flujo del cuaderno de Información Mutua: mismo
-# universo, mismo rango temporal, mismo número de clusters (uno por sector
-# GICS), y la misma evaluación sectorial, para que ambas métricas sean
-# comparables.
+# $$\rho_{ij} = \frac{\mathrm{Cov}(r_i, r_j)}
+#                     {\sigma_i\, \sigma_j}$$
+#
+# Toma valores en $[-1, 1]$:
+# - $\rho \approx 1$: movimientos altamente alineados;
+# - $\rho \approx 0$: ausencia de dependencia lineal;
+# - $\rho \approx -1$: movimientos opuestos.
+#
+# ## Limitaciones
+#
+# Pearson **sólo captura relaciones lineales**.  Dos activos con un
+# acoplamiento monótono no lineal (por ejemplo $r_j = r_i^2$) pueden
+# tener $\rho$ cercano a cero y aun así estar altamente coordinados.
+# Por eso este notebook se complementa con
+# [`1_PairSelectionMutualInformation.py`](./1_PairSelectionMutualInformation.py),
+# que usa Información Mutua KSG para detectar dependencias no lineales.
+#
+# ## Flujo del notebook
 #
 # 1. Universo S&P 500 completo con ``START:END``.
 # 2. Matriz de correlación de Pearson.
-# 3. Top 20 pares por correlación.
-# 4. Clustering jerárquico de Ward con tantos clusters como sectores.
+# 3. Top 20 pares por correlación, filtrando emisores del mismo grupo.
+# 4. Clustering jerárquico de Ward sobre la distancia
+#    $\sqrt{1 - \rho}$.
 # 5. Evaluación de la calidad sectorial del clustering.
-# 6. Visualización de matrices, composición sectorial y animación rolling.
+# 6. Visualización de matrices, composición sectorial y animación
+#    rolling sobre el sub-manifold reducido.
 
 # %%
 import sys
@@ -67,9 +81,11 @@ from thesis.plotting import (
 
 # %%
 # ## Universo, retornos y sector GICS de cada activo
+#
 # ``filter_duplicate_issuers`` elimina una clase de acción por emisor
-# (ej. ``GOOGL``/``GOOG`` o ``FOXA``/``FOX``) antes de descargar datos y
-# calcular la matriz de correlación, evitando evaluar pares inválidos.
+# (ej. ``GOOGL``/``GOOG`` o ``FOXA``/``FOX``) antes de descargar
+# datos y calcular la matriz de correlación, evitando evaluar pares
+# inválidos.
 constituents, removed = filter_duplicate_issuers(get_sp500_constituents())
 tickers_sp500 = constituents["Symbol"].tolist()
 print(f"Tamaño del universo S&P 500: {len(tickers_sp500)} activos únicos")
@@ -90,6 +106,10 @@ print(f"Sectores GICS presentes: {n_clusters}")
 
 # %%
 # ## Correlación de Pearson sobre el universo completo
+#
+# ``pandas.DataFrame.corr`` calcula todas las correlaciones de forma
+# vectorizada.  La diagonal queda implícita en 1; los ``NaN`` se
+# descartan automáticamente par a par.
 corr_matrix = returns_full.corr(method="pearson")
 top_20_pairs = top_pairs(corr_matrix, n=20, issuer_map=issuer_map)
 
@@ -99,6 +119,10 @@ for rank, (t1, t2, val) in enumerate(top_20_pairs, 1):
 
 # %%
 # ## Tabla de pares principales con sector y cluster
+#
+# Cada par lleva el sector GICS de ambos miembros.  Permite distinguir
+# combinaciones intra-sectoriales (Utilities, Energy, ...) de
+# combinaciones inter-sectoriales.
 top_pairs_df = pd.DataFrame(
     top_20_pairs,
     columns=["ticker_a", "ticker_b", "pearson"],
@@ -110,6 +134,13 @@ print(top_pairs_df.to_string(index=False))
 
 # %%
 # ## Clustering jerárquico de Ward con k = número de sectores
+#
+# Para clustering se usa la distancia ``sqrt(1 - rho)`` porque cumple
+# la desigualdad triangular y estabiliza el método de Ward (que asume
+# distancias euclidianas).
+#
+# El número de clusters se fija igual al número de sectores GICS para
+# facilitar la evaluación sectorial 1-a-1.
 distance_pearson = correlation_distance(corr_matrix, use_sqrt=True)
 cluster_labels, leaf_order = hierarchical_clustering(
     distance_pearson, n_clusters=n_clusters,
@@ -125,6 +156,12 @@ for cid in sorted(clusters.unique()):
 
 # %%
 # ## Evaluación de la calidad sectorial del clustering
+#
+# Métricas globales y por cluster (ver ``evaluate_cluster_sector_alignment``
+# para las fórmulas de purity, entropía normalizada, HHI, ARI, AMI,
+# homogeneity, completeness y V-measure).  No miden calidad
+# financiera: miden cuánto se parece el clustering a la partición
+# oficial del S&P 500.
 report = evaluate_cluster_sector_alignment(clusters, available_sectors)
 
 print("\nMétricas globales de alineación sectorial:")
@@ -142,6 +179,12 @@ print(report.per_cluster.to_string())
 
 # %%
 # ## Visualización sectorial
+#
+# Tres vistas complementarias:
+# - **Heatmap**: cuántos activos de cada sector caen en cada cluster.
+# - **Composición apilada**: porcentaje del cluster ocupado por cada
+#   sector.
+# - **Resumen**: purity, entropía normalizada y HHI por cluster.
 plot_cluster_sector_heatmap(
     report.contingency,
     title=f"Sectores vs clusters (Pearson, k = {n_clusters})",
@@ -156,6 +199,12 @@ plot_cluster_sector_summary(report.per_cluster)
 
 # %%
 # ## Matriz de correlación ordenada por sector (sin etiquetas de ticker)
+#
+# La matriz se reordena agrupando activos por sector y, dentro de
+# cada sector, por cluster.  Se eliminan las etiquetas individuales
+# de ticker (ilegibles con ≈500 activos) y se dibujan líneas gruesas
+# negras en las fronteras entre sectores.  Permite ver si la
+# correlación es alta dentro de cada sector y baja entre sectores.
 plot_sector_reordered_matrix(
     corr_matrix,
     sector_labels=available_sectors,
@@ -167,6 +216,10 @@ plot_sector_reordered_matrix(
 
 # %%
 # ## Matriz promedio sector × sector
+#
+# ``sector_average_matrix`` agrega la matriz de correlación de
+# activos a una matriz sector × sector usando la media.  La diagonal
+# mide el acoplamiento intra-sectorial promedio.
 sector_corr = sector_average_matrix(corr_matrix, available_sectors, operation="mean")
 
 fig, ax = plt.subplots(figsize=(10, 8))
@@ -181,6 +234,16 @@ plt.show()
 
 # %%
 # ## Correlación rolling (animación) sobre el sub-manifold reducido
+#
+# Para visualizar la estabilidad temporal de la correlación se calcula
+# una ventana móvil de ``WINDOW_SIZE`` sesiones y se avanza con
+# ``STEP_SIZE`` entre fotogramas:
+#
+# - WINDOW_SIZE = 126 sesiones ≈ 6 meses bursátiles.
+# - STEP_SIZE   = 5 sesiones   ≈ 1 semana.
+#
+# El orden de los activos se fija con el clustering de la ventana
+# completa para que los bloques visuales no salten entre frames.
 surviving_nodes = sorted({t1 for t1, _, _ in top_20_pairs}
                          | {t2 for _, t2, _ in top_20_pairs})
 print(f"\nSub-manifold para animación: {len(surviving_nodes)} activos")
@@ -236,6 +299,10 @@ print(f"GIF guardado en {OUTPUT_FILENAME}")
 
 # %%
 # ## Símbolos finales del top 20 Pearson
+#
+# Lista única de tickers que aparecen en el top-20.  Estos son los
+# candidatos a estudiar en `PairTrading.py` para el análisis del
+# spread y el modelo OU.
 final_symbols = sorted({t1 for t1, _, _ in top_20_pairs}
                        | {t2 for _, t2, _ in top_20_pairs})
 print(final_symbols)
