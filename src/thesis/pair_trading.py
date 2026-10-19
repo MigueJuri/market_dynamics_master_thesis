@@ -9,6 +9,7 @@ descarga cacheada de precios, en ``thesis.timeseries`` para retornos y en
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from io import StringIO
@@ -49,7 +50,8 @@ def get_sp500_constituents() -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        Columnas ``Symbol`` (normalizado para ``yfinance``) y ``GICS Sector``.
+        Columnas ``Symbol`` (normalizado para ``yfinance``), ``Security``
+        (nombre del valor según la tabla oficial) y ``GICS Sector``.
     """
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
     response = requests.get(url, headers=WIKIPEDIA_HEADERS, timeout=15)
@@ -57,12 +59,94 @@ def get_sp500_constituents() -> pd.DataFrame:
         raise ConnectionError(f"HTTP Error: {response.status_code}")
 
     df = pd.read_html(StringIO(response.text))[0]
-    df = df[["Symbol", "GICS Sector"]].copy()
+    df = df[["Symbol", "Security", "GICS Sector"]].copy()
     df["Symbol"] = df["Symbol"].str.replace(".", "-", regex=False)
     return df
 
 
-def get_sp500_tickers_by_sector(target_sector: str = "Energy") -> list[str]:
+def _issuer_key(security: str) -> str:
+    """Normaliza el nombre de un valor para identificar emisores duplicados."""
+    if not isinstance(security, str):
+        return ""
+    name = security.lower()
+    name = re.sub(
+        r"\bclass\s+[a-z]\b|\bcl\s+[a-z]\b",
+        "",
+        name,
+    )
+    name = re.sub(
+        r"\b(inc|corp|corporation|company|co|ltd|plc|sa|ag|n\.v\.|"
+        r"holdings|group|plc|the)\b\.?",
+        "",
+        name,
+    )
+    name = re.sub(r"[^a-z0-9]+", " ", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    return name
+
+
+def filter_duplicate_issuers(
+    constituents: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Filtra emisores con múltiples clases de acciones (ej. GOOGL/GOOG).
+
+    Mantiene una sola fila por emisor utilizando la primera aparición en la
+    tabla oficial (criterio determinista).  Excluye explícitamente pares de
+    emisores conocidos que ``yfinance`` no resuelve con símbolos idénticos.
+
+    Parameters
+    ----------
+    constituents : pd.DataFrame
+        Salida de :func:`get_sp500_constituents`.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame]
+        ``kept``: constituyentes filtrados con una fila por emisor y columna
+        extra ``Issuer``.
+        ``removed``: símbolos descartados y su símbolo representante
+        (una fila por símbolo).
+    """
+    if "Security" not in constituents.columns:
+        raise ValueError(
+            "constituents debe contener la columna 'Security'. "
+            "Usa get_sp500_constituents()."
+        )
+
+    work = constituents.copy()
+    work["Issuer"] = work["Security"].map(_issuer_key)
+
+    counts = work["Issuer"].value_counts()
+    multi_issuer = counts[counts > 1].index
+    if len(multi_issuer) == 0:
+        work["Issuer"] = work["Issuer"].fillna("")
+        removed = pd.DataFrame(columns=["Symbol", "Issuer", "Representative"])
+        return work, removed
+
+    first_per_issuer = (
+        work[work["Issuer"].isin(multi_issuer)]
+        .drop_duplicates(subset="Issuer", keep="first")
+    )
+    representative = first_per_issuer.set_index("Issuer")["Symbol"].to_dict()
+    duplicates = work[
+        work["Issuer"].isin(multi_issuer)
+        & ~work["Symbol"].isin(representative.values())
+    ].copy()
+    duplicates["Representative"] = duplicates["Issuer"].map(representative)
+    removed = (
+        duplicates[["Symbol", "Issuer", "Representative"]]
+        .reset_index(drop=True)
+    )
+
+    keepers_mask = ~work["Symbol"].isin(removed["Symbol"])
+    kept = work.loc[keepers_mask].reset_index(drop=True)
+    return kept, removed
+
+
+def get_sp500_tickers_by_sector(
+    target_sector: str = "Energy",
+    unique_issuers: bool = False,
+) -> tuple[list[str], pd.DataFrame] | list[str]:
     """Scrapea los constituyentes del S&P 500 y los filtra por sector GICS.
 
     Parameters
@@ -70,24 +154,32 @@ def get_sp500_tickers_by_sector(target_sector: str = "Energy") -> list[str]:
     target_sector : str
         Nombre del sector GICS.  ``"all"`` devuelve todos los tickers sin
         filtrar (útil como universo completo).
+    unique_issuers : bool
+        Si ``True``, elimina símbolos duplicados del mismo emisor (ej.
+        ``GOOGL``/``GOOG``).  Cuando se activa, devuelve además una tabla
+        ``DataFrame`` con los símbolos descartados y su representante.
 
     Returns
     -------
-    list[str]
-        Tickers compatibles con ``yfinance``.
+    list[str] o tuple[list[str], pd.DataFrame]
+        Tickers compatibles con ``yfinance``.  Si ``unique_issuers=True``
+        devuelve también la tabla de símbolos descartados.
     """
     df = get_sp500_constituents()
 
-    if target_sector.lower() == "all":
-        return df["Symbol"].tolist()
+    if target_sector.lower() != "all":
+        available = df["GICS Sector"].unique()
+        if target_sector not in available:
+            raise ValueError(
+                f"Sector '{target_sector}' no encontrado. Sectores válidos: {available}"
+            )
+        df = df.loc[df["GICS Sector"] == target_sector].copy()
 
-    available = df["GICS Sector"].unique()
-    if target_sector not in available:
-        raise ValueError(
-            f"Sector '{target_sector}' no encontrado. Sectores válidos: {available}"
-        )
+    if unique_issuers:
+        kept, removed = filter_duplicate_issuers(df)
+        return kept["Symbol"].tolist(), removed
 
-    return df.loc[df["GICS Sector"] == target_sector, "Symbol"].tolist()
+    return df["Symbol"].tolist()
 
 
 def load_log_returns(
@@ -368,16 +460,40 @@ def ksg_mi_matrix(
 
 
 def top_pairs(
-    matrix: pd.DataFrame, n: int = 20, ascending: bool = False
+    matrix: pd.DataFrame,
+    n: int = 20,
+    ascending: bool = False,
+    issuer_map: pd.Series | None = None,
 ) -> list[tuple[str, str, float]]:
-    """Devuelve las ``n`` parejas más (o menos) acopladas de una matriz."""
+    """Devuelve las ``n`` parejas más (o menos) acopladas de una matriz.
+
+    Parameters
+    ----------
+    matrix : pd.DataFrame
+        Matriz cuadrada con tickers en índice y columnas.
+    n : int
+        Número de parejas a devolver.
+    ascending : bool
+        Si ``True`` devuelve los pares con valores más bajos.
+    issuer_map : pd.Series, opcional
+        Mapa ``ticker → emisor``.  Cuando se proporciona, se descartan
+        parejas formadas por el mismo emisor (ej. ``GOOGL``/``GOOG``).
+    """
     pairs: list[tuple[str, str, float]] = []
     cols = matrix.columns
+    issuers = issuer_map if issuer_map is None else issuer_map.reindex(cols)
     for i in range(len(matrix)):
         for j in range(i + 1, len(matrix)):
             val = matrix.iloc[i, j]
-            if not np.isnan(val):
-                pairs.append((cols[i], cols[j], float(val)))
+            if np.isnan(val):
+                continue
+            if issuers is not None:
+                a_issuer = issuers.iloc[i]
+                b_issuer = issuers.iloc[j]
+                if (pd.notna(a_issuer) and pd.notna(b_issuer)
+                        and a_issuer == b_issuer):
+                    continue
+            pairs.append((cols[i], cols[j], float(val)))
     pairs.sort(key=lambda t: t[2], reverse=not ascending)
     return pairs[:n]
 

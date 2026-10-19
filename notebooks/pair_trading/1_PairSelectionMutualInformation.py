@@ -46,8 +46,8 @@ import pandas as pd
 from thesis.config import DATA_DIR, END, START
 from thesis.pair_trading import (
     evaluate_cluster_sector_alignment,
+    filter_duplicate_issuers,
     get_sp500_constituents,
-    get_sp500_tickers_by_sector,
     hierarchical_clustering,
     ksg_mi_matrix,
     load_log_returns,
@@ -64,12 +64,18 @@ from thesis.plotting import (
 
 # %%
 # ## Universo, retornos y sector GICS de cada activo
-tickers_sp500 = get_sp500_tickers_by_sector("all")
-print(f"Tamaño del universo S&P 500: {len(tickers_sp500)} activos")
+# ``filter_duplicate_issuers`` elimina una clase de acción por emisor
+# (ej. ``GOOGL``/``GOOG`` o ``FOXA``/``FOX``) antes de descargar datos y
+# calcular la matriz MI, evitando evaluar pares inválidos.
+constituents, removed = filter_duplicate_issuers(get_sp500_constituents())
+tickers_sp500 = constituents["Symbol"].tolist()
+print(f"Tamaño del universo S&P 500: {len(tickers_sp500)} activos únicos")
+if not removed.empty:
+    print("Símbolos descartados (mismo emisor que otro ya presente):")
+    print(removed.to_string(index=False))
 
-constituents = get_sp500_constituents()
-constituents = constituents[constituents["Symbol"].isin(tickers_sp500)]
 sector_map = constituents.set_index("Symbol")["GICS Sector"]
+issuer_map = constituents.set_index("Symbol")["Issuer"]
 
 returns_full = load_log_returns(tickers_sp500, START, END, DATA_DIR)
 print(f"Retornos cargados: {returns_full.shape[0]} sesiones × {returns_full.shape[1]} activos")
@@ -82,7 +88,7 @@ print(f"Sectores GICS presentes: {n_clusters}")
 # %%
 # ## Información mutua KSG sobre el universo completo
 mi_matrix = ksg_mi_matrix(returns_full, k_neighbors=3)
-top_20_pairs = top_pairs(mi_matrix, n=20)
+top_20_pairs = top_pairs(mi_matrix, n=20, issuer_map=issuer_map)
 
 print("\nTop 20 pares por Información Mutua KSG:")
 for rank, (t1, t2, val) in enumerate(top_20_pairs, 1):
