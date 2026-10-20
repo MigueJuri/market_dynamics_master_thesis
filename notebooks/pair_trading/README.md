@@ -11,7 +11,7 @@ proceso de Ornstein-Uhlenbeck.
 |---|---|
 | [`1_PairSelectionMutualInformation.py`](./1_PairSelectionMutualInformation.py) | Selección de pares mediante Información Mutua estimada con el método KSG (k-NN). |
 | [`2_PairSelectionPearson.py`](./2_PairSelectionPearson.py) | Selección de pares mediante correlación de Pearson, con animación de la correlación *rolling*. |
-| [`PairTrading.py`](./PairTrading.py) | Construcción del spread y ajuste del modelo OU para un par concreto. |
+| [`PairTrading.py`](./PairTrading.py) | Construcción del spread, ajuste del modelo OU y las tres gráficas del par: spread, precios y vista conjunta con subplots. |
 | [`OUProcess.py`](./OUProcess.py) | Simulación de un proceso OU y de dos activos GBM cuyo spread coincide con la trayectoria simulada. |
 
 Toda la lógica común (descarga de precios, log-retornos, scraping del
@@ -23,8 +23,8 @@ cálculo de métricas sectoriales, simulaciones OU y GBM) vive en
 
 1. `OUProcess.py` (sólo requiere `simulate_ou_process`, `simulate_gbm`).
 2. `PairTrading.py` (depende de `extract_and_construct_spread`,
-   `fit_ou_process` y de `plotting.plot_ou_process` /
-   `plot_pair_prices`).
+   `fit_ou_process` y de `thesis.plotting` para las tres figuras:
+   `plot_spread`, `plot_pair_prices` y `plot_pair_overview`).
 3. `1_PairSelectionMutualInformation.py` y/o
    `2_PairSelectionPearson.py`.  Ambos comparten la misma fase de
    preparación (universo, retornos, sectores) pero luego divergen en

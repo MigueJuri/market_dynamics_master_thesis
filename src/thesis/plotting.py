@@ -534,48 +534,68 @@ def plot_sector_reordered_matrix(
 # =============================================================================
 
 
-def plot_ou_process(
+def plot_spread(
     spread: pd.Series,
-    ou_params,
-    figsize: Tuple[float, float] = (14.0, 7.0),
+    ou_params=None,
+    figsize: tuple[float, float] = (12.0, 5.0),
+    title: str = "Spread del par",
 ) -> None:
-    """Spread con bandas de equilibrio ``±k·sigma_eq`` del proceso OU.
+    """Spread con la media de equilibrio y bandas ``±k·sigma_eq`` del OU.
+
+    Si ``ou_params`` es ``None`` se dibuja únicamente la serie y su media
+    muestral.  Si se proporciona (salida de
+    :func:`thesis.pair_trading.fit_ou_process`) se añaden las bandas de
+    equilibrio ``±1σ``, ``±2σ`` y ``±3σ``.
 
     Parameters
     ----------
     spread : pd.Series
         Serie del spread estacionario ``Z_t``.
-    ou_params : thesis.pair_trading.OUParameters
-        Salida de :func:`thesis.pair_trading.fit_ou_process`.
+    ou_params : thesis.pair_trading.OUParameters, opcional
+        Parámetros del OU ajustados al spread.
+    figsize : tuple
+        Tamaño de la figura.
+    title : str
+        Título de la gráfica.
     """
-    mu = ou_params.mu
-    sigma_eq = ou_params.sigma_eq
-    half_life = ou_params.half_life
+    if spread.empty:
+        print("El spread está vacío: no hay nada que graficar.")
+        return
 
-    fig, ax = plt.subplots(figsize=figsize)
+    _, ax = plt.subplots(figsize=figsize)
 
     ax.plot(spread.index, spread.values, color="darkblue",
-            linewidth=1.5, label="Spread (Z_t)")
-    ax.axhline(mu, color="black", linestyle="-", linewidth=2,
-               label=f"Equilibrio (μ = {mu:.4f})")
+            linewidth=1.5, label="Spread (Z$_t$)")
 
-    bands = (("±1σ", sigma_eq, "green", 0.20),
-             ("±2σ", 2 * sigma_eq, "orange", 0.15),
-             ("±3σ", 3 * sigma_eq, "red", 0.10))
-    for label, width, color, alpha in bands:
-        ax.fill_between(spread.index, mu - width, mu + width,
-                        color=color, alpha=alpha, label=f"{label} (±{width:.4f})")
-        ax.axhline(mu + width, color=color, linestyle="--",
-                   linewidth=1, alpha=0.7)
-        ax.axhline(mu - width, color=color, linestyle="--",
-                   linewidth=1, alpha=0.7)
+    if ou_params is None:
+        mu = float(spread.mean())
+        ax.axhline(mu, color="black", linewidth=1.5,
+                   label=f"Media muestral ({mu:.4f})")
+        subtitle = ""
+    else:
+        mu = ou_params.mu
+        sigma_eq = ou_params.sigma_eq
+        ax.axhline(mu, color="black", linewidth=2,
+                   label=f"Equilibrio (μ = {mu:.4f})")
+        for width, color, alpha in (
+            (sigma_eq, "green", 0.20),
+            (2 * sigma_eq, "orange", 0.15),
+            (3 * sigma_eq, "red", 0.10),
+        ):
+            ax.fill_between(spread.index, mu - width, mu + width,
+                            color=color, alpha=alpha)
+            ax.axhline(mu + width, color=color, linestyle="--",
+                       linewidth=1, alpha=0.7)
+            ax.axhline(mu - width, color=color, linestyle="--",
+                       linewidth=1, alpha=0.7)
+        subtitle = (f"bandas ±1/2/3 σ$_{{eq}}$ = "
+                    f"{sigma_eq:.4f} | vida media "
+                    f"{ou_params.half_life:.1f} sesiones")
 
     ax.set_xlabel("Fecha")
     ax.set_ylabel("Spread")
-    ax.set_title(
-        f"Proceso de Ornstein-Uhlenbeck\n(Half-Life: {half_life:.2f} sesiones)",
-        fontweight="bold",
-    )
+    ax.set_title(f"{title}\n{subtitle}" if subtitle else title,
+                 fontweight="bold")
     ax.legend(loc="best")
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
@@ -586,26 +606,122 @@ def plot_pair_prices(
     prices: pd.DataFrame,
     ticker_a: str,
     ticker_b: str,
-    figsize: Tuple[float, float] = (14.0, 9.0),
+    figsize: tuple[float, float] = (12.0, 5.0),
+    title: str = "Precios del par",
+    log_scale: bool = False,
 ) -> None:
-    """Compara precios crudos y normalizados de un par de activos."""
+    """Precios ajustados de los dos activos del par en un único eje.
+
+    Parameters
+    ----------
+    prices : pd.DataFrame
+        Frame con una columna por ticker.
+    ticker_a, ticker_b : str
+        Tickers a graficar (deben ser columnas de ``prices``).
+    figsize : tuple
+        Tamaño de la figura.
+    title : str
+        Título de la gráfica.
+    log_scale : bool
+        Si ``True`` usa escala logarítmica en el eje Y.
+    """
     if prices.empty:
         print("No hay precios para graficar. Verifica los tickers o el rango.")
         return
 
-    fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
+    _, ax = plt.subplots(figsize=figsize)
+    ax.plot(prices.index, prices[ticker_a], linewidth=1.6,
+            label=ticker_a)
+    ax.plot(prices.index, prices[ticker_b], linewidth=1.6,
+            label=ticker_b)
 
-    prices[[ticker_a, ticker_b]].plot(ax=axes[0], linewidth=1.6)
-    axes[0].set_title(f"Precios ajustados: {ticker_a} vs {ticker_b}")
-    axes[0].set_ylabel("Precio (USD)")
-    axes[0].grid(alpha=0.3)
+    if log_scale:
+        ax.set_yscale("log")
+        ax.set_ylabel("Precio (USD, escala log)")
+    else:
+        ax.set_ylabel("Precio (USD)")
 
-    normalized = prices[[ticker_a, ticker_b]] / prices.iloc[0]
-    normalized.plot(ax=axes[1], linewidth=1.6)
-    axes[1].set_title("Precios normalizados (Base = 1 al inicio)")
-    axes[1].set_ylabel("Precio normalizado")
+    ax.set_xlabel("Fecha")
+    ax.set_title(title, fontweight="bold")
+    ax.legend(loc="best")
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_pair_overview(
+    prices: pd.DataFrame,
+    spread: pd.Series,
+    ticker_a: str,
+    ticker_b: str,
+    ou_params=None,
+    figsize: tuple[float, float] = (12.0, 8.0),
+    log_scale: bool = True,
+) -> None:
+    """Vista conjunta del par: precios arriba, spread abajo.
+
+    Ambos subplots comparten el eje temporal, de modo que se pueden
+    relacionar las divergencias de precio con los movimientos del
+    spread.
+
+    Parameters
+    ----------
+    prices : pd.DataFrame
+        Frame con una columna por ticker.
+    spread : pd.Series
+        Spread estacionario del par.
+    ticker_a, ticker_b : str
+        Tickers a graficar.
+    ou_params : thesis.pair_trading.OUParameters, opcional
+        Parámetros del OU; si se pasan, el subplot inferior incluye las
+        bandas de equilibrio.
+    figsize : tuple
+        Tamaño de la figura.
+    log_scale : bool
+        Si ``True`` (por defecto) usa escala logarítmica en el subplot
+        de precios.
+    """
+    if prices.empty or spread.empty:
+        print("Faltan datos (precios o spread) para la vista conjunta.")
+        return
+
+    fig, axes = plt.subplots(
+        2, 1, figsize=figsize, sharex=True,
+        gridspec_kw={"height_ratios": [2, 1]},
+    )
+
+    axes[0].plot(prices.index, prices[ticker_a], linewidth=1.5,
+                 label=ticker_a)
+    axes[0].plot(prices.index, prices[ticker_b], linewidth=1.5,
+                 label=ticker_b)
+    axes[0].set_ylabel("Precio (USD, escala log)" if log_scale
+                       else "Precio (USD)")
+    axes[0].set_title(f"{ticker_a} vs {ticker_b}", fontweight="bold")
+    axes[0].legend(loc="best")
+    axes[0].grid(True, alpha=0.3)
+    if log_scale:
+        axes[0].set_yscale("log")
+
+    axes[1].plot(spread.index, spread.values, color="darkblue",
+                 linewidth=1.3, label="Spread (Z$_t$)")
+    if ou_params is not None:
+        mu = ou_params.mu
+        axes[1].axhline(mu, color="black", linewidth=1.5,
+                        label=f"Equilibrio (μ = {mu:.4f})")
+        for width, color, alpha in (
+            (ou_params.sigma_eq, "green", 0.20),
+            (2 * ou_params.sigma_eq, "orange", 0.15),
+        ):
+            axes[1].fill_between(spread.index, mu - width, mu + width,
+                                 color=color, alpha=alpha)
+    else:
+        axes[1].axhline(spread.mean(), color="black", linewidth=1.5,
+                        linestyle="--", label="Media muestral")
+    axes[1].set_ylabel("Spread")
     axes[1].set_xlabel("Fecha")
-    axes[1].grid(alpha=0.3)
+    axes[1].legend(loc="best")
+    axes[1].grid(True, alpha=0.3)
 
+    fig.suptitle("Par y spread", fontweight="bold")
     plt.tight_layout()
     plt.show()

@@ -44,8 +44,7 @@
 # 3. Construir el spread residual y aplicar el test ADF para confirmar
 #    estacionariedad.
 # 4. Ajustar el modelo OU por máxima verosimilitud (vía AR(1)).
-# 5. Visualizar el spread con sus bandas de equilibrio.
-# 6. Comparar visualmente los precios del par (crudos y normalizados).
+# 5. Graficar el spread, los precios y una vista conjunta con subplots.
 
 # %% [markdown]
 # ## Hedge Ratio ($\beta$)
@@ -81,7 +80,7 @@ from thesis.pair_trading import (
     extract_and_construct_spread,
     fit_ou_process,
 )
-from thesis.plotting import plot_ou_process, plot_pair_prices
+from thesis.plotting import plot_pair_overview, plot_pair_prices, plot_spread
 
 # %%
 # ## Selección del par y construcción del spread
@@ -89,9 +88,9 @@ from thesis.plotting import plot_ou_process, plot_pair_prices
 # ``extract_and_construct_spread`` descarga ambos activos con la
 # caché CSV de ``market_data``, aplica log-precios, ajusta la OLS,
 # construye el spread y aplica el test ADF, imprimiendo un resumen.
-TICKER_A = "INVH"
-TICKER_B = "WBD"
-START_DATE = "2023-01-01"
+TICKER_A = "NSC"
+TICKER_B = "UNP"
+START_DATE = "1993-01-01"
 END_DATE = "2026-01-01"
 
 spread_series, hedge_ratio = extract_and_construct_spread(
@@ -144,24 +143,51 @@ z_score_t = (spread_series.iloc[-1] - ou_params.mu) / ou_params.sigma_eq
 print(f"Z-score actual:          {z_score_t:+.4f}")
 
 # %%
-# ## Visualización del proceso OU
+# ## Los precios del par
 #
-# ``plot_ou_process`` dibuja el spread junto con bandas
-# $\mu \pm k\,\sigma_{eq}$ para $k \in \{1, 2, 3\}$, donde
-# $\sigma_{eq} = \sqrt{\sigma^2 / (2\theta)}$ es la **desviación de
-# equilibrio**.  Un valor $|z|>2$ señala una oportunidad teórica de
-# arbitraje (entrada) si el modelo es válido.
-plot_ou_process(spread_series, ou_params)
-
-# %%
-# ## Precios del par (crudos y normalizados)
-#
-# Para entender visualmente el par se grafican los precios crudos
-# (escala original) y los precios normalizados a 1 al inicio de la
-# ventana.  Si ambos activos siguen una trayectoria similar, la
-# línea normalizada diverge menos que la cruda.
+# Descargamos los precios ajustados una sola vez y los reutilizamos en
+# las dos gráficas siguientes.
 prices = load_multiple_prices(
     [TICKER_A, TICKER_B], START_DATE, END_DATE, DATA_DIR,
 ).dropna()
 
-plot_pair_prices(prices, TICKER_A, TICKER_B)
+# %%
+# ## 1. Spread con bandas de equilibrio del OU
+#
+# La banda de equilibrio se define como
+# $\sigma_{eq} = \sqrt{\sigma^2 / (2\theta)}$.  Un spread fuera de
+# $\pm 2\sigma_{eq}$ es una señal teórica de entrada; dentro de
+# $\pm\sigma_{eq}$ sugiere cierre de posición.
+plot_spread(
+    spread_series,
+    ou_params,
+    title=f"Spread {TICKER_A}–{TICKER_B} (hedge ratio β = {hedge_ratio:.3f})",
+)
+
+# %%
+# ## 2. Precios del par
+#
+# Escala logarítmica para comparar activos con niveles de precio muy
+# distintos.
+plot_pair_prices(
+    prices,
+    TICKER_A,
+    TICKER_B,
+    title=f"Precios ajustados: {TICKER_A} vs {TICKER_B}",
+    log_scale=True,
+)
+
+# %%
+# ## 3. Vista conjunta (subplots)
+#
+# Precios arriba y spread abajo, compartiendo el eje temporal.  Permite
+# verificar visualmente que las divergencias de precio se compensan en
+# el spread gracias al hedge ratio.
+plot_pair_overview(
+    prices,
+    spread_series,
+    TICKER_A,
+    TICKER_B,
+    ou_params,
+    log_scale=True,
+)
