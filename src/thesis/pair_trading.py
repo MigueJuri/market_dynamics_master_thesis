@@ -980,6 +980,17 @@ class ClusterSectorReport:
         Media armónica de homogeneity y completeness.
     """
 
+    contingency: pd.DataFrame
+    per_cluster: pd.DataFrame
+    weighted_purity: float
+    normalized_entropy: float
+    mean_hhi: float
+    ari: float
+    ami: float
+    homogeneity: float
+    completeness: float
+    v_measure: float
+
 
 def evaluate_cluster_sector_alignment(
     cluster_labels: pd.Series,
