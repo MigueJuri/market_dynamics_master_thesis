@@ -58,11 +58,14 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from matplotlib import animation
 
 from thesis.config import DATA_DIR, END, START
 from thesis.pair_trading import (
+    adf_test,
+    compute_hedge_ratio,
     correlation_distance,
     evaluate_cluster_sector_alignment,
     filter_duplicate_issuers,
@@ -118,19 +121,73 @@ for rank, (t1, t2, val) in enumerate(top_20_pairs, 1):
     print(f"{rank:>3}. {t1} - {t2} : {val:.4f}")
 
 # %%
-# ## Tabla de pares principales con sector y cluster
+# ## Tabla de pares principales con sector, cluster y test de ADF
 #
 # Cada par lleva el sector GICS de ambos miembros.  Permite distinguir
 # combinaciones intra-sectoriales (Utilities, Energy, ...) de
 # combinaciones inter-sectoriales.
+#
+# Para cada par se reconstruyen los log-precios a partir de los
+# retornos logarítmicos ya descargados (suma acumulada) y se estima el
+# hedge ratio por OLS de
+# $\log A_t = \alpha + \beta \log B_t + \varepsilon_t$.  El spread
+# resultante $\varepsilon_t$ es la serie sobre la que se aplica el test
+# Augmented Dickey-Fuller:
+#
+# - ``estadistico_adf``: valores muy negativos rechazan la raíz unitaria;
+# - ``p_valor_adf``: por debajo de 0.05 el spread se considera
+#   estacionario;
+# - ``estacionario``: bandera booleana con ese mismo criterio.
+#
+# El objetivo del estadístico es el spread, no la correlación: dos
+# activos muy correlacionados pueden tener un spread no estacionario.
+SIGNIFICANCIO_ADF = 0.05
+
 top_pairs_df = pd.DataFrame(
     top_20_pairs,
-    columns=["ticker_a", "ticker_b", "pearson"],
+    columns=["ticker_a", "ticker_b", "correlacion_pearson"],
 )
 top_pairs_df["sector_a"] = top_pairs_df["ticker_a"].map(available_sectors)
 top_pairs_df["sector_b"] = top_pairs_df["ticker_b"].map(available_sectors)
-print("\nTop 20 pares con sector:")
+
+
+def adf_para_par(ticker_a, ticker_b):
+    """Calcula el estadístico y el p-value del ADF sobre el spread del par.
+
+    Devuelve ``(np.nan, np.nan)`` si faltan datos o el spread no es
+    calculable, para no interrumpir la tabla completa.
+    """
+    retornos = returns_full[[ticker_a, ticker_b]].dropna()
+    if len(retornos) < 10:
+        return np.nan, np.nan
+    # El log-precio es la suma acumulada de los log-retornos (salvo una
+    # constante aditiva por activo, que el propio OLS absorbe en alpha).
+    log_precios = retornos.cumsum()
+    try:
+        hedge = compute_hedge_ratio(log_precios[ticker_a], log_precios[ticker_b])
+        spread = log_precios[ticker_a] - (
+            hedge.alpha + hedge.beta * log_precios[ticker_b]
+        )
+        adf = adf_test(spread, significance=SIGNIFICANCIO_ADF)
+    except (ValueError, np.linalg.LinAlgError):
+        return np.nan, np.nan
+    return adf.statistic, adf.pvalue
+
+
+adf_stats = [
+    adf_para_par(row.ticker_a, row.ticker_b)
+    for row in top_pairs_df.itertuples(index=False)
+]
+top_pairs_df["estadistico_adf"] = [s for s, _ in adf_stats]
+top_pairs_df["p_valor_adf"] = [p for _, p in adf_stats]
+top_pairs_df["estacionario"] = top_pairs_df["p_valor_adf"] < SIGNIFICANCIO_ADF
+
+print("\nTop 20 pares con sector y diagnóstico ADF del spread:")
 print(top_pairs_df.to_string(index=False))
+print(
+    f"\nSpread estacionario al {SIGNIFICANCIO_ADF:.0%} en "
+    f"{int(top_pairs_df['estacionario'].sum())} de {len(top_pairs_df)} pares."
+)
 
 # %%
 # ## Clustering jerárquico de Ward con k = número de sectores
@@ -306,3 +363,4 @@ print(f"GIF guardado en {OUTPUT_FILENAME}")
 final_symbols = sorted({t1 for t1, _, _ in top_20_pairs}
                        | {t2 for _, t2, _ in top_20_pairs})
 print(final_symbols)
+# %%
