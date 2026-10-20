@@ -468,6 +468,13 @@ class OUParameters:
         R² del AR(1) usado para la calibración.
     """
 
+    theta: float
+    mu: float
+    sigma: float
+    half_life: float
+    sigma_eq: float
+    r_squared: float
+
 
 def fit_ou_process(spread: pd.Series, dt: float = 1.0) -> OUParameters:
     """Ajusta un OU a un spread estacionario mediante AR(1) → OU.
