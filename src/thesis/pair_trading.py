@@ -296,6 +296,11 @@ class HedgeResult:
         Modelo completo para diagnósticos adicionales.
     """
 
+    alpha: float
+    beta: float
+    r_squared: float
+    model: object
+
 
 @dataclass(frozen=True)
 class ADFResult:
