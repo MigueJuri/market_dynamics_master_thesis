@@ -356,6 +356,45 @@ def plot_cross_sectional_curves(
 # =============================================================================
 
 
+def plot_sector_average_heatmap(
+    matrix: pd.DataFrame,
+    cmap: str = "viridis",
+    figsize: tuple[float, float] = (10, 8),
+    title: str = "Matriz promedio sector x sector",
+    cbar_label: str = "Valor medio",
+    xlabel: str = "Sector GICS",
+    ylabel: str = "Sector GICS",
+) -> Optional[plt.Figure]:
+    """Heatmap de una matriz sector x sector con escala medida.
+
+    Comparte la política de color de :func:`plot_sector_reordered_matrix`:
+    la paleta se recibe como parámetro y los límites salen de los valores
+    realmente presentes en la matriz.  Así una correlación de Pearson y una
+    información mutua se dibujan con la misma paleta y el mismo criterio de
+    intensidad, sin transformar los datos ni sus unidades.
+    """
+    valores = matrix.to_numpy(dtype=float)
+    finitos = valores[np.isfinite(valores)]
+    if finitos.size == 0:
+        print("La matriz no contiene valores finitos.")
+        return None
+
+    fig, ax = plt.subplots(figsize=figsize)
+    im = ax.imshow(
+        matrix, cmap=cmap, interpolation="nearest",
+        vmin=float(finitos.min()), vmax=float(finitos.max()),
+    )
+    ax.set_xticks(range(len(matrix.columns)), matrix.columns,
+                  rotation=45, ha="right")
+    ax.set_yticks(range(len(matrix.index)), matrix.index)
+    ax.set_title(title, fontweight="bold")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    fig.colorbar(im, ax=ax, label=cbar_label)
+    plt.tight_layout()
+    plt.show()
+    return fig
+
 def plot_cluster_sector_heatmap(
     contingency: pd.DataFrame,
     figsize: Tuple[float, float] = (10, 7),
@@ -464,69 +503,159 @@ def plot_cluster_sector_summary(
 
 def plot_sector_reordered_matrix(
     matrix: pd.DataFrame,
-    sector_labels: pd.Series,
-    cluster_labels: Optional[pd.Series] = None,
-    cmap: str = "inferno",
-    figsize: Tuple[float, float] = (10, 9),
-    title: str = "Matriz ordenada por sector",
+    sector_labels: pd.Series | None = None,
+    cluster_labels: pd.Series | None = None,
+    cmap: str = "viridis",
+    figsize: tuple[float, float] = (10, 9),
+    title: str = "Matriz ordenada por cluster",
     cbar_label: str = "Valor",
-) -> None:
-    """Muestra la matriz con bandas sectoriales y sin etiquetas de ticker.
+separator_color: str = "white",
+    sector_labels_visible: bool = False,
+    cluster_labels_visible: bool = True,
+    xlabel: str = "Clusters",
+) -> plt.Figure | None:
+    """Muestra la matriz reordenada por clúster y sin etiquetas de ticker.
 
-    Si se proporciona ``cluster_labels``, también dibuja separadores entre
-    clusters dentro de cada sector.
+    El orden es global por clúster, no «sector y dentro del sector»: así
+    los bloques del heatmap son exactamente los clusters que evalúa el
+    análisis sectorial.  Los separadores dibujados son únicamente los
+    cambios de clúster; no se marcan los límites sectoriales, que en un
+    mapa de calor denso sólo añaden ruido.
+
+    Bajo cada bloque se imprime su número, centrado, de modo que se sabe a
+    qué cluster corresponde cada zona.  La numeración es la posición del
+    bloque de izquierda a derecha y no el identificador interno del
+    clustering, para que la lectura sea inmediata.
+
+    La escala de color se fija con los valores **medidos** en la matriz
+    (``vmin``/``vmax`` reales, ignorando la diagonal ``NaN``), no con un
+    rango teórico.  Esto permite comparar visualmente dos métricas
+    distintas —correlación de Pearson e información mutua— con la misma
+    paleta y el mismo criterio de intensidad, sin transformar los datos:
+    cada barra sigue labeling sus unidades reales.  Un mismo color
+    significa "intensidad equivalente dentro de cada métrica", no el mismo
+    valor numérico, porque Pearson e MI tienen unidades distintas.
+
+    Parameters
+    ----------
+    matrix : pd.DataFrame
+        Matriz cuadrada con tickers en índice y columnas.  Los valores se
+        dibujan sin transformar.
+    sector_labels : pd.Series, opcional
+        Sectores por ticker.  Se usan como desempate al ordenar dentro de
+        cada cluster y, si ``sector_labels_visible`` es ``True``, para
+        rotular el eje Y.
+    cluster_labels : pd.Series, opcional
+        Etiqueta de cluster por ticker; si falta, la función no dibuja
+        ningún separador ni numeración.
+    cmap : str
+        Paleta; por defecto ``viridis`` para compartir entre métricas.
+    separator_color : str
+        Color de las líneas discontinuas entre clusters.
+    sector_labels_visible : bool
+        Si ``True``, añade los sectores como etiquetas del eje Y.  El eje X
+        queda reservado para la numeración de clusters.
+    cluster_labels_visible : bool
+        Si ``True``, numera los bloques de cluster en el eje X.
+    xlabel : str
+        Título del eje X.
+
+    Returns
+    -------
+    Optional[plt.Figure]
+        La figura, para poder guardarla; ``None`` si no hay activos comunes.
     """
-    common = matrix.index.intersection(sector_labels.index)
+    common = matrix.index.intersection(matrix.columns)
+    if sector_labels is not None:
+        common = common.intersection(sector_labels.index)
     if cluster_labels is not None:
         common = common.intersection(cluster_labels.index)
 
     if len(common) == 0:
         print("No hay activos comunes para ordenar.")
-        return
+        return None
 
-    sub_sectors = sector_labels.reindex(common)
-    sectors = sorted(sub_sectors.unique())
-
-    order: list[str] = []
     if cluster_labels is not None:
         sub_clusters = cluster_labels.reindex(common)
-        for sector in sectors:
-            sector_tickers = sub_sectors[sub_sectors == sector].index.tolist()
-            sector_clusters = sub_clusters.reindex(sector_tickers)
-            ordered = sector_clusters.sort_values().index.tolist()
-            order.extend(ordered)
+        # Orden global por cluster; a igualdad, por sector para que los
+        # bloques no salgan mezclados.
+        if sector_labels is not None:
+            sub_sectors = sector_labels.reindex(common)
+            frame = pd.DataFrame({"cluster": sub_clusters, "sector": sub_sectors})
+            order = frame.sort_values(["cluster", "sector"]).index.tolist()
+        else:
+            order = sub_clusters.sort_values().index.tolist()
+    elif sector_labels is not None:
+        sub_sectors = sector_labels.reindex(common)
+        order = sorted(sub_sectors.unique(), key=str)
+        order = [
+            t
+            for sector in order
+            for t in sub_sectors[sub_sectors == sector].index.tolist()
+        ]
     else:
-        for sector in sectors:
-            order.extend(sub_sectors[sub_sectors == sector].index.tolist())
+        order = common.tolist()
 
     ordered_matrix = matrix.reindex(index=order, columns=order)
 
+    # Escala medida: se ignoran los NaN de la diagonal.
+    valores = ordered_matrix.to_numpy(dtype=float)
+    finitos = valores[np.isfinite(valores)]
+    if finitos.size == 0:
+        print("La matriz no contiene valores finitos.")
+        return None
+    vmin, vmax = float(finitos.min()), float(finitos.max())
+
     fig, ax = plt.subplots(figsize=figsize)
-    im = ax.imshow(ordered_matrix, cmap=cmap, interpolation="nearest")
+    im = ax.imshow(
+        ordered_matrix, cmap=cmap, interpolation="nearest",
+        vmin=vmin, vmax=vmax,
+    )
     ax.set_title(title, fontweight="bold")
     fig.colorbar(im, ax=ax, label=cbar_label)
 
-    # Límites entre sectores
-    sector_boundaries = []
-    for i in range(1, len(order)):
-        if sub_sectors.loc[order[i]] != sub_sectors.loc[order[i - 1]]:
-            sector_boundaries.append(i)
-
-    for b in sector_boundaries:
-        ax.axhline(b - 0.5, color="black", linewidth=2)
-        ax.axvline(b - 0.5, color="black", linewidth=2)
-
-    # Límites entre clusters
+# Separadores: sólo entre clusters.
+    bloques: list[tuple[int, int]] = []
     if cluster_labels is not None:
-        for i in range(1, len(order)):
-            if sub_clusters.loc[order[i]] != sub_clusters.loc[order[i - 1]]:
-                ax.axhline(i - 0.5, color="white", linewidth=1, linestyle="--")
-                ax.axvline(i - 0.5, color="white", linewidth=1, linestyle="--")
+        etiquetas = sub_clusters.loc[order]
+        inicio = 0
+        for i in range(1, len(order) + 1):
+            if i == len(order) or etiquetas.iloc[i] != etiquetas.iloc[i - 1]:
+                if inicio > 0:
+                    ax.axhline(i - 0.5, color=separator_color, linewidth=1,
+                               linestyle="--")
+                    ax.axvline(i - 0.5, color=separator_color, linewidth=1,
+                               linestyle="--")
+                bloques.append((inicio, i - 1))
+                inicio = i
 
-    ax.set_xticks([])
-    ax.set_yticks([])
+    # Eje X: el número de cada cluster, centrado bajo su bloque.
+    if bloques and cluster_labels_visible:
+        # ``imshow`` sitúa el índice ``i`` en el píxel ``[i - 0.5, i + 0.5]``,
+        # así que el centro del bloque ``[inicio, fin]`` es ``(inicio + fin) / 2``.
+        ax.set_xticks([(ini + fin) / 2 for ini, fin in bloques])
+        ax.set_xticklabels(
+            [str(i) for i in range(1, len(bloques) + 1)], fontsize=8,
+        )
+        ax.set_xlabel(xlabel)
+    else:
+        ax.set_xticks([])
+
+    # Eje Y: sectores, sólo si se piden de forma explícita.
+    if sector_labels_visible and sector_labels is not None:
+        visibles = sector_labels.reindex(order)
+        cambios = [
+            i for i in range(1, len(order))
+            if visibles.iloc[i] != visibles.iloc[i - 1]
+        ]
+        ax.set_yticks(cambios, [str(visibles.iloc[i]) for i in cambios],
+                      fontsize=7)
+    else:
+        ax.set_yticks([])
+
     plt.tight_layout()
     plt.show()
+    return fig
 
 
 # =============================================================================
