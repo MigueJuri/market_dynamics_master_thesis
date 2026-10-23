@@ -38,13 +38,16 @@
 #
 # ## Flujo del notebook
 #
-# 1. Universo S&P 500 completo con ``START:END``.
+# 1. Universo S&P 500 completo con ventana explícita y filtro de historia,
+#    más el diagnóstico de cobertura del panel.
 # 2. Matriz de correlación de Pearson.
 # 3. Top 20 pares por correlación, filtrando emisores del mismo grupo.
-# 4. Clustering jerárquico de Ward sobre la distancia
+# 4. Test ADF del spread de cada par sobre la historia completa, con el
+#    tamaño muestral de cada par.
+# 5. Clustering jerárquico de Ward sobre la distancia
 #    $\sqrt{1 - \rho}$.
-# 5. Evaluación de la calidad sectorial del clustering.
-# 6. Visualización de matrices, composición sectorial y animación
+# 6. Evaluación de la calidad sectorial del clustering.
+# 7. Visualización de matrices, composición sectorial y animación
 #    rolling sobre el sub-manifold reducido.
 
 # %%
@@ -62,50 +65,99 @@ import numpy as np
 import pandas as pd
 from matplotlib import animation
 
-from thesis.config import DATA_DIR, END, START
+from thesis.config import (
+    DATA_DIR,
+    END,
+    PAIR_SELECTION_MIN_HISTORY_OBS,
+    START,
+)
 from thesis.pair_trading import (
     adf_test,
     compute_hedge_ratio,
     correlation_distance,
     evaluate_cluster_sector_alignment,
-    filter_duplicate_issuers,
-    get_sp500_constituents,
+    export_pair_selection_table,
     hierarchical_clustering,
-    load_log_returns,
+    load_log_prices,
+    prepare_pair_selection_universe,
     sector_average_matrix,
     top_pairs,
+    translate_gics_sectors,
+    unmapped_gics_sectors,
 )
 from thesis.plotting import (
     plot_cluster_sector_composition,
     plot_cluster_sector_heatmap,
     plot_cluster_sector_summary,
+    plot_sector_average_heatmap,
     plot_sector_reordered_matrix,
 )
 
 # %%
-# ## Universo, retornos y sector GICS de cada activo
+# ## Universo, ventana de análisis y retornos
 #
-# ``filter_duplicate_issuers`` elimina una clase de acción por emisor
-# (ej. ``GOOGL``/``GOOG`` o ``FOXA``/``FOX``) antes de descargar
-# datos y calcular la matriz de correlación, evitando evaluar pares
-# inválidos.
-constituents, removed = filter_duplicate_issuers(get_sp500_constituents())
-tickers_sp500 = constituents["Symbol"].tolist()
-print(f"Tamaño del universo S&P 500: {len(tickers_sp500)} activos únicos")
-if not removed.empty:
-    print("Símbolos descartados (mismo emisor que otro ya presente):")
-    print(removed.to_string(index=False))
+# ``prepare_pair_selection_universe`` ejecuta la fase compartida con
+# ``1_PairSelectionMutualInformation.py``: elimina una clase de acción por
+# emisor (ej. ``GOOGL``/``GOOG`` o ``FOXA``/``FOX``), construye el panel de
+# log-retornos con ``load_returns_panel`` y alinea sectores y emisores.
+#
+# ## Por qué el panel filtra por historia antes de alinear
+#
+# ``load_returns_panel`` descarta primero los activos sin historia
+# suficiente y **sólo después** alinea las fechas.  Sin ese orden, ``dropna``
+# conserva únicamente las fechas en las que cotizan los ~500 activos a la
+# vez, y basta un único emisor recién salgado a bolsa para que un rango de
+# treinta años se convierta en dos meses.  Medido sobre la caché actual, la
+# intersección sin filtro da 43 sesiones (2025-10-28 → 2025-12-31) en lugar
+# de las ~8.300 del rango pedido.
+#
+# El umbral ``PAIR_SELECTION_MIN_HISTORY_OBS`` vive en ``thesis.config`` y
+# fija el equilibrio entre historia y número de activos.  Con la ventana
+# completa 1993-2026 sobre el universo actual:
+#
+# ==========  ========  ==========  =============
+# mínimo      activos   sesiones    desde
+# ==========  ========  ==========  =============
+# 0           497       43         2025-10-28
+# 1260 (~5a)  484       1 267      2020-12-11
+# 5040 (~20a) 388       5 047      2005-12-06
+# 7560 (~30a) 301       7 557      1995-12-18
+# ==========  ========  ==========  =============
+#
+# El valor por defecto son veinte años: mantiene 388 activos (suficientes
+# para el clustering sectorial) y veinte años de observaciones para la
+# correlación.  Subir el umbral acorta la intersección; bajarlo obliga a
+# usar un panel reciente o directamente inservible.
+#
+# El diagnóstico que devuelve el panel (sesiones, cobertura frente al
+# calendario disponible, ritmo anual, historia por activo y descartes) se
+# imprime para que cualquier recorte sea visible antes de interpretar los
+# resultados.
+universe = prepare_pair_selection_universe(
+    start=START,
+    end=END,
+    cache_dir=DATA_DIR,
+    min_history_obs=PAIR_SELECTION_MIN_HISTORY_OBS,
+)
 
-sector_map = constituents.set_index("Symbol")["GICS Sector"]
-issuer_map = constituents.set_index("Symbol")["Issuer"]
+returns_full = universe.returns
+issuer_map = universe.issuers
+n_clusters = universe.n_sectors
 
-returns_full = load_log_returns(tickers_sp500, START, END, DATA_DIR)
-print(f"Retornos cargados: {returns_full.shape[0]} sesiones × {returns_full.shape[1]} activos")
+# Los sectores GICS llegan en inglés desde Wikipedia y se traducen aquí para
+# que toda la salida de la tesis (métricas, figuras y tablas) esté en
+# castellano.  Traducir no altera los resultados: las métricas de alineación
+# sólo dependen de la partición.
+sectors_en = universe.sectors
+available_sectors = translate_gics_sectors(sectors_en)
 
-# Alineamos sector con los tickers que finalmente tienen datos
-available_sectors = sector_map.reindex(returns_full.columns).dropna()
-n_clusters = available_sectors.nunique()
-print(f"Sectores GICS presentes: {n_clusters}")
+sin_traducir = unmapped_gics_sectors(sectors_en)
+if sin_traducir:
+    print(f"⚠ Sectores GICS sin traducción CASTELLANO: {sin_traducir}")
+print("Sectores GICS (traducidos):")
+for sector in sorted(available_sectors.unique()):
+    n_activos = int((available_sectors == sector).sum())
+    print(f"  {sector}: {n_activos} activos")
 
 # %%
 # ## Correlación de Pearson sobre el universo completo
@@ -114,7 +166,7 @@ print(f"Sectores GICS presentes: {n_clusters}")
 # vectorizada.  La diagonal queda implícita en 1; los ``NaN`` se
 # descartan automáticamente par a par.
 corr_matrix = returns_full.corr(method="pearson")
-top_20_pairs = top_pairs(corr_matrix, n=20, issuer_map=issuer_map)
+top_20_pairs = top_pairs(corr_matrix, n=50, issuer_map=issuer_map)
 
 print("\nTop 20 pares por correlación de Pearson:")
 for rank, (t1, t2, val) in enumerate(top_20_pairs, 1):
@@ -127,9 +179,9 @@ for rank, (t1, t2, val) in enumerate(top_20_pairs, 1):
 # combinaciones intra-sectoriales (Utilities, Energy, ...) de
 # combinaciones inter-sectoriales.
 #
-# Para cada par se reconstruyen los log-precios a partir de los
-# retornos logarítmicos ya descargados (suma acumulada) y se estima el
-# hedge ratio por OLS de
+# Para cada par se toman los log-precios de las observaciones comunes a
+# ambos activos mediante ``load_log_prices`` y se estima el hedge ratio por
+# OLS de
 # $\log A_t = \alpha + \beta \log B_t + \varepsilon_t$.  El spread
 # resultante $\varepsilon_t$ es la serie sobre la que se aplica el test
 # Augmented Dickey-Fuller:
@@ -139,9 +191,34 @@ for rank, (t1, t2, val) in enumerate(top_20_pairs, 1):
 #   estacionario;
 # - ``estacionario``: bandera booleana con ese mismo criterio.
 #
+# El ADF se estima sobre $\log P$ y no sobre retornos: acumular los
+# log-retornos con ``cumsum`` perdería el primer nivel y todas las fechas en
+# las que un activo no cotizó, dando series distintas de las que produce
+# ``PairTrading.py`` para un mismo par.
+#
+# ## Dos ventanas distintas y por qué
+#
+# El panel de correlación y el ADF no usan exactamente la misma muestra.  La
+# correlación se estima sobre el panel alineado (intersección de fechas de
+# los activos con historia suficiente), mientras que el ADF usa
+# ``load_log_prices`` sobre las fechas comunes de **ese par**, que recupera
+# historia adicional de los activos que no cotizaban en el periodo en que
+# empezó el último superviviente del universo.
+#
+# La diferencia no es un descuido: la selección de candidatos necesita un
+# panel común para poder clusterizar, mientras que la cointegración se
+# estima mejor sobre toda la historia del par.  Ambas consultas parten de
+# ``START`` y terminan en ``END``, y la del ADF **coincide con el rango de
+# ``PairTrading.py`**, así que el estadístico de un mismo par es
+# directamente comparable entre ambos cuadernos.  La columna
+# ``n_sesiones_par`` deja explícito cuánto soporte tiene cada resultado.
+#
 # El objetivo del estadístico es el spread, no la correlación: dos
 # activos muy correlacionados pueden tener un spread no estacionario.
 SIGNIFICANCIO_ADF = 0.05
+
+#: Un ADF sobre menos de un año de sesiones no es interpretable.
+MIN_SESIONES_ADF = 252
 
 top_pairs_df = pd.DataFrame(
     top_20_pairs,
@@ -152,17 +229,22 @@ top_pairs_df["sector_b"] = top_pairs_df["ticker_b"].map(available_sectors)
 
 
 def adf_para_par(ticker_a, ticker_b):
-    """Calcula el estadístico y el p-value del ADF sobre el spread del par.
+    """Calcula el estadístico, el p-value y el tamaño muestral del par.
 
-    Devuelve ``(np.nan, np.nan)`` si faltan datos o el spread no es
-    calculable, para no interrumpir la tabla completa.
+    Devuelve ``(np.nan, np.nan, n)`` si faltan datos, no se puede calcular
+    el spread o la muestra es demasiado corta, para no interrumpir la tabla
+    completa.  ``n`` es el número de sesiones comunes del par, que acota
+    cuánta evidencia respalda cada estadístico.
     """
-    retornos = returns_full[[ticker_a, ticker_b]].dropna()
-    if len(retornos) < 10:
-        return np.nan, np.nan
-    # El log-precio es la suma acumulada de los log-retornos (salvo una
-    # constante aditiva por activo, que el propio OLS absorbe en alpha).
-    log_precios = retornos.cumsum()
+    try:
+        log_precios = load_log_prices([ticker_a, ticker_b], START, END, DATA_DIR)
+    except ValueError:
+        return np.nan, np.nan, 0
+
+    n = len(log_precios)
+    if n < MIN_SESIONES_ADF:
+        return np.nan, np.nan, n
+
     try:
         hedge = compute_hedge_ratio(log_precios[ticker_a], log_precios[ticker_b])
         spread = log_precios[ticker_a] - (
@@ -170,16 +252,17 @@ def adf_para_par(ticker_a, ticker_b):
         )
         adf = adf_test(spread, significance=SIGNIFICANCIO_ADF)
     except (ValueError, np.linalg.LinAlgError):
-        return np.nan, np.nan
-    return adf.statistic, adf.pvalue
+        return np.nan, np.nan, n
+    return adf.statistic, adf.pvalue, n
 
 
 adf_stats = [
     adf_para_par(row.ticker_a, row.ticker_b)
     for row in top_pairs_df.itertuples(index=False)
 ]
-top_pairs_df["estadistico_adf"] = [s for s, _ in adf_stats]
-top_pairs_df["p_valor_adf"] = [p for _, p in adf_stats]
+top_pairs_df["n_sesiones_par"] = [n for _, _, n in adf_stats]
+top_pairs_df["estadistico_adf"] = [s for s, _, _ in adf_stats]
+top_pairs_df["p_valor_adf"] = [p for _, p, _ in adf_stats]
 top_pairs_df["estacionario"] = top_pairs_df["p_valor_adf"] < SIGNIFICANCIO_ADF
 
 print("\nTop 20 pares con sector y diagnóstico ADF del spread:")
@@ -188,6 +271,90 @@ print(
     f"\nSpread estacionario al {SIGNIFICANCIO_ADF:.0%} en "
     f"{int(top_pairs_df['estacionario'].sum())} de {len(top_pairs_df)} pares."
 )
+print(
+    f"Muestra del ADF: mediana {top_pairs_df['n_sesiones_par'].median():.0f} "
+    f"sesiones, rango {top_pairs_df['n_sesiones_par'].min()}-"
+    f"{top_pairs_df['n_sesiones_par'].max()}."
+)
+
+# %%
+# ## Exportación de la tabla
+#
+# ``export_pair_selection_table`` escribe tres versiones de la tabla en
+# ``outputs/tables``: el CSV con los valores sin formatear, el LaTeX listo
+# para insertar en la tesis y un JSON con las condiciones de cálculo.
+#
+# El ``.tex`` incluye como nota las condiciones que producen la tabla:
+# método, ventanas solicitada y efectiva, sesiones, ritmo anual, tamaño
+# del universo, filtro de historia y cobertura.  Sin ellas la tabla sería
+# irreproducible: los mismos tickers sobre otra ventana dan ADF distintos.
+#
+# Los valores ausentes (``NaN``) se imprimen como ``--`` y los booleanos
+# como ``Sí``/``No``, con el ``Sí`` en negrita para localizar de un vistazo
+# los spreads estacionarios.
+#
+# ## Columnas de la tabla
+#
+# ``COLUMNAS_TABLA`` decide qué se exporta al CSV y al LaTeX, y en qué
+# orden.  Edita esta lista para recortar la tabla de la tesis sin tocar
+# nada más; el DataFrame completo sigue disponible arriba.  Para una tabla
+# más estrecha, por ejemplo sin las columnas del ADF:
+#
+# ```python
+# COLUMNAS_TABLA = [
+#     "rank",
+#     "ticker_a", "ticker_b", "sector_a", "sector_b",
+#     "correlacion_pearson", "p_valor_adf",
+# ]
+# ```
+COLUMNAS_TABLA = [
+    "rank",
+    "ticker_a",
+    "ticker_b",
+    "sector_a",
+    "sector_b",
+    "correlacion_pearson",
+    "n_sesiones_par",
+    "estadistico_adf",
+    "p_valor_adf",
+    "estacionario",
+]
+
+export_paths = export_pair_selection_table(
+    top_pairs_df,
+    universe.report,
+    stem="pearson_top20",
+    columns=COLUMNAS_TABLA,
+    method="correlación de Pearson sobre log-retornos diarios",
+    caption=(
+        "Principales pares por correlación de Pearson y diagnóstico ADF "
+        "de su spread"
+    ),
+    label="tab:pearson_top20",
+    extra_metadata={
+        "significancia_adf": SIGNIFICANCIO_ADF,
+        "sesiones_minimas_adf": MIN_SESIONES_ADF,
+        "n_sesiones_adf_mediana": float(
+            top_pairs_df["n_sesiones_par"].median()
+        ),
+        "pares_estacionarios": int(top_pairs_df["estacionario"].sum()),
+    },
+    notes=[
+        (
+            f"Test ADF sobre el spread con significancia "
+            f"{SIGNIFICANCIO_ADF:.0%} y al menos {MIN_SESIONES_ADF} sesiones "
+            f"por par; mediana de {top_pairs_df['n_sesiones_par'].median():.0f} "
+            f"sesiones (rango {top_pairs_df['n_sesiones_par'].min()}-"
+            f"{top_pairs_df['n_sesiones_par'].max()})."
+        ),
+        (
+            f"Spread estacionario en "
+            f"{int(top_pairs_df['estacionario'].sum())} de "
+            f"{len(top_pairs_df)} pares."
+        ),
+    ],
+)
+print(f"LaTeX: {export_paths['tex']}")
 
 # %%
 # ## Clustering jerárquico de Ward con k = número de sectores
@@ -255,19 +422,34 @@ plot_cluster_sector_composition(
 plot_cluster_sector_summary(report.per_cluster)
 
 # %%
-# ## Matriz de correlación ordenada por sector (sin etiquetas de ticker)
+# ## Matriz de correlación ordenada por cluster (sin etiquetas de ticker)
 #
-# La matriz se reordena agrupando activos por sector y, dentro de
-# cada sector, por cluster.  Se eliminan las etiquetas individuales
-# de ticker (ilegibles con ≈500 activos) y se dibujan líneas gruesas
-# negras en las fronteras entre sectores.  Permite ver si la
-# correlación es alta dentro de cada sector y baja entre sectores.
+# La matriz se reordena **globalmente por cluster**, no por sector: los
+# bloques del heatmap son así exactamente los clusters que evalúa el
+# análisis sectorial.  Los separadores dibujados son sólo los cambios de
+# cluster (línea discontinua), y no se marcan los límites sectoriales, que
+# en una matriz tan densa sólo añaden ruido.
+#
+# ## Escala de color comparable con la de información mutua
+#
+# La escala se fija con los valores **medidos** en la matriz (``vmin`` y
+# ``vmax`` reales, ignorando la diagonal ``NaN``) y la paleta es la misma
+# que usa el cuaderno de información mutua.  No se transforma ningún valor:
+# la correlación se dibuja tal cual, en su rango real.
+#
+# Eso permite comparar **visualmente** ambas matrices con el mismo criterio
+# de intensidad, pero un mismo color no significa el mismo valor numérico:
+# Pearson e información mutua tienen unidades distintas, y cada barra de
+# color sigue labelling las suyas.  Lo comparable es el patrón de bloques,
+# no la magnitud.
+CMAP_COMPARABLE = "viridis"
+
 plot_sector_reordered_matrix(
     corr_matrix,
     sector_labels=available_sectors,
     cluster_labels=clusters,
-    cmap="coolwarm",
-    title="Correlación Pearson ordenada por sector y cluster",
+    cmap=CMAP_COMPARABLE,
+    title="Correlación Pearson ordenada por cluster",
     cbar_label="Correlación de Pearson",
 )
 
@@ -277,17 +459,18 @@ plot_sector_reordered_matrix(
 # ``sector_average_matrix`` agrega la matriz de correlación de
 # activos a una matriz sector × sector usando la media.  La diagonal
 # mide el acoplamiento intra-sectorial promedio.
+#
+# Usa la misma paleta y la misma escala medida que el heatmap de la
+# matriz de activos, de modo que las dos vistas son directamente
+# comparables entre sí y con las del cuaderno de información mutua.
 sector_corr = sector_average_matrix(corr_matrix, available_sectors, operation="mean")
 
-fig, ax = plt.subplots(figsize=(10, 8))
-im = ax.imshow(sector_corr, cmap="coolwarm", interpolation="nearest",
-               vmin=-1, vmax=1)
-ax.set_xticks(range(len(sector_corr.columns)), sector_corr.columns, rotation=45, ha="right")
-ax.set_yticks(range(len(sector_corr.index)), sector_corr.index)
-ax.set_title("Correlación Pearson promedio entre sectores GICS")
-fig.colorbar(im, ax=ax, label="Correlación media")
-plt.tight_layout()
-plt.show()
+plot_sector_average_heatmap(
+    sector_corr,
+    cmap=CMAP_COMPARABLE,
+    title="Correlación Pearson promedio entre sectores GICS",
+    cbar_label="Correlación media",
+)
 
 # %%
 # ## Correlación rolling (animación) sobre el sub-manifold reducido
@@ -306,8 +489,14 @@ surviving_nodes = sorted({t1 for t1, _, _ in top_20_pairs}
 print(f"\nSub-manifold para animación: {len(surviving_nodes)} activos")
 print(f"Tickers: {surviving_nodes}")
 
-returns_rolling = load_log_returns(
-    surviving_nodes, "2019-01-01", END, DATA_DIR,
+# El sub-manifold se recorta del panel ya calculado: recargar los mismos
+# tickers volvería a alinear (y potencialmente a descargar) por duplicado.
+returns_rolling = returns_full[surviving_nodes]
+print(
+    f"Panel rolling: {len(returns_rolling)} sesiones "
+    f"({returns_rolling.index[0]:%Y-%m-%d} → "
+    f"{returns_rolling.index[-1]:%Y-%m-%d}), "
+    f"{returns_rolling.shape[1]} activos"
 )
 
 corr_static = returns_rolling.corr(method="pearson")
@@ -317,6 +506,15 @@ static_labels = corr_static.columns[static_order]
 
 WINDOW_SIZE = 126
 STEP_SIZE = 5
+
+n_frames = max(0, (len(returns_rolling) - WINDOW_SIZE) // STEP_SIZE)
+if n_frames == 0:
+    raise ValueError(
+        f"El panel tiene {len(returns_rolling)} sesiones, "
+        f"insuficientes para una ventana de {WINDOW_SIZE}. "
+        "Amplía la ventana de análisis o reduce WINDOW_SIZE."
+    )
+print(f"Fotogramas de la animación: {n_frames}")
 
 matrices, dates = [], []
 for i in range(0, len(returns_rolling) - WINDOW_SIZE, STEP_SIZE):
@@ -354,7 +552,7 @@ OUTPUT_FILENAME = "rolling_correlation.gif"
 ani.save(OUTPUT_FILENAME, writer="pillow")
 print(f"GIF guardado en {OUTPUT_FILENAME}")
 
-# %%
+ # %%
 # ## Símbolos finales del top 20 Pearson
 #
 # Lista única de tickers que aparecen en el top-20.  Estos son los

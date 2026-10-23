@@ -48,7 +48,7 @@
 #
 # ## Flujo del notebook
 #
-# 1. Universo S&P 500 completo con ``START:END``.
+# 1. Universo S&P 500 con ventana explícita y filtro de historia.
 # 2. Matriz MI KSG sobre todo el universo (calculada y cacheada).
 # 3. Top 20 pares por MI, filtrando emisores del mismo grupo.
 # 4. Clustering jerárquico de Ward con tantos clusters como sectores.
@@ -65,53 +65,96 @@ _SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-import matplotlib.pyplot as plt
 import pandas as pd
 
-from thesis.config import DATA_DIR, END, START
+from thesis.config import (
+    DATA_DIR,
+    END,
+    PAIR_SELECTION_MIN_HISTORY_OBS,
+    SEED,
+    START,
+)
 from thesis.pair_trading import (
     cached_ksg_mi_matrix,
     evaluate_cluster_sector_alignment,
-    filter_duplicate_issuers,
-    get_sp500_constituents,
+    export_pair_selection_table,
     hierarchical_clustering,
-    load_log_returns,
     mi_distance,
+    prepare_pair_selection_universe,
     sector_average_matrix,
     top_pairs,
+    translate_gics_sectors,
+    unmapped_gics_sectors,
 )
 from thesis.plotting import (
     plot_cluster_sector_composition,
     plot_cluster_sector_heatmap,
     plot_cluster_sector_summary,
+    plot_sector_average_heatmap,
     plot_sector_reordered_matrix,
 )
 
 # %%
-# ## Universo, retornos y sector GICS de cada activo
+# ## Universo, ventana de análisis y retornos
 #
-# ``filter_duplicate_issuers`` normaliza el nombre del valor (elimina
-# sufijos como ``Class A``, ``Inc.``, ``Corp.``, etc.) y elimina una
-# clase de acción por emisor (ej. ``GOOGL``/``GOOG`` o
-# ``FOXA``/``FOX``) **antes** de descargar datos y calcular la matriz
-# MI.  Esto evita evaluar pares inválidos y reduce el coste del KSG.
-constituents, removed = filter_duplicate_issuers(get_sp500_constituents())
-tickers_sp500 = constituents["Symbol"].tolist()
-print(f"Tamaño del universo S&P 500: {len(tickers_sp500)} activos únicos")
-if not removed.empty:
-    print("Símbolos descartados (mismo emisor que otro ya presente):")
-    print(removed.to_string(index=False))
+# ``prepare_pair_selection_universe`` ejecuta la fase compartida con
+# ``2_PairSelectionPearson.py``:
+#
+# 1. ``filter_duplicate_issuers`` normaliza el nombre del valor (elimina
+#    sufijos como ``Class A``, ``Inc.``, ``Corp.``, etc.) y conserva **una
+#    sola clase de acción por emisor** (ej. ``GOOGL``/``GOOG`` o
+#    ``FOXA``/``FOX``), evitando evaluar pares inválidos y reduciendo el
+#    coste del KSG.
+# 2. ``load_returns_panel`` **filtra por historia antes de alinear las
+#    fechas**.  Sin ese filtro, ``dropna`` conservaría sólo las fechas en las
+#    que cotizan los ~500 activos a la vez y un único emisor recién salgado a
+#    bolsa reduciría el rango completo a dos meses.
+# 3. Se alinean sectores y emisores con los tickers que sobreviven y se
+#    imprime el diagnóstico de cobertura.
+#
+# El umbral de historia vive en ``thesis.config`` como
+# ``PAIR_SELECTION_MIN_HISTORY_OBS``, de modo que ambos cuadernos estiman su
+# métrica sobre exactamente la misma muestra y las dos matrices son
+# comparables.  Medido sobre la caché actual, con la ventana 1993-2026:
+#
+# ==========  ========  ==========  =============
+# mínimo      activos   sesiones    desde
+# ==========  ========  ==========  =============
+# 0           497       43         2025-10-28
+# 1260 (~5a)  484       1 267      2020-12-11
+# 5040 (~20a) 388       5 047      2005-12-06
+# 7560 (~30a) 301       7 557      1995-12-18
+# ==========  ========  ==========  =============
+#
+# Se elige el mínimo de veinte años: mantiene 388 activos (suficientes para
+# el clustering sectorial) y veinte años de observaciones.  Subir el umbral
+# acorta la intersección; bajarlo obliga a usar un panel reciente o
+# directamente inservible.
+universe = prepare_pair_selection_universe(
+    start=START,
+    end=END,
+    cache_dir=DATA_DIR,
+    min_history_obs=PAIR_SELECTION_MIN_HISTORY_OBS,
+)
 
-sector_map = constituents.set_index("Symbol")["GICS Sector"]
-issuer_map = constituents.set_index("Symbol")["Issuer"]
+returns_full = universe.returns
+issuer_map = universe.issuers
+n_clusters = universe.n_sectors
 
-returns_full = load_log_returns(tickers_sp500, START, END, DATA_DIR)
-print(f"Retornos cargados: {returns_full.shape[0]} sesiones × {returns_full.shape[1]} activos")
+# Los sectores GICS llegan en inglés desde Wikipedia y se traducen aquí para
+# que toda la salida de la tesis (métricas, figuras y tablas) esté en
+# castellano.  Traducir no altera los resultados: las métricas de alineación
+# sólo dependen de la partición.
+sectors_en = universe.sectors
+available_sectors = translate_gics_sectors(sectors_en)
 
-# Alineamos sector con los tickers que finalmente tienen datos
-available_sectors = sector_map.reindex(returns_full.columns).dropna()
-n_clusters = available_sectors.nunique()
-print(f"Sectores GICS presentes: {n_clusters}")
+sin_traducir = unmapped_gics_sectors(sectors_en)
+if sin_traducir:
+    print(f"⚠ Sectores GICS sin traducción al castellano: {sin_traducir}")
+print("Sectores GICS (traducidos):")
+for sector in sorted(available_sectors.unique()):
+    n_activos = int((available_sectors == sector).sum())
+    print(f"  {sector}: {n_activos} activos")
 
 # %%
 # ## Información mutua KSG sobre el universo completo
@@ -126,7 +169,13 @@ print(f"Sectores GICS presentes: {n_clusters}")
 # se simetriza como la media, mitigando asimetrías numéricas de la
 # búsqueda k-NN.  Series con varianza cero se omiten y la diagonal
 # queda vacía.
-mi_matrix = cached_ksg_mi_matrix(returns_full, k_neighbors=3)
+# El parámetro ``k_neighbors`` controla el balance sesgo-varianza del
+# estimador.  Se fija una única constante y se reutiliza tanto en el cálculo
+# de la matriz como en las condiciones de la tabla exportada, para que la
+# tabla documente exactamente el estimador que la produjo.
+K_NEIGHBORS = 3
+
+mi_matrix = cached_ksg_mi_matrix(returns_full, k_neighbors=K_NEIGHBORS)
 top_20_pairs = top_pairs(mi_matrix, n=20, issuer_map=issuer_map)
 
 print("\nTop 20 pares por Información Mutua KSG:")
@@ -146,6 +195,57 @@ top_pairs_df["sector_a"] = top_pairs_df["ticker_a"].map(available_sectors)
 top_pairs_df["sector_b"] = top_pairs_df["ticker_b"].map(available_sectors)
 print("\nTop 20 pares con sector:")
 print(top_pairs_df.to_string(index=False))
+
+# %%
+# ## Exportación de la tabla
+#
+# ``export_pair_selection_table`` escribe tres versiones de la tabla en
+# ``outputs/tables``: el CSV con los valores sin formatear, el LaTeX listo
+# para insertar en la tesis y un JSON con las condiciones de cálculo.
+#
+# El ``.tex`` incluye como nota las condiciones que producen la tabla:
+# método, ventanas solicitada y efectiva, sesiones, ritmo anual, tamaño del
+# universo, filtro de historia y cobertura.  Aquí es especialmente
+# importante registrar el número de vecinos, porque la MI KSG es
+# sesgo-varianza dependiente de ``k`` y dos ejecuciones con distinto ``k``
+# no son comparables.
+#
+# ## Columnas de la tabla
+#
+# ``COLUMNAS_TABLA`` decide qué se exporta al CSV y al LaTeX, y en qué
+# orden.  Edita esta lista para recortar la tabla de la tesis; el DataFrame
+# completo sigue disponible arriba.
+COLUMNAS_TABLA = [
+    "rank",
+    "ticker_a",
+    "ticker_b",
+    "sector_a",
+    "sector_b",
+    "mi",
+]
+
+export_paths = export_pair_selection_table(
+    top_pairs_df,
+    universe.report,
+    stem="mutual_information_top20",
+    columns=COLUMNAS_TABLA,
+    method=(
+        f"información mutua estimada con KSG (k = {K_NEIGHBORS} vecinos) "
+        f"sobre log-retornos diarios"
+    ),
+    caption="Principales pares por información mutua KSG",
+    label="tab:mi_top20",
+    extra_metadata={"vecinos_ksg": K_NEIGHBORS, "semilla": SEED},
+    notes=[
+        (
+            f"Estimador KSG con k = {K_NEIGHBORS} vecinos sobre "
+            f"{universe.report.n_sessions} observaciones; cada par se estima "
+            f"en ambos sentidos y se simetriza."
+        ),
+        "Métrica expresada en nats.",
+    ],
+)
+print(f"LaTeX: {export_paths['tex']}")
 
 # %%
 # ## Clustering jerárquico de Ward con k = número de sectores
@@ -213,19 +313,31 @@ plot_cluster_sector_composition(
 plot_cluster_sector_summary(report.per_cluster)
 
 # %%
-# ## Matriz MI ordenada por sector (sin etiquetas de ticker)
+# ## Matriz MI ordenada por cluster (sin etiquetas de ticker)
 #
-# La matriz se reordena agrupando activos por sector y, dentro de cada
-# sector, por cluster.  Se eliminan las etiquetas individuales de
-# ticker (ilegibles con ≈500 activos) y se dibujan líneas gruesas
-# negras en las fronteras entre sectores.  Permite ver si la MI es
-# alta dentro de cada sector y baja entre sectores.
+# La matriz se reordena **globalmente por cluster**, igual que en
+# ``2_PairSelectionPearson.py``: los bloques del heatmap son los clusters
+# que evalúa el análisis sectorial, y los únicos separadores dibujados son
+# los cambios de cluster (línea discontinua).
+#
+# ## Escala de color comparable con la de Pearson
+#
+# Se usa la misma paleta (``viridis``) y la misma política de escala: los
+# límites salen de los valores **medidos** en la matriz, ignorando la
+# diagonal ``NaN``.  Ningún valor se transforma; la MI se dibuja en nats.
+#
+# Un mismo color equivale a la misma intensidad **dentro de cada métrica**,
+# no al mismo valor numérico: Pearson e información mutua tienen unidades
+# distintas y cada barra de color etiqueta las suyas.  Lo comparable entre
+# ambos cuadernos es el patrón de los bloques, no la magnitud.
+CMAP_COMPARABLE = "viridis"
+
 plot_sector_reordered_matrix(
     mi_matrix,
     sector_labels=available_sectors,
     cluster_labels=clusters,
-    cmap="inferno",
-    title="MI KSG ordenada por sector y cluster",
+    cmap=CMAP_COMPARABLE,
+    title="MI KSG ordenada por cluster",
     cbar_label="MI (nats)",
 )
 
@@ -237,16 +349,17 @@ plot_sector_reordered_matrix(
 # bloque).  Valores altos en la diagonal confirman acoplamiento
 # intra-sectorial; valores altos fuera de la diagonal indican
 # dependencias inter-sectoriales.
+#
+# Comparte paleta y escala medida con el heatmap de la matriz de activos
+# y con las figuras del cuaderno de Pearson.
 sector_mi = sector_average_matrix(mi_matrix, available_sectors, operation="mean")
 
-fig, ax = plt.subplots(figsize=(10, 8))
-im = ax.imshow(sector_mi, cmap="inferno", interpolation="nearest")
-ax.set_xticks(range(len(sector_mi.columns)), sector_mi.columns, rotation=45, ha="right")
-ax.set_yticks(range(len(sector_mi.index)), sector_mi.index)
-ax.set_title("MI KSG promedio entre sectores GICS")
-fig.colorbar(im, ax=ax, label="MI media (nats)")
-plt.tight_layout()
-plt.show()
+plot_sector_average_heatmap(
+    sector_mi,
+    cmap=CMAP_COMPARABLE,
+    title="MI KSG promedio entre sectores GICS",
+    cbar_label="MI media (nats)",
+)
 
 # %%
 # ## Símbolos finales del top 20
@@ -257,3 +370,4 @@ plt.show()
 final_symbols = sorted({t1 for t1, _, _ in top_20_pairs}
                        | {t2 for _, t2, _ in top_20_pairs})
 print(final_symbols)
+# %%

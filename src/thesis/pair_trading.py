@@ -14,7 +14,8 @@ import json
 import os
 import re
 import tempfile
-from collections.abc import Sequence
+import warnings
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import StringIO
@@ -36,7 +37,14 @@ from sklearn.metrics import (
 )
 from statsmodels.tsa.stattools import adfuller
 
-from thesis.config import DATA_DIR, END, SEED, START
+from thesis.config import (
+    DATA_DIR,
+    END,
+    PAIR_SELECTION_MIN_HISTORY_OBS,
+    SEED,
+    START,
+    TABLES_DIR,
+)
 from thesis.market_data import load_multiple_prices
 
 WIKIPEDIA_HEADERS = {
@@ -89,8 +97,12 @@ def _issuer_key(security: str) -> str:
     - sustitución de puntuación por espacios;
     - recorte de espacios.
 
-    El resultado es una clave canónica que agrupa ``GOOGL Class A`` y
-    ``GOOG Class C`` bajo la misma raíz ``alphabet``.
+    El resultado es una clave canónica que agrupa las filas que comparten la
+    raíz de la empresa: ``Alphabet Inc. Class A`` y ``Alphabet Inc. Class C``
+    colapsan en ``alphabet``.  La agrupación depende de que esa raíz esté en
+    ``Security``: dos símbolos del mismo emisor escritos sólo con el ticker
+    (``GOOGL Class A`` y ``GOOG Class C``) producen claves distintas y **no**
+    se agrupan.
     """
     if not isinstance(security, str):
         return ""
@@ -218,21 +230,875 @@ def get_sp500_tickers_by_sector(
     return df["Symbol"].tolist()
 
 
-def load_log_returns(
+def _download_prices(
+    tickers: Sequence[str] | str,
+    start: str,
+    end: str,
+    cache_dir: Path,
+    refresh: bool,
+) -> pd.DataFrame:
+    """Descarga el frame de precios ``Adj Close`` sin filtrar columnas."""
+    if isinstance(tickers, str):
+        tickers = [tickers]
+
+    prices = load_multiple_prices(list(tickers), start, end, cache_dir, refresh)
+    if prices.empty:
+        raise ValueError("No se descargaron datos para el rango solicitado.")
+    return prices
+
+
+def filter_by_history(
+    prices: pd.DataFrame,
+    min_history_obs: int = 0,
+    min_valid_obs: int = 0,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Descarta los tickers con historia insuficiente dentro de la ventana.
+
+    El filtro se aplica **antes** de alinear las fechas.  Es la clave para
+    que la intersección de fechas no la determine un único activo recién
+    cotizado: si un ticker sólo tiene 46 observaciones, alinear todo el
+    universo con él reduciría el panel a esas 46 sesiones.
+
+    Parameters
+    ----------
+    prices : pd.DataFrame
+        Precios sin alinear, con una columna por ticker.
+    min_history_obs : int
+        Mínimo de observaciones no nulas dentro de la ventana para conservar
+        un ticker (historia real, no sólo datos presentes).
+    min_valid_obs : int
+        Mínimo absoluto de observaciones no nulas; si ``min_history_obs`` es
+        menor, el umbral efectivo es el mayor de los dos.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame]
+        Panel filtrado y tabla ``dropped`` con columnas ``n_obs``,
+        ``primera_fecha``, ``ultima_fecha`` y ``motivo``, ordenada por número
+        de observaciones.
+    """
+    umbral = max(min_history_obs, min_valid_obs)
+    conteo = prices.notna().sum()
+
+    if conteo.empty:
+        return prices.copy(), _empty_drop_table()
+
+    excedentes = conteo.index[conteo >= umbral]
+    insuficientes = conteo.index[conteo < umbral]
+
+    panel = prices[excedentes].copy()
+
+    if len(insuficientes) == 0:
+        return panel, _empty_drop_table()
+
+    motivo = np.where(
+        conteo.loc[insuficientes] < min_history_obs,
+        "historia_insuficiente",
+        "sin_datos",
+    )
+    dropped = pd.DataFrame(
+        {
+            "n_obs": conteo.loc[insuficientes],
+            "primera_fecha": _extremes(prices[insuficientes], "min"),
+            "ultima_fecha": _extremes(prices[insuficientes], "max"),
+            "motivo": motivo,
+        },
+        index=pd.Index(insuficientes, name="ticker"),
+    ).sort_values("n_obs")
+    return panel, dropped
+
+
+def _extremes(prices: pd.DataFrame, which: str) -> pd.Series:
+    """Primera o última fecha con precio válido de cada columna."""
+    return prices.apply(lambda col: col.dropna().index.min() if which == "min"
+                        else col.dropna().index.max())
+
+
+def _empty_drop_table() -> pd.DataFrame:
+    """Tabla de descarte vacía con las columnas esperadas."""
+    return pd.DataFrame(
+        {
+            "n_obs": pd.Series(dtype="int64"),
+            "primera_fecha": pd.Series(dtype="datetime64[ns]"),
+            "ultima_fecha": pd.Series(dtype="datetime64[ns]"),
+            "motivo": pd.Series(dtype="object"),
+        },
+        index=pd.Index([], name="ticker"),
+    )
+
+
+@dataclass(frozen=True)
+class DatasetReport:
+    """Diagnóstico de cobertura de un panel de retornos alineado.
+
+    Sirve para detectar el fallo más insidioso de estos cuadernos: pedir un
+    rango de treinta años y acabar analysizando dos meses porque la
+    intersección de fechas la fijó el activo con menos historia.
+
+    Attributes
+    ----------
+    requested_start, requested_end : str
+        Ventana temporal solicitada.
+    first_date, last_date : pd.Timestamp
+        Fechas efectivas de la primera y la última sesión del panel.
+    n_sessions : int
+        Número de sesiones (observaciones de retorno) del panel.
+    n_assets : int
+        Activos que sobreviven al filtro de historia.
+    n_assets_requested : int
+        Activos solicitados antes de filtrar.
+    min_history_obs : int
+        Umbral de historia aplicado.  Se registra en el informe para que la
+        tabla exportada documente qué filtro produjo la muestra.
+    union_sessions : int
+        Fechas distintas en las que cotizó **algún** activo superviviente: el
+        máximo de sesiones que permite alinear ese universo.  Comparado con
+        ``n_sessions`` revela cuánto se pierde por exigir la intersección.
+    coverage_pct : float
+        ``n_sessions / union_sessions``.  Es la métrica que delata el fallo
+        de alineación: un valor minúsculo significa que la fecha más temprana
+        la fija un activo sin historia, no que falten datos.
+    window_pct : float
+        ``n_sessions / expected_sessions`` sobre la ventana solicitada.  Suele
+        ser bajo por diseño, ya que la mayoría de los componentes actuales
+        del S&P 500 no cotizaba todavía en el inicio del rango.
+    expected_sessions : int
+        Días hábiles entre las fechas solicitadas (límite superior, no
+        descuenta festivos bursátiles).
+    calendar_days : int
+        Días naturales entre la primera y la última sesión efectivas.
+    sessions_per_year : float
+        Sesiones efectivas por año natural; un valor cercano a 252 confirma
+        que el índice es de sesiones bursátiles y no de días calendario.
+    history_per_asset : pd.Series
+        Observaciones de precio disponibles por activo dentro de la ventana,
+        antes de alinear.
+    dropped_assets : pd.DataFrame
+        Activos descartados con ``n_obs``, fechas y ``motivo``.
+    """
+
+    requested_start: str
+    requested_end: str
+    first_date: pd.Timestamp
+    last_date: pd.Timestamp
+    n_sessions: int
+    n_assets: int
+    n_assets_requested: int
+    min_history_obs: int
+    union_sessions: int
+    coverage_pct: float
+    window_pct: float
+    expected_sessions: int
+    calendar_days: int
+    sessions_per_year: float
+    history_per_asset: pd.Series
+    dropped_assets: pd.DataFrame
+
+
+#: Mínimo de sesiones para que los estadísticos (correlación, ADF, OU) sean
+#: interpretables; por debajo se advierte en lugar de devolver números sin
+#: contexto.  Un año bursátil.
+MIN_SESSIONS_WARN = 252
+
+
+def _build_dataset_report(
+    returns: pd.DataFrame,
+    history: pd.DataFrame,
+    dropped: pd.DataFrame,
+    requested_start: str,
+    requested_end: str,
+    n_requested: int,
+    min_history_obs: int,
+) -> DatasetReport:
+    """Construye el :class:`DatasetReport` de un panel ya alineado."""
+    inicio, fin = pd.Timestamp(requested_start), pd.Timestamp(requested_end)
+    # ``np.busday_count`` exige granularidad diaria.
+    expected = int(
+        np.busday_count(
+            np.datetime64(inicio.to_datetime64(), "D"),
+            np.datetime64(fin.to_datetime64(), "D"),
+        )
+    )
+    n_sessions = len(returns)
+    dias = (returns.index[-1] - returns.index[0]).days if n_sessions else 0
+    años = dias / 365.25 if dias else float("nan")
+    union = int(history.notna().any(axis=1).sum())
+
+    return DatasetReport(
+        requested_start=requested_start,
+        requested_end=requested_end,
+        first_date=returns.index[0],
+        last_date=returns.index[-1],
+        n_sessions=n_sessions,
+        n_assets=returns.shape[1],
+        n_assets_requested=n_requested,
+        min_history_obs=min_history_obs,
+        union_sessions=union,
+        coverage_pct=n_sessions / union if union else float("nan"),
+        window_pct=n_sessions / expected if expected else float("nan"),
+        expected_sessions=expected,
+        calendar_days=dias,
+        sessions_per_year=n_sessions / años if años else float("nan"),
+        history_per_asset=history.notna().sum(),
+        dropped_assets=dropped,
+    )
+
+
+def _warn_on_low_coverage(report: DatasetReport) -> None:
+    """Advierte si la muestra efectiva no permite interpretar los análisis.
+
+    El criterio es el tamaño absoluto de la muestra, no la cobertura: un
+    universo de componentes actuales no puede cubrir toda la ventana pedida
+    porque muchas empresas no cotizaban todavía al principio del rango.  Lo
+    que sí indica un fallo es una intersección minúscula, y eso queda
+    reflejado en ``coverage_pct`` frente a ``union_sessions``.
+    """
+    if report.n_sessions < MIN_SESSIONS_WARN:
+        warnings.warn(
+            f"Panel de retornos degradado: sólo {report.n_sessions} sesiones "
+            f"(mínimo recomendado {MIN_SESSIONS_WARN}) y una cobertura del "
+            f"{report.coverage_pct:.1%} de las {report.union_sessions} sesiones "
+            f"disponibles. Suele indicar que algún activo sin historia está "
+            f"truncando la intersección: revisa min_history_obs y la ventana.",
+            UserWarning,
+            stacklevel=3,
+        )
+
+
+def print_dataset_report(
+    report: DatasetReport,
+    min_history_obs: int | None = None,
+    max_dropped: int = 10,
+) -> None:
+    """Imprime el diagnóstico de cobertura de un panel de retornos.
+
+    Existe para que los cuadernos que comparten la fase de preparación
+    (Pearson e Información Mutua) no dupliquen el bloque de impresiones y
+    cualquier recorte de la muestra quede visible antes de interpretar los
+    resultados.
+
+    Parameters
+    ----------
+    report : DatasetReport
+        Diagnóstico devuelto por :func:`load_returns_panel`.
+    min_history_obs : int, opcional
+        Umbral de historia aplicado, sólo para mostrarlo en el resumen.
+    max_dropped : int
+        Número máximo de activos descartados que se listan en detalle.
+    """
+    print(f"\nVentana solicitada : {report.requested_start} → "
+          f"{report.requested_end}")
+    print(
+        f"Ventana efectiva   : {report.first_date:%Y-%m-%d} → "
+        f"{report.last_date:%Y-%m-%d}"
+    )
+    print(
+        f"Sesiones           : {report.n_sessions} "
+        f"({report.calendar_days} días naturales, "
+        f"{report.sessions_per_year:.0f} sesiones/año)"
+    )
+    print(
+        f"Cobertura          : {report.coverage_pct:.1%} de las "
+        f"{report.union_sessions} fechas disponibles y "
+        f"{report.window_pct:.1%} de la ventana solicitada"
+    )
+    umbral = (
+        f" (exige ≥ {min_history_obs} sesiones)"
+        if min_history_obs is not None
+        else ""
+    )
+    print(
+        f"Activos            : {report.n_assets} de "
+        f"{report.n_assets_requested}{umbral}"
+    )
+    historia = report.history_per_asset
+    if not historia.empty:
+        print(
+            f"Historia por activo: min {historia.min()}, "
+            f"mediana {historia.median():.0f}, max {historia.max()}"
+        )
+    if not report.dropped_assets.empty:
+        print(
+            f"\nActivos descartados por historia insuficiente "
+            f"({len(report.dropped_assets)}):"
+        )
+        print(report.dropped_assets.head(max_dropped).to_string())
+        restantes = len(report.dropped_assets) - max_dropped
+        if restantes > 0:
+            print(f"... y {restantes} más.")
+
+
+@dataclass(frozen=True)
+class PairSelectionUniverse:
+    """Universo preparado para los cuadernos de selección de pares.
+
+    Agrupa lo que ambos cuaderos necesitan antes de estimar su métrica:
+    los tickers únicos por emisor, sus sectores, sus emisores, el panel de
+    log-retornos alineado y su diagnóstico de cobertura.
+
+    Attributes
+    ----------
+    returns : pd.DataFrame
+        Log-retornos alineados del panel común.
+    report : DatasetReport
+        Diagnóstico de cobertura del panel.
+    sectors : pd.Series
+        Sector GICS de cada ticker presente en el panel.
+    issuers : pd.Series
+        Emisor de cada ticker presente en el panel.
+    n_sectors : int
+        Número de sectores GICS distintos presentes.
+    removed_duplicate_issuers : pd.DataFrame
+        Filas descartadas por compartir emisor con otra clase de acción.
+    """
+
+    returns: pd.DataFrame
+    report: DatasetReport
+    sectors: pd.Series
+    issuers: pd.Series
+    n_sectors: int
+    removed_duplicate_issuers: pd.DataFrame
+
+
+def prepare_pair_selection_universe(
+    constituents: pd.DataFrame | None = None,
+    start: str = START,
+    end: str = END,
+    cache_dir: Path = DATA_DIR,
+    refresh: bool = False,
+    min_history_obs: int = PAIR_SELECTION_MIN_HISTORY_OBS,
+    min_valid_obs: int = 3,
+    verbose: bool = True,
+) -> PairSelectionUniverse:
+    """Prepara el universo común de los cuadernos de selección de pares.
+
+    Encadena la fase compartida por ambos cuadernos: elimina una clase de
+    acción por emisor, construye el panel de log-retornos con
+    :func:`load_returns_panel` (que filtra por historia **antes** de alinear)
+    y alinea sectores y emisores con los tickers que sobreviven.
+
+    Mantener esta fase en un único sitio garantiza que la matriz de Pearson
+    y la de Información Mutua se estimen sobre exactamente la misma muestra.
+
+    Parameters
+    ----------
+    constituents : pd.DataFrame, opcional
+        Tabla de constituyentes del S&P 500.  Si se omite se descarga con
+        :func:`get_sp500_constituents`.
+    start, end : str
+        Ventana temporal solicitada.
+    cache_dir : Path
+        Carpeta de la caché CSV de precios.
+    refresh : bool
+        Si ``True``, fuerza la descarga de precios aunque exista caché.
+    min_history_obs : int
+        Mínimo de sesiones por ticker dentro de la ventana.
+    min_valid_obs : int
+        Mínimo absoluto de observaciones válidas por ticker.
+    verbose : bool
+        Si ``True``, imprime el tamaño del universo, los emisores
+        descartados y el diagnóstico completo de cobertura.
+
+    Returns
+    -------
+    PairSelectionUniverse
+        Panel de retornos, diagnóstico y metadatos alineados.
+    """
+    if constituents is None:
+        constituents = get_sp500_constituents()
+
+    kept, removed = filter_duplicate_issuers(constituents)
+    tickers = kept["Symbol"].tolist()
+
+    if verbose:
+        print(f"Tamaño del universo S&P 500: {len(tickers)} activos únicos")
+        if not removed.empty:
+            print("Símbolos descartados (mismo emisor que otro ya presente):")
+            print(removed.to_string(index=False))
+
+    returns, report = load_returns_panel(
+        tickers,
+        start,
+        end,
+        cache_dir,
+        refresh,
+        min_valid_obs,
+        min_history_obs,
+    )
+
+    sectors = kept.set_index("Symbol")["GICS Sector"].reindex(
+        returns.columns
+    ).dropna()
+    issuers = kept.set_index("Symbol")["Issuer"].reindex(returns.columns)
+
+    if verbose:
+        print_dataset_report(report, min_history_obs=min_history_obs)
+        print(f"Sectores GICS presentes: {sectors.nunique()}")
+
+    return PairSelectionUniverse(
+        returns=returns,
+        report=report,
+        sectors=sectors,
+        issuers=issuers,
+        n_sectors=int(sectors.nunique()),
+        removed_duplicate_issuers=removed,
+    )
+
+
+# =============================================================================
+# Exportación de tablas para la tesis
+# =============================================================================
+
+#: Caracteres con significado especial en LaTeX y su reemplazo.
+_LATEX_ESCAPES = {
+    "\\": r"\textbackslash{}",
+    "&": r"\&",
+    "%": r"\%",
+    "$": r"\$",
+    "#": r"\#",
+    "_": r"\_",
+    "{": r"\{",
+    "}": r"\}",
+    "~": r"\textasciitilde{}",
+    "^": r"\textasciicircum{}",
+}
+
+
+def _latex_escape(text: object) -> str:
+    """Escapa los caracteres especiales de LaTeX de una cadena."""
+    return "".join(_LATEX_ESCAPES.get(char, char) for char in str(text))
+
+
+def _format_latex_cell(value: object, decimals: int) -> str:
+    """Formatea una celda para ``tabular``: ausentes, booleanos y números.
+
+    Los booleanos se muestran como ``Sí``/``No`` y los enteros con separador
+    de miles, para que las sesiones de la tabla se lean de un vistazo.
+    """
+    if isinstance(value, (bool, np.bool_)):
+        return r"\textbf{Sí}" if value else "No"
+    if isinstance(value, (int, np.integer)):
+        return f"{int(value):,}".replace(",", r"\,")
+    if isinstance(value, (float, np.floating)):
+        return "--" if np.isnan(value) else f"{float(value):.{decimals}f}"
+    if isinstance(value, pd.Timestamp):
+        return value.strftime("%Y-%m-%d")
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return "--"
+    return _latex_escape(value)
+
+
+def _latex_tabular(display: pd.DataFrame, decimals: int) -> str:
+    """Construye el ``tabular`` con ``booktabs`` de un DataFrame.
+
+    Se implementa a mano en lugar de usar ``DataFrame.to_latex`` porque en
+    pandas 3 ese método delega en ``Styler``, que exige ``jinja2``: una
+    dependencia nueva sólo para formatear una tabla de veinte filas.  Así se
+    controlan con exactitud el escapado, los valores ausentes y la
+    alineación por tipo de columna.
+    """
+    aligns = "".join(
+        "r" if pd.api.types.is_numeric_dtype(display[col]) else "l"
+        for col in display.columns
+    ) or "l"
+    header = " & ".join(_latex_escape(col) for col in display.columns)
+    # La cadena cruda es imprescindible: en una f-string normal ``"\\\\"``
+    # colapsaría a un único "\", que rompe la alineación de LaTeX.
+    fin_de_fila = r" \\"
+    lines = [
+        rf"\begin{{tabular}}{{{aligns}}}",
+        r"\toprule",
+        f"{header}" + fin_de_fila,
+        r"\midrule",
+    ]
+    for _, row in display.iterrows():
+        cells = [_format_latex_cell(value, decimals) for value in row]
+        lines.append(" & ".join(cells) + fin_de_fila)
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(lines)
+
+
+def _jsonable(value: object) -> object:
+    """Convierte tipos de pandas y numpy en valores serializables en JSON."""
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, pd.Series):
+        return {str(k): _jsonable(v) for k, v in value.to_dict().items()}
+    if isinstance(value, pd.DataFrame):
+        return _jsonable(value.to_dict(orient="list"))
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return None if np.isnan(value) else float(value)
+    if isinstance(value, float) and np.isnan(value):
+        return None
+    return value
+
+
+def table_conditions(
+    report: DatasetReport,
+    method: str,
+    n_pairs: int,
+    notes: Sequence[str] = (),
+) -> list[str]:
+    """Redacta las condiciones de cálculo que acompañan a una tabla.
+
+    Una tabla de resultados sin las condiciones con las que se produjo es
+    irreproducible: aquí se recogen la ventana solicitada y la efectiva, el
+    tamaño real de la muestra, el filtro de historia aplicado y la cobertura,
+    de modo que el lector pueda reconstruir exactamente el panel.  Las
+    ``notes`` del cuaderno (significancia del test, número de vecinos, ...)
+    se añaden al final ya redactadas.
+    """
+    lineas = [
+        f"Método de selección: {method}.",
+        (
+            f"Ventana solicitada: {report.requested_start} a "
+            f"{report.requested_end}."
+        ),
+        (
+            f"Ventana efectiva: {report.first_date:%Y-%m-%d} a "
+            f"{report.last_date:%Y-%m-%d}."
+        ),
+        (
+            f"Muestra: {report.n_sessions} sesiones "
+            f"({report.calendar_days} días naturales, "
+            f"{report.sessions_per_year:.1f} sesiones/año)."
+        ),
+        (
+            f"Universo: {report.n_assets} activos de "
+            f"{report.n_assets_requested} solicitados "
+            f"({len(report.dropped_assets)} descartados por historia "
+            f"insuficiente)."
+        ),
+        (
+            f"Filtro de historia: al menos {report.min_history_obs} sesiones "
+            f"por activo dentro de la ventana."
+        ),
+        (
+            f"Cobertura: {report.coverage_pct:.1%} de las "
+            f"{report.union_sessions} fechas disponibles y "
+            f"{report.window_pct:.1%} de la ventana solicitada."
+        ),
+        f"Pares seleccionados: {n_pairs}.",
+    ]
+    lineas.extend(str(nota) for nota in notes)
+    return lineas
+
+
+def _with_rank(table: pd.DataFrame) -> pd.DataFrame:
+    """Antepone la columna ``rank`` si la tabla todavía no la tiene."""
+    if "rank" in table.columns:
+        return table
+    con_rank = table.copy()
+    con_rank.insert(0, "rank", np.arange(1, len(con_rank) + 1))
+    return con_rank
+
+
+def select_table_columns(
+    table: pd.DataFrame,
+    columns: Sequence[str] | None,
+) -> pd.DataFrame:
+    """Selecciona y reordena las columnas de una tabla de resultados.
+
+    Permite que cada cuaderno elija qué información acaba en el ``.tex`` y
+    en el ``.csv`` sin perder de vista el resto: las condiciones de cálculo
+    viajan aparte, en la nota y en el JSON, así que recortar columnas no
+    hace la tabla menos reproducible.
+
+    Parameters
+    ----------
+    table : pd.DataFrame
+        Tabla de partida, ya con ``rank`` si procede.
+    columns : Sequence[str] o None
+        Columnas a exportar, en el orden deseado.  ``None`` las exporta
+        todas.  La lista se respeta al pie de la letra: si no incluye
+        ``rank``, la tabla exportada no lo lleva.
+
+    Returns
+    -------
+    pd.DataFrame
+        La tabla con exactamente las columnas pedidas, en ese orden.
+
+    Raises
+    ------
+    TypeError
+        Si ``columns`` es una cadena suelta en lugar de una secuencia.
+    ValueError
+        Si la lista está vacía, repite columnas o pide alguna inexistente.
+    """
+    if columns is None:
+        return table
+    if isinstance(columns, str):
+        raise TypeError(
+            "``columns`` debe ser una secuencia de nombres de columna, no "
+            f"una cadena suelta: {columns!r}. Usa [{columns!r}] si sólo "
+            "quieres una columna."
+        )
+
+    pedidas = list(columns)
+    if not pedidas:
+        raise ValueError("``columns`` no puede ser una lista vacía.")
+
+    repetidas = [c for c in dict.fromkeys(pedidas) if pedidas.count(c) > 1]
+    if repetidas:
+        raise ValueError(f"Columnas repetidas en ``columns``: {repetidas}.")
+
+    faltantes = [c for c in pedidas if c not in table.columns]
+    if faltantes:
+        raise ValueError(
+            f"Columnas inexistentes en la tabla: {faltantes}. "
+            f"Disponibles: {list(table.columns)}."
+        )
+    return table.loc[:, pedidas]
+
+
+def export_pair_selection_table(
+    table: pd.DataFrame,
+    report: DatasetReport,
+    output_dir: Path | None = None,
+    stem: str = "parejas",
+    method: str = "",
+    caption: str = "",
+    label: str = "",
+    columns: Sequence[str] | None = None,
+    extra_metadata: Mapping[str, object] | None = None,
+    notes: Sequence[str] = (),
+    decimals: int = 4,
+) -> dict[str, Path]:
+    """Exporta una tabla de pares a CSV, LaTeX y JSON de metadatos.
+
+    Escribe tres ficheros en ``output_dir`` con el mismo ``stem``:
+
+    - ``.csv`` con los valores sin formatear, para reutilizarlos;
+    - ``.tex`` listo para ``\\input`` en la tesis, con las condiciones de
+      cálculo como nota bajo la tabla;
+    - ``.json`` con las condiciones estructuradas, para documentarlas o
+      compararlas entre ejecuciones.
+
+    Parameters
+    ----------
+    table : pd.DataFrame
+        Tabla de pares.  Si no trae la columna ``rank``, se antepone.
+    report : DatasetReport
+        Diagnóstico del panel con el que se calculó la tabla.
+    output_dir : Path, opcional
+        Destino; por defecto ``TABLES_DIR`` (``outputs/tables``).
+    stem : str
+        Nombre base de los tres ficheros.
+    method : str
+        Descripción del método, por ejemplo ``"correlación de Pearson"``.
+    caption, label : str
+        Texto y etiqueta LaTeX de la tabla.
+    columns : Sequence[str], opcional
+        Columnas a exportar y su orden.  ``None`` (por defecto) exporta
+        todas.  Ver :func:`select_table_columns`.
+    extra_metadata : Mapping, opcional
+        Claves y valores adicionales del cuaderno que se guardan en el JSON
+        (número de vecinos KSG, significancia del ADF, ...).
+    notes : Sequence[str], opcional
+        Condiciones adicionales del cuaderno, ya redactadas, que se añaden
+        a la nota de la tabla LaTeX.
+    decimals : int
+        Decimales de las columnas de punto flotante en el ``.tex``.
+
+    Returns
+    -------
+    dict[str, Path]
+        Rutas de los ficheros escritos, con las claves ``csv``, ``tex`` y
+        ``json``.
+    """
+    if table.empty:
+        raise ValueError("La tabla a exportar no tiene filas.")
+
+    destino = Path(output_dir) if output_dir is not None else TABLES_DIR
+    destino.mkdir(parents=True, exist_ok=True)
+
+    tabla = select_table_columns(_with_rank(table), columns)
+
+    csv_path = destino / f"{stem}.csv"
+    tex_path = destino / f"{stem}.tex"
+    json_path = destino / f"{stem}.json"
+
+    tabla.to_csv(csv_path, index=False)
+
+    lineas = table_conditions(report, method, len(tabla), notes)
+    metadata = {
+        "generado": datetime.now(timezone.utc).isoformat(),
+        "metodo": method,
+        "columnas": list(tabla.columns),
+        "n_pares": len(tabla),
+        "ventana_solicitada": {
+            "inicio": report.requested_start,
+            "fin": report.requested_end,
+        },
+        "ventana_efectiva": {
+            "inicio": report.first_date.strftime("%Y-%m-%d"),
+            "fin": report.last_date.strftime("%Y-%m-%d"),
+        },
+        "sesiones": report.n_sessions,
+        "dias_naturales": report.calendar_days,
+        "sesiones_por_ano": report.sessions_per_year,
+        "activos_solicitados": report.n_assets_requested,
+        "activos_conservados": report.n_assets,
+        "activos_descartados": len(report.dropped_assets),
+        "umbral_historia_sesiones": report.min_history_obs,
+        "fechas_disponibles_union": report.union_sessions,
+        "cobertura_panel_pct": report.coverage_pct,
+        "cobertura_ventana_pct": report.window_pct,
+        "condiciones": lineas,
+    }
+    metadata.update(dict(extra_metadata or {}))
+    json_path.write_text(
+        json.dumps(_jsonable(metadata), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    caption = caption or method or stem
+    cuerpo = [
+        (
+            "% Generado automáticamente por "
+            "thesis.pair_trading.export_pair_selection_table"
+        ),
+        "% No editar a mano: se regenera en cada ejecución del cuaderno.",
+        "% Requiere únicamente el paquete booktabs.",
+        r"\begin{table}[htbp]",
+        r"\centering",
+        rf"\caption{{{_latex_escape(caption)}}}",
+    ]
+    if label:
+        cuerpo.append(rf"\label{{{label}}}")
+    cuerpo += [_latex_tabular(tabla, decimals), "", r"\vspace{2pt}"]
+    # Las condiciones van en un ``minipage`` y no en ``tablenotes``: dentro
+    # de ``threeparttable`` tanto ``itemize`` como los párrafos sueltos
+    # abortan la compilación, y así sólo hace falta ``booktabs``.
+    cuerpo += [r"\begin{minipage}{0.98\linewidth}", r"\footnotesize"]
+    cuerpo += [
+        rf"\textbullet\ {_latex_escape(linea)}\par" for linea in lineas
+    ]
+    cuerpo += [r"\end{minipage}", r"\end{table}"]
+    tex_path.write_text("\n".join(cuerpo) + "\n", encoding="utf-8")
+
+    print(f"Tabla exportada: {csv_path.name}, {tex_path.name}, {json_path.name}")
+    return {"csv": csv_path, "tex": tex_path, "json": json_path}
+
+
+def _load_aligned_prices(
+    tickers: Sequence[str] | str,
+    start: str,
+    end: str,
+    cache_dir: Path,
+    refresh: bool,
+    min_valid_obs: int,
+    min_history_obs: int = 0,
+) -> pd.DataFrame:
+    """Descarga precios ``Adj Close`` y conserva sólo los tickers válidos.
+
+    Aplica el filtro de historia antes de alinear y exige que sobrevivan al
+    menos dos columnas.
+    """
+    prices = _download_prices(tickers, start, end, cache_dir, refresh)
+    panel, _ = filter_by_history(prices, min_history_obs, min_valid_obs)
+
+    if len(panel.columns) < 2:
+        raise ValueError(
+            f"Se necesitan al menos 2 tickers válidos. Encontrados: "
+            f"{list(panel.columns)}"
+        )
+    return panel
+
+
+def load_returns_panel(
     tickers: Sequence[str] | str,
     start: str = START,
     end: str = END,
     cache_dir: Path = DATA_DIR,
     refresh: bool = False,
     min_valid_obs: int = 3,
+    min_history_obs: int = 0,
+) -> tuple[pd.DataFrame, DatasetReport]:
+    """Construye el panel de log-retornos alineado junto con su diagnóstico.
+
+    Descarga los precios, descarta por historia los tickers demasiado
+    recientes, alinea las fechas de los supervivientes y calcula
+    $r_t = \\log(P_t / P_{t-1})$.
+
+    El orden importa: alinear **antes** de filtrar haría que un único activo
+    recién cotizado truncase el panel completo, ya que ``dropna`` conserva
+    sólo las fechas en las que cotizan todos los activos.
+
+    Parameters
+    ----------
+    tickers : Sequence[str] | str
+        Lista de tickers (o un único ticker) compatible con ``yfinance``.
+    start, end : str
+        Ventana temporal solicitada.
+    cache_dir : Path
+        Carpeta donde ``load_multiple_prices`` guarda la caché CSV.
+    refresh : bool
+        Si ``True``, fuerza la descarga aunque exista caché.
+    min_valid_obs : int
+        Mínimo absoluto de observaciones válidas por ticker.
+    min_history_obs : int
+        Mínimo de observaciones dentro de la ventana.  Un valor de ``1260``
+        (~5 años) mantiene la historia suficiente sin depender de que el
+        activo más nuevo haya cotizado durante toda la ventana.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, DatasetReport]
+        Retornos logarítmios alineados y el diagnóstico de cobertura.
+    """
+    prices = _download_prices(tickers, start, end, cache_dir, refresh)
+    n_requested = len(prices.columns)
+
+    panel, dropped = filter_by_history(prices, min_history_obs, min_valid_obs)
+    if len(panel.columns) < 2:
+        raise ValueError(
+            f"Se necesitan al menos 2 tickers válidos. Encontrados: "
+            f"{list(panel.columns)}"
+        )
+
+    log_ret = np.log(panel / panel.shift(1)).dropna(how="any")
+    if log_ret.empty:
+        raise ValueError("No quedan observaciones tras el alineamiento.")
+
+    report = _build_dataset_report(
+        log_ret, panel, dropped, start, end, n_requested, min_history_obs,
+    )
+    _warn_on_low_coverage(report)
+    return log_ret, report
+
+
+def load_log_prices(
+    tickers: Sequence[str] | str,
+    start: str = START,
+    end: str = END,
+    cache_dir: Path = DATA_DIR,
+    refresh: bool = False,
+    min_valid_obs: int = 3,
+    min_history_obs: int = 0,
 ) -> pd.DataFrame:
-    """Descarga precios ``Adj Close`` y devuelve los log-retornos limpios.
+    """Descarga precios ``Adj Close`` y devuelve los log-precios limpios.
 
     Reutiliza :func:`thesis.market_data.load_multiple_prices` para
-    aprovechar la caché CSV.  El log-retorno es
-    $r_t = \\log(P_t / P_{t-1})$.  Tras alinear fechas descarta tickers
-    con menos de ``min_valid_obs`` observaciones válidas y elimina filas
-    con ``NaN``.
+    aprovechar la caché CSV y aplica $\\log P_t$ sobre las observaciones
+    comunes a todos los tickers válidos.
+
+    Es la serie que requiere el análisis de cointegración: el hedge ratio y
+    el test ADF se estiman sobre $\\log P$, no sobre retornos.  Acumular los
+    log-retornos con ``cumsum`` no es equivalente, porque descarta el
+    primer nivel y pierde observaciones en las fechas donde un activo no
+    cotizó, de modo que las series resultantes no coinciden con las que
+    produce :func:`thesis.market_data.load_multiple_prices` más ``np.log``.
 
     Parameters
     ----------
@@ -246,32 +1112,62 @@ def load_log_returns(
         Si ``True``, fuerza la descarga aunque exista caché.
     min_valid_obs : int
         Mínimo de observaciones válidas para conservar un ticker.
+    min_history_obs : int
+        Mínimo de observaciones dentro de la ventana.
+
+    Returns
+    -------
+    pd.DataFrame
+        Log-precios con índice temporal y un ticker por columna.
+    """
+    prices = _load_aligned_prices(
+        tickers, start, end, cache_dir, refresh, min_valid_obs, min_history_obs,
+    )
+
+    log_prices = np.log(prices.where(prices > 0)).dropna(how="any")
+    if log_prices.empty:
+        raise ValueError("No quedan observaciones tras el alineamiento.")
+    return log_prices
+
+
+def load_log_returns(
+    tickers: Sequence[str] | str,
+    start: str = START,
+    end: str = END,
+    cache_dir: Path = DATA_DIR,
+    refresh: bool = False,
+    min_valid_obs: int = 3,
+    min_history_obs: int = 0,
+) -> pd.DataFrame:
+    """Descarga precios ``Adj Close`` y devuelve los log-retornos limpios.
+
+    Atajo sobre :func:`load_returns_panel` para los consumidores que no
+    necesitan el diagnóstico de cobertura.  El log-retorno es
+    $r_t = \\log(P_t / P_{t-1})$.
+
+    Parameters
+    ----------
+    tickers : Sequence[str] | str
+        Lista de tickers (o un único ticker) compatible con ``yfinance``.
+    start, end : str
+        Fechas en formato ``"YYYY-MM-DD"``.
+    cache_dir : Path
+        Carpeta donde ``load_multiple_prices`` guarda la caché CSV.
+    refresh : bool
+        Si ``True``, fuerza la descarga aunque exista caché.
+    min_valid_obs : int
+        Mínimo de observaciones válidas por ticker.
+    min_history_obs : int
+        Mínimo de observaciones dentro de la ventana.
 
     Returns
     -------
     pd.DataFrame
         Retornos logarítmicos con índice temporal y un ticker por columna.
     """
-    if isinstance(tickers, str):
-        tickers = [tickers]
-
-    prices = load_multiple_prices(list(tickers), start, end, cache_dir, refresh)
-    if prices.empty:
-        raise ValueError("No se descargaron datos para el rango solicitado.")
-
-    valid_cols = [
-        col for col in prices.columns
-        if prices[col].notna().sum() > min_valid_obs - 1
-    ]
-    if len(valid_cols) < 2:
-        raise ValueError(
-            f"Se necesitan al menos 2 tickers válidos. Encontrados: {valid_cols}"
-        )
-    prices = prices[valid_cols]
-
-    log_ret = np.log(prices / prices.shift(1)).dropna(how="any")
-    if log_ret.empty:
-        raise ValueError("No quedan observaciones tras el alineamiento.")
+    log_ret, _ = load_returns_panel(
+        tickers, start, end, cache_dir, refresh, min_valid_obs, min_history_obs,
+    )
     return log_ret
 
 
@@ -863,6 +1759,64 @@ def top_pairs(
 # =============================================================================
 # Evaluación sectorial de clusters
 # =============================================================================
+
+#: Sectores GICS con su denominación en castellano.  Wikipedia publica la
+#: tabla en inglés; la tesis está escrita en español, así que las etiquetas
+#: se traducen antes de calcular métricas, dibujar figuras y exportar
+#: tablas.  Traducir no altera ningún resultado: las métricas de
+#: alineación sólo dependen de la partición, no de los nombres.
+GICS_SECTOR_ES: dict[str, str] = {
+    "Communication Services": "Servicios de Comunicación",
+    "Consumer Discretionary": "Consumo Discrecional",
+    "Consumer Staples": "Consumo Básico",
+    "Energy": "Energía",
+    # GICS renombró el sector; ambas denominaciones deben colapsar en la
+    # misma etiqueta o la partición sectorial se fragmentaría en dos.
+    "Financials": "Finanzas",
+    "Financial Services": "Finanzas",
+    "Health Care": "Salud",
+    "Industrials": "Industriales",
+    "Information Technology": "Tecnología de la Información",
+    "Materials": "Materiales",
+    "Real Estate": "Inmobiliario",
+    "Utilities": "Servicios Públicos",
+}
+
+
+def translate_gics_sectors(sectors: pd.Series) -> pd.Series:
+    """Traduce a castellano los nombres de sector GICS de una serie.
+
+    Parameters
+    ----------
+    sectors : pd.Series
+        Serie indexada por ticker con el sector GICS como valor.
+
+    Returns
+    -------
+    pd.Series
+        Misma serie con los sectores traducidos.  Los valores que no están
+        en :data:`GICS_SECTOR_ES` se conservan tal cual, de modo que un
+        sector nuevo no rompe el análisis y queda visible en las tablas.
+    """
+    traducidos = sectors.map(lambda s: GICS_SECTOR_ES.get(s, s))
+    traducidos.name = sectors.name
+    return traducidos
+
+
+def unmapped_gics_sectors(sectors: pd.Series) -> list[str]:
+    """Sectores presentes en la serie que no están en :data:`GICS_SECTOR_ES`.
+
+    Sirve para detectar que GICS haya añadido un sector y la traducción se
+    haya quedado obsoleta, en lugar de que la etiqueta en inglés aparezca
+    sin avisar en la tesis.
+    """
+    return sorted(
+        {
+            str(s)
+            for s in pd.unique(sectors.dropna())
+            if str(s) not in GICS_SECTOR_ES
+        }
+    )
 
 
 def align_cluster_sector_labels(
