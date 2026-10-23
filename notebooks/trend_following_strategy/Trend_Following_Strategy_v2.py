@@ -368,7 +368,7 @@ ax.legend(loc='best', fontsize=8)
 
 ax2 = axes[1]
 ax2.plot(relative_log.index, relative_log, color='steelblue', lw=1.0,
-         label='log(Strategy) − log(Buy & Hold)')
+         label='log(Strategy)  − log(Buy & Hold)')
 ax2.axhline(0.0, color='black', lw=0.6, ls=':')
 ax2.fill_between(relative_log.index, relative_log, 0.0,
                  where=relative_log >= 0, color='limegreen', alpha=0.25)

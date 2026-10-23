@@ -846,11 +846,11 @@ def plot_pair_overview(
     else:
         axes[1].axhline(spread.mean(), color="black", linewidth=1.5,
                         linestyle="--", label="Media muestral")
-    axes[1].set_ylabel("Spread")
+    axes[1].set_ylabel("Dispersión")
     axes[1].set_xlabel("Fecha")
-    axes[1].legend(loc="best")
+    axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 
-    fig.suptitle("Par y spread", fontweight="bold")
+    # fig.suptitle("Par y spread", fontweight="bold")
     plt.tight_layout()
     plt.show()

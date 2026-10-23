@@ -1,25 +1,82 @@
 # Entornos e ignorados automáticos
 .venv/
 .env
+.env.*
+
+# Python-generated files
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+wheels/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.dmypy.json
+
+# Jupyter / Jupytext
+.ipynb_checkpoints/
+*.ipynb
+
+# Cobertura y mediciones
+.coverage
+.coverage.*
+htmlcov/
+*.cover
+.cache/
 
 # Datos (NUNCA subir bases de datos completas a Git)
 data/
 *.parquet
 *.csv
+*.feather
+*.h5
+*.hdf5
+*.db
+*.sqlite
+*.sqlite3
 
 # Artefactos y salidas
 outputs/
+results/
+figures/
 *.npy
+*.npz
 *.pt
 *.pth
+*.pkl
+*.pickle
+*.json
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
+*.gif
+*.mp4
+*.avi
+*.mov
 
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# Logs
+*.log
 
+# IDEs y editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Hatch / Setuptools
+.eggs/
+*.manifest
+*.spec
+pip-wheel-metadata/

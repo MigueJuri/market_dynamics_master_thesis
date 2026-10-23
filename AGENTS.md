@@ -8,10 +8,12 @@ Después de cada modificación en archivos del proyecto, muestro el diff resulta
 antes de continuar. Para archivos nuevos, los preparo (`git add`) y muestro el
 diff de la zona de preparación (`git diff --cached`).
 
-## 2. Commits automáticos tras cada modificación
+## 2. Commits agrupados por unidad lógica
 
-Una vez mostrado el diff y confirmados los cambios, creo un commit automático
-con un mensaje breve y descriptivo que siga el estilo del repositorio.
+No creo commits automáticos.  Antes de hacer commit pregunto al usuario
+para confirmar el alcance y el mensaje.  Cuando se confirma, agrupo los
+cambios relacionados en un único commit por unidad lógica en lugar de
+fragmentar cada edición individual.
 
 No hago commit de cambios que no sean parte de una modificación intencionada
 (por ejemplo, archivos temporales o secretos).
