@@ -45,6 +45,9 @@ pip install -e ".[dev]"
 │   ├── features.py              # Características y targets
 │   ├── event_labeling.py        # Triple barrera
 │   ├── pair_trading.py          # Spread, OU, MI y clustering
+│   ├── volatility.py            # Features y target de volatilidad
+│   ├── volatility_models.py     # LSTM, HAR-RV y entrenamiento
+│   ├── volatility_evaluation.py # Métricas, backtest y gráficos
 │   └── plotting.py              # Visualizaciones reutilizables
 │
 ├── tests/                       # Tests del paquete
@@ -53,7 +56,8 @@ pip install -e ".[dev]"
 ├── notebooks/
 │   ├── feature_analysis/        # Análisis de predictibilidad
 │   ├── pair_trading/            # Selección de pares, OU y trading
-│   └── trend_following_strategy/# Estrategia de momentum
+│   ├── trend_following_strategy/# Estrategia de momentum
+│   └── volatility/              # Predicción de volatilidad con LSTM
 │
 ├── data/                        # Caché local de precios (no en Git)
 ├── outputs/                     # Resultados y figuras (no en Git)
@@ -82,6 +86,13 @@ Para una sola función de test:
 
 ```bash
 uv run pytest tests/test_pair_trading.py::test_dataclass_declara_campos -v
+```
+
+Los tests de integración requieren red y datos reales, por lo que están
+marcados con `integration` y se omiten por defecto.  Para ejecutarlos:
+
+```bash
+uv run pytest -m integration -v
 ```
 
 ---
@@ -118,7 +129,11 @@ uv run ruff format src tests
 
 ## Notas
 
-- Los tests no requieren conexión a red: usan datos sintéticos generados en
-  memoria.
+- Los tests por defecto no requieren conexión a red: usan datos sintéticos
+  generados en memoria.  Los de integración sí la requieren y se ejecutan
+  con `pytest -m integration`.
+- `torch` se resuelve desde el índice de wheels CPU de PyTorch
+  (`download.pytorch.org/whl/cpu`), evitando descargar las dependencias
+  CUDA (~3 GB) innecesarias para este proyecto.
 - El directorio `data/` y los artefactos generados no deben subirse al
   repositorio; están incluidos en `.gitignore`.

@@ -14,6 +14,7 @@ dependencies = [
     "statsmodels>=0.15.0",
     "librosa>=0.11.0",
     "scikit-learn>=1.3.0",
+    "torch>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +29,16 @@ dev = [
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
+# PyTorch se instala desde el índice de wheels CPU para evitar descargar las
+# dependencias CUDA (~3 GB) que no aporta nada en este proyecto.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
 [dependency-groups]
 dev = [
     "ipykernel>=7.3.0",
@@ -35,3 +46,9 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.8",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests que requieren red o datos reales (se omiten por defecto)",
+]
+addopts = "-m 'not integration'"
