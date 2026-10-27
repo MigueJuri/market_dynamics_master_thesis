@@ -25,9 +25,12 @@ from thesis.pair_trading import (
     DatasetReport,
     HedgeResult,
     OUParameters,
+    PairBacktestResult,
     PairSelectionUniverse,
     adf_test,
     align_cluster_sector_labels,
+    build_strategy_comparison,
+    build_z_score,
     cluster_sector_purity,
     compute_hedge_ratio,
     correlation_distance,
@@ -42,6 +45,7 @@ from thesis.pair_trading import (
     load_log_returns,
     load_returns_panel,
     mi_distance,
+    pair_trading_backtest,
     prepare_pair_selection_universe,
     print_dataset_report,
     sector_average_matrix,
@@ -51,6 +55,7 @@ from thesis.pair_trading import (
     top_pairs,
     translate_gics_sectors,
     unmapped_gics_sectors,
+    z_score_positions,
 )
 
 TICKERS = ["AAPL", "MSFT", "JPM", "XOM", "JNJ", "PFE", "KO", "WMT"]
@@ -78,7 +83,7 @@ def cointegrated_pair(rng):
     n = 252
     log_b = np.cumsum(rng.normal(0, 0.01, size=n))
     spread = simulate_ou_process(
-        theta=15.0, mu=0.0, sigma=0.05, x0=0.0, T=1.0, dt=1 / 252
+        theta=15.0, mu=0.0, sigma=0.05, x0=0.0, T=1.0, dt=1 / 252, seed=42
     )
     log_a = 0.5 + 0.8 * log_b + spread
     idx = pd.date_range("2023-01-01", periods=n, freq="B")
@@ -145,9 +150,7 @@ def panel_con_ipo_reciente():
         index=idx,
     )
     precios["C"] = np.nan
-    precios.loc[idx[-30:], "C"] = 20.0 * np.exp(
-        np.cumsum(rng.normal(0, 0.02, 30))
-    )
+    precios.loc[idx[-30:], "C"] = 20.0 * np.exp(np.cumsum(rng.normal(0, 0.02, 30)))
     return precios
 
 
@@ -164,9 +167,7 @@ def _patch_prices(monkeypatch, precios: pd.DataFrame) -> None:
     )
 
 
-def test_load_log_prices_es_log_de_los_precios(
-    monkeypatch, precios_sinteticos
-) -> None:
+def test_load_log_prices_es_log_de_los_precios(monkeypatch, precios_sinteticos) -> None:
     """``load_log_prices`` es el logaritmo de los precios comunes."""
     _patch_prices(monkeypatch, precios_sinteticos)
 
@@ -291,15 +292,19 @@ def test_filter_by_history_informa_de_historia_insuficiente() -> None:
 def test_filter_by_history_sin_descartes_devuelve_tabla_vacia() -> None:
     """Si nadie queda fuera, la tabla de descarte conserva sus columnas."""
     idx = pd.date_range("2023-01-02", periods=10, freq="B")
-    precios = pd.DataFrame({"A": np.arange(1.0, 11.0), "B": np.arange(2.0, 12.0)},
-                           index=idx)
+    precios = pd.DataFrame(
+        {"A": np.arange(1.0, 11.0), "B": np.arange(2.0, 12.0)}, index=idx
+    )
 
     panel, dropped = filter_by_history(precios, min_history_obs=5)
 
     assert list(panel.columns) == ["A", "B"]
     assert dropped.empty
     assert list(dropped.columns) == [
-        "n_obs", "primera_fecha", "ultima_fecha", "motivo",
+        "n_obs",
+        "primera_fecha",
+        "ultima_fecha",
+        "motivo",
     ]
 
 
@@ -346,9 +351,7 @@ def test_load_returns_panel_diagnostica_la_cobertura(
     assert report.n_assets_requested == 3
     assert report.first_date == retornos.index[0]
     assert report.last_date == retornos.index[-1]
-    assert report.calendar_days == (
-        retornos.index[-1] - retornos.index[0]
-    ).days
+    assert report.calendar_days == (retornos.index[-1] - retornos.index[0]).days
     # El ritmo anual confirma que el índice es de sesiones, no de días.
     assert 200.0 <= report.sessions_per_year <= 270.0
     # La cobertura se mide contra el calendario realmente disponible, no
@@ -385,7 +388,9 @@ def test_load_returns_panel_advierte_si_la_muestra_es_corta(
 
     with pytest.warns(UserWarning, match="sesiones"):
         retornos, report = load_returns_panel(
-            ["A", "B", "C"], "2019-01-01", "2020-08-01",
+            ["A", "B", "C"],
+            "2019-01-01",
+            "2020-08-01",
         )
 
     # Sin el filtro sobreviven los tres tickers, pero sólo las 30 sesiones
@@ -405,10 +410,16 @@ def test_load_returns_panel_coincide_con_load_log_returns(
     _patch_prices(monkeypatch, panel_con_ipo_reciente)
 
     con_informe, _ = load_returns_panel(
-        ["A", "B", "C"], "2019-01-01", "2020-08-01", min_history_obs=250,
+        ["A", "B", "C"],
+        "2019-01-01",
+        "2020-08-01",
+        min_history_obs=250,
     )
     atajo = load_log_returns(
-        ["A", "B", "C"], "2019-01-01", "2020-08-01", min_history_obs=250,
+        ["A", "B", "C"],
+        "2019-01-01",
+        "2020-08-01",
+        min_history_obs=250,
     )
 
     pd.testing.assert_frame_equal(con_informe, atajo)
@@ -456,9 +467,7 @@ def test_prepare_universo_filtra_por_historia(
     monkeypatch, panel_con_ipo_reciente, constituyentes_sin_duplicados
 ) -> None:
     """El universo descarta la IPO reciente antes de alinear el panel."""
-    _patch_prices(monkeypatch, panel_con_ipo_reciente.rename(
-        columns={"C": "D"}
-    ))
+    _patch_prices(monkeypatch, panel_con_ipo_reciente.rename(columns={"C": "D"}))
 
     universo = prepare_pair_selection_universe(
         constituents=constituyentes_sin_duplicados,
@@ -481,9 +490,7 @@ def test_prepare_universo_alinea_sectores_y_emisores(
     monkeypatch, panel_con_ipo_reciente, constituyentes_sin_duplicados
 ) -> None:
     """Sectores y emisores quedan indexados como las columnas del panel."""
-    _patch_prices(monkeypatch, panel_con_ipo_reciente.rename(
-        columns={"C": "D"}
-    ))
+    _patch_prices(monkeypatch, panel_con_ipo_reciente.rename(columns={"C": "D"}))
 
     universo = prepare_pair_selection_universe(
         constituents=constituyentes_sin_duplicados,
@@ -1146,7 +1153,10 @@ def test_export_anade_ranking_al_csv(
 ) -> None:
     """El CSV incluye el ranking como primera columna."""
     rutas = export_pair_selection_table(
-        tabla_de_pares, reporte_de_ejemplo, output_dir=tmp_path, stem="p",
+        tabla_de_pares,
+        reporte_de_ejemplo,
+        output_dir=tmp_path,
+        stem="p",
     )
 
     guardado = pd.read_csv(rutas["csv"])
@@ -1162,7 +1172,10 @@ def test_export_respeta_ranking_existente(
     con_rank.insert(0, "rank", [7, 8])
 
     rutas = export_pair_selection_table(
-        con_rank, reporte_de_ejemplo, output_dir=tmp_path, stem="p",
+        con_rank,
+        reporte_de_ejemplo,
+        output_dir=tmp_path,
+        stem="p",
     )
 
     assert pd.read_csv(rutas["csv"])["rank"].tolist() == [7, 8]
@@ -1221,7 +1234,10 @@ def test_export_tex_cierra_cada_fila_con_doble_barra(
     fallo sólo aparece al compilar.
     """
     rutas = export_pair_selection_table(
-        tabla_de_pares, reporte_de_ejemplo, output_dir=tmp_path, stem="p",
+        tabla_de_pares,
+        reporte_de_ejemplo,
+        output_dir=tmp_path,
+        stem="p",
     )
     filas = rutas["tex"].read_text(encoding="utf-8").splitlines()
 
@@ -1388,7 +1404,8 @@ def test_export_usa_solo_las_columnas_pedidas(
     assert meta["columnas"] == elegidas
 
     cabecera = next(
-        linea for linea in rutas["tex"].read_text(encoding="utf-8").splitlines()
+        linea
+        for linea in rutas["tex"].read_text(encoding="utf-8").splitlines()
         if linea.startswith("ticker\\_a")
     )
     assert cabecera.startswith("ticker\\_a & ticker\\_b")
@@ -1409,18 +1426,16 @@ def test_export_permite_omitir_el_ranking(
     )
 
     assert "rank" not in pd.read_csv(rutas["csv"]).columns
-    assert "rank" not in json.loads(
-        rutas["json"].read_text(encoding="utf-8")
-    )["columnas"]
+    assert (
+        "rank" not in json.loads(rutas["json"].read_text(encoding="utf-8"))["columnas"]
+    )
 
 
 def test_export_admite_ranking_inexistente_en_la_tabla(
     reporte_de_ejemplo, tmp_path
 ) -> None:
     """``rank`` puede pedirse aunque el DataFrame no lo traiga."""
-    sin_rank = pd.DataFrame(
-        {"ticker_a": ["AAPL"], "ticker_b": ["MSFT"], "mi": [0.5]}
-    )
+    sin_rank = pd.DataFrame({"ticker_a": ["AAPL"], "ticker_b": ["MSFT"], "mi": [0.5]})
 
     rutas = export_pair_selection_table(
         sin_rank,
@@ -1456,7 +1471,10 @@ def test_export_crea_el_directorio(
     destino = tmp_path / "anidado" / "tablas"
 
     rutas = export_pair_selection_table(
-        tabla_de_pares, reporte_de_ejemplo, output_dir=destino, stem="p",
+        tabla_de_pares,
+        reporte_de_ejemplo,
+        output_dir=destino,
+        stem="p",
     )
 
     assert destino.is_dir()
@@ -1503,9 +1521,7 @@ def test_los_alias_de_un_sector_deben_coincidir() -> None:
     Si divergieran y un dataset contuviera ambas, la partición sectorial se
     fragmentaría en dos y purity, entropía y ARI quedarían sesgados.
     """
-    assert (
-        GICS_SECTOR_ES["Financials"] == GICS_SECTOR_ES["Financial Services"]
-    )
+    assert GICS_SECTOR_ES["Financials"] == GICS_SECTOR_ES["Financial Services"]
 
 
 def test_traduce_sectores_de_una_serie() -> None:
@@ -1519,7 +1535,9 @@ def test_traduce_sectores_de_una_serie() -> None:
     traduccion = translate_gics_sectors(series)
 
     assert traduccion.tolist() == [
-        "Tecnología de la Información", "Salud", "Inmobiliario",
+        "Tecnología de la Información",
+        "Salud",
+        "Inmobiliario",
     ]
     assert traduccion.index.tolist() == ["AAPL", "JNJ", "PLD"]
     assert traduccion.name == "sector"
@@ -1564,8 +1582,12 @@ def test_traducir_no_altera_las_metricas_de_alineacion() -> None:
     # Sectores sin empate, para que el sector dominante sea inequívoco.
     clusters = pd.Series([0, 0, 0, 1], index=TICKERS[:4], name="cluster")
     sectores_en = pd.Series(
-        ["Information Technology", "Information Technology",
-         "Health Care", "Real Estate"],
+        [
+            "Information Technology",
+            "Information Technology",
+            "Health Care",
+            "Real Estate",
+        ],
         index=TICKERS[:4],
         name="sector",
     )
@@ -1582,7 +1604,8 @@ def test_traducir_no_altera_las_metricas_de_alineacion() -> None:
     assert traducido.ami == pytest.approx(original.ami)
     assert traducido.v_measure == pytest.approx(original.v_measure)
     assert set(traducido.per_cluster["dominant_sector"]) == {
-        "Tecnología de la Información", "Inmobiliario",
+        "Tecnología de la Información",
+        "Inmobiliario",
     }
     # Y las etiquetas inglesas ya no aparecen en la salida.
     assert not (
@@ -1590,6 +1613,326 @@ def test_traducir_no_altera_las_metricas_de_alineacion() -> None:
         .isin(["Information Technology", "Health Care", "Real Estate"])
         .any()
     )
+
+
+# =============================================================================
+# Backtest básico de pair trading
+# =============================================================================
+
+
+def test_build_z_score_forma_y_valores() -> None:
+    """El z-score tiene la estructura esperada y está normalizado por la std."""
+    idx = pd.date_range("2023-01-01", periods=200, freq="B")
+    # Serie estacionaria alrededor de cero con varianza unitaria.
+    rng = np.random.default_rng(7)
+    spread = pd.Series(rng.normal(0.0, 1.0, size=200), index=idx)
+
+    z_df = build_z_score(spread, window=60, min_periods=10)
+
+    assert list(z_df.columns) == ["spread", "mean", "std", "z_score"]
+    assert z_df.index.equals(spread.index)
+    valid_z = z_df["z_score"].dropna()
+    assert np.isclose(valid_z.mean(), 0.0, atol=0.25)
+    assert np.isclose(valid_z.std(), 1.0, atol=0.25)
+
+
+def test_z_score_positions_sin_look_ahead() -> None:
+    """La posición del día t se decide con el z-score del día t y se aplica
+    al día siguiente dentro del backtest."""
+    z = pd.Series([np.nan, np.nan, 3.0, 2.5, 0.5, -0.5, -2.5, -3.0, 0.0])
+    pos = z_score_positions(z, entry_z=2.0, exit_z=0.0)
+
+    expected = np.array([0.0, 0.0, -1.0, -1.0, -1.0, 0.0, 1.0, 1.0, 0.0])
+    assert np.array_equal(pos.to_numpy(), expected)
+
+
+def test_pair_backtest_dataclass_campos() -> None:
+    """PairBacktestResult declara los campos documentados y es inmutable."""
+    declared = tuple(f.name for f in dataclasses.fields(PairBacktestResult))
+    expected = (
+        "results",
+        "equity",
+        "sharpe",
+        "total_return",
+        "max_drawdown",
+        "trades",
+    )
+    assert declared == expected
+    assert PairBacktestResult.__dataclass_params__.frozen is True
+
+
+def _make_walk_forward_pair(n: int = 300, seed: int = 0):
+    """Construye un par cointegrado con un shock medio para el backtest."""
+    idx = pd.date_range("2022-01-01", periods=n, freq="B")
+    rng = np.random.default_rng(seed)
+    log_b = np.cumsum(rng.normal(0.0, 0.005, size=n))
+    spread = simulate_ou_process(
+        theta=10.0, mu=0.0, sigma=0.4, x0=0.0, T=n / 252, dt=1 / 252, seed=seed
+    )
+    spread[120:170] += np.linspace(0.0, 4.0, 50)
+    log_a = 0.5 + 0.8 * log_b + spread
+    return pd.DataFrame({"A": log_a, "B": log_b}, index=idx)
+
+
+def test_pair_trading_backtest_con_cointegracion() -> None:
+    """Sobre un par cointegrado el backtest walk-forward produce métricas finitas."""
+    log_prices = _make_walk_forward_pair(n=300, seed=42)
+
+    bt = pair_trading_backtest(
+        log_prices,
+        "A",
+        "B",
+        hedge_window=100,
+        z_window=40,
+        entry_z=1.5,
+        exit_z=0.0,
+        cost=0.0,
+    )
+
+    assert isinstance(bt, PairBacktestResult)
+    assert bt.results.shape[0] == len(log_prices)
+    assert np.isfinite(bt.sharpe)
+    assert np.isfinite(bt.total_return)
+    assert bt.max_drawdown <= 0.0
+    assert bt.trades >= 0
+    # El warm-up impide señales hasta disponer de suficiente historia.
+    assert bt.results["position"].iloc[:101].eq(0).all()
+
+
+def test_pair_trading_backtest_no_usa_futuro_para_hedge() -> None:
+    """El backtest walk-forward no coincide con el hedge estimado in-sample.
+
+    Si el backtest usara todo el periodo para estimar beta, el beta
+    efectivo sería constante e igual al beta in-sample.  Al recalcularlo
+    cada día con datos pasados, el beta efectivo varía día a día.
+    """
+    log_prices = _make_walk_forward_pair(n=300, seed=7)
+
+    bt = pair_trading_backtest(
+        log_prices,
+        "A",
+        "B",
+        hedge_window=100,
+        z_window=40,
+        entry_z=1.5,
+        exit_z=0.0,
+        cost=0.0,
+    )
+
+    in_sample = compute_hedge_ratio(log_prices["A"], log_prices["B"])
+    in_op = bt.results.loc[bt.results["position"] != 0, "effective_beta"]
+
+    assert not np.allclose(in_op.to_numpy(), in_sample.beta, atol=1e-6)
+
+
+def test_pair_trading_backtest_costes_por_turnover() -> None:
+    """Cada cambio de posición reduce el retorno en ``cost`` por unidad de
+    turnover."""
+    log_prices = _make_walk_forward_pair(n=300, seed=0)
+
+    bt_no_cost = pair_trading_backtest(
+        log_prices,
+        "A",
+        "B",
+        hedge_window=100,
+        z_window=40,
+        entry_z=1.5,
+        exit_z=0.0,
+        cost=0.0,
+    )
+    bt_cost = pair_trading_backtest(
+        log_prices,
+        "A",
+        "B",
+        hedge_window=100,
+        z_window=40,
+        entry_z=1.5,
+        exit_z=0.0,
+        cost=0.01,
+    )
+
+    assert bt_no_cost.trades > 0
+    assert bt_cost.results["turnover"].sum() == bt_no_cost.results["turnover"].sum()
+    assert bt_cost.total_return < bt_no_cost.total_return
+
+
+def test_pair_trading_backtest_rebalance_daily_aumenta_turnover() -> None:
+    """Recalcular el hedge diariamente aumenta el turnover respecto a dejarlo
+    fijo durante cada operación."""
+    log_prices = _make_walk_forward_pair(n=300, seed=3)
+
+    bt_entry = pair_trading_backtest(
+        log_prices,
+        "A",
+        "B",
+        hedge_window=100,
+        z_window=40,
+        entry_z=1.5,
+        exit_z=0.0,
+        cost=0.0,
+        rebalance_hedge="on_entry",
+    )
+    bt_daily = pair_trading_backtest(
+        log_prices,
+        "A",
+        "B",
+        hedge_window=100,
+        z_window=40,
+        entry_z=1.5,
+        exit_z=0.0,
+        cost=0.0,
+        rebalance_hedge="daily",
+    )
+
+    assert bt_daily.results["turnover"].sum() > bt_entry.results["turnover"].sum()
+
+
+def test_pair_trading_backtest_sin_operaciones() -> None:
+    """Si el z-score nunca cruza el umbral, no hay operaciones ni drawdown."""
+    idx = pd.date_range("2023-01-01", periods=30, freq="B")
+    log_b = np.cumsum(np.zeros(30))
+    spread = np.zeros(30)
+    log_a = 0.5 + 0.8 * log_b + spread
+    log_prices = pd.DataFrame({"A": log_a, "B": log_b}, index=idx)
+
+    bt = pair_trading_backtest(
+        log_prices,
+        "A",
+        "B",
+        hedge_window=10,
+        z_window=5,
+        entry_z=5.0,
+        exit_z=0.0,
+        cost=0.0,
+    )
+
+    assert bt.trades == 0
+    assert bt.total_return == 0.0
+    assert bt.max_drawdown == 0.0
+
+
+def test_pair_trading_backtest_lanza_si_falta_columna() -> None:
+    """Si falta uno de los tickers se levanta ``ValueError``."""
+    log_prices = pd.DataFrame({"A": [1.0, 2.0, 3.0]})
+    with pytest.raises(ValueError, match="Faltan columnas"):
+        pair_trading_backtest(log_prices, "A", "B")
+
+
+# =============================================================================
+# Comparativa de la estrategia frente a benchmarks
+# =============================================================================
+
+
+def _returns_with_drift(drift: float, n: int = 100, seed: int = 1) -> pd.Series:
+    """Serie de retornos logarítmicos diarios con la deriva dada."""
+    idx = pd.date_range("2023-01-01", periods=n, freq="B")
+    rng = np.random.default_rng(seed)
+    return pd.Series(drift + rng.normal(0.0, 0.01, size=n), index=idx)
+
+
+def test_build_strategy_comparison_estructura() -> None:
+    """La tabla tiene una fila por alternativa y la estrategia va primera."""
+    estrategia = _returns_with_drift(0.001, seed=1)
+    tabla = build_strategy_comparison(
+        estrategia,
+        {"Buy & hold SPY": _returns_with_drift(0.0005, seed=2)},
+    )
+
+    assert list(tabla["estrategia"]) == [
+        "Estrategia pair trading",
+        "Buy & hold SPY",
+    ]
+    assert list(tabla.columns) == [
+        "estrategia",
+        "retorno_total",
+        "sharpe",
+        "n_sesiones",
+        "inicio",
+        "fin",
+    ]
+    assert tabla["n_sesiones"].nunique() == 1
+
+
+def test_build_strategy_comparison_usa_el_mismo_periodo() -> None:
+    """Todas las alternativas se miden sobre las mismas fechas."""
+    estrategia = _returns_with_drift(0.001, n=100, seed=1)
+    # Un benchmark con menos historia: el recorte debe igualar los periodos.
+    benchmark = _returns_with_drift(0.001, n=60, seed=2).reindex(
+        estrategia.index[:60]
+    )
+    tabla = build_strategy_comparison(estrategia, {"B&H": benchmark})
+
+    assert tabla["n_sesiones"].nunique() == 1
+    assert tabla["n_sesiones"].iloc[0] == 60
+    assert tabla["inicio"].nunique() == 1
+    assert tabla["fin"].nunique() == 1
+
+
+def test_build_strategy_comparison_coincide_con_el_backtest() -> None:
+    """La fila de la estrategia reproduce ``total_return`` y ``sharpe``.
+
+    Es el contrato que hace la tabla comparable con las métricas del
+    propio backtest, que se calculan con la misma convención.
+    """
+    log_prices = _make_walk_forward_pair(n=300, seed=0)
+    bt = pair_trading_backtest(
+        log_prices,
+        "A",
+        "B",
+        hedge_window=60,
+        z_window=20,
+        entry_z=2.0,
+        exit_z=0.0,
+        cost=0.001,
+    )
+    tabla = build_strategy_comparison(
+        bt.results["strategy_ret"],
+        {"Buy & hold A": bt.results["strategy_ret"] * 0.0 + 0.0001},
+    )
+    fila = tabla.loc[tabla["estrategia"] == "Estrategia pair trading"].iloc[0]
+
+    assert np.isclose(fila["retorno_total"], bt.total_return)
+    assert np.isclose(fila["sharpe"], bt.sharpe)
+
+
+def test_build_strategy_comparison_rechaza_nombres_duplicados() -> None:
+    """Un benchmark no puede llamarse como la estrategia."""
+    estrategia = _returns_with_drift(0.001)
+    with pytest.raises(ValueError, match="duplicado"):
+        build_strategy_comparison(
+            estrategia, {"Estrategia pair trading": estrategia}
+        )
+
+
+def test_build_strategy_comparison_benchmark_desde_precios() -> None:
+    """Un buy & hold calculado desde precios coincide con su ratio de precios.
+
+    Es la identidad que blinde contra el error de aplicar el logaritmo dos
+    veces: ``log(log(P))`` no es un retorno y subestimaría el rendimiento
+    de forma silenciosa.
+    """
+    idx = pd.date_range("2023-01-01", periods=100, freq="B")
+    precios = pd.Series(
+        100.0 * np.exp(np.cumsum(np.full(100, 0.001))), index=idx
+    )
+    returns = np.log(precios).diff().fillna(0.0)
+
+    tabla = build_strategy_comparison(returns, {"B&H": returns})
+    fila = tabla.loc[tabla["estrategia"] == "B&H"].iloc[0]
+
+    esperado = float(precios.iloc[-1] / precios.iloc[0] - 1.0)
+    assert np.isclose(fila["retorno_total"], esperado)
+
+
+def test_build_strategy_comparison_sin_fechas_comunes() -> None:
+    """Sin fechas compartidas se levanta ``ValueError``."""
+    estrategia = _returns_with_drift(0.001, n=10)
+    benchmark = pd.Series(
+        [0.001] * 10,
+        index=pd.date_range("2030-01-01", periods=10, freq="B"),
+    )
+    with pytest.raises(ValueError, match="fechas comunes"):
+        build_strategy_comparison(estrategia, {"B&H": benchmark})
 
 
 # =============================================================================

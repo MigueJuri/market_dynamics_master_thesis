@@ -11,8 +11,9 @@ proceso de Ornstein-Uhlenbeck.
 |---|---|
 | [`1_PairSelectionMutualInformation.py`](./1_PairSelectionMutualInformation.py) | Selección de pares mediante Información Mutua estimada con el método KSG (k-NN). |
 | [`2_PairSelectionPearson.py`](./2_PairSelectionPearson.py) | Selección de pares mediante correlación de Pearson, con animación de la correlación *rolling*. |
-| [`PairTrading.py`](./PairTrading.py) | Construcción del spread, ajuste del modelo OU y las tres gráficas del par: spread, precios y vista conjunta con subplots. |
+| [`Spread.py`](./Spread.py) | Construcción del spread, ajuste del modelo OU y las tres gráficas del par: spread, precios y vista conjunta con subplots. |
 | [`OUProcess.py`](./OUProcess.py) | Simulación de un proceso OU y de dos activos GBM cuyo spread coincide con la trayectoria simulada. |
+| [`PracticalPairTrading.py`](./PracticalPairTrading.py) | Backtest básico de pair trading con hedge ratio estático y z-score móvil. |
 
 Toda la lógica común (descarga de precios, log-retornos, scraping del
 S&P 500, filtro de emisores duplicados, estimadores de MI, clustering,
@@ -231,6 +232,7 @@ outputs/tables/
 ├── pearson_top20.csv        valores sin formatear
 ├── pearson_top20.tex        tabla lista para \input
 ├── pearson_top20.json       condiciones estructuradas
+├── pearson_cointegrated_top20.{csv,tex,json}
 ├── mutual_information_top20.{csv,tex,json}
 ```
 
@@ -297,6 +299,75 @@ No se usa `DataFrame.to_latex`: en pandas 3 delega en `Styler`, que exige
 `jinja2`, y el proyecto no declara esa dependencia. El formateador propio
 además controla el escapado, los valores ausentes (`--`), los booleanos
 (`Sí`/`No`, con `Sí` en negrita) y el separador de miles.
+
+## Tabla de pares cointegrados (Pearson + ADF)
+
+`2_PairSelectionPearson.py` exporta **dos** tablas:
+
+| Tabla | `stem` | Contenido |
+|---|---|---|
+| Candidatos | `pearson_top20` | Los 200 pares con mayor correlación, con el diagnóstico ADF de cada uno (estacionarios y no estacionarios mezclados). |
+| Cointegrados | `pearson_cointegrated_top20` | Los 20 pares con mayor correlación **entre los que superan el filtro ADF**. |
+
+La segunda tabla es un subconjunto de la primera: no introduce una métrica
+nueva, sino que aplica el diagnóstico ADF que la primera ya calcula como
+criterio de selección.
+
+### Criterio de cointegración
+
+El filtro es el **p-value del test ADF**, con significancia
+`SIGNIFICANCIO_ADF = 0.05`:
+
+```python
+cointegrated_df = (
+    top_pairs_df.loc[top_pairs_df["p_valor_adf"] < SIGNIFICANCIO_ADF]
+    .sort_values("correlacion_pearson", ascending=False)
+    .head(TOP_N_COINTEGRADOS)
+    .reset_index(drop=True)
+)
+```
+
+Se usa el p-value y no un umbral fijo sobre el t-estadístico porque el valor
+crítico del ADF depende del tamaño muestral del par: a mayor muestra, el
+mismo nivel de significancia exige un t-stat más negativo. Un corte como
+`t < -3` no sería comparable entre pares con muestras de tamaños distintos,
+mientras que el p-value ya tiene en cuenta ese efecto. El t-stat se conserva
+en la tabla exportada como diagnóstico, que es el estadístico que el test
+contrasta contra su valor crítico.
+
+### Alcance del filtro
+
+El filtro se aplica **dentro del conjunto de candidatos ya evaluados** por el
+cuaderno, no sobre el universo completo de pares. Estimar el ADF para los
+~75.000 pares del universo completo multiplica por unas dos horas el tiempo de
+ejecución, frente a los minutos que tarda el panel ya calculado.
+
+La consecuencia metodológica es explícita y queda documentada en la nota del
+`.tex`: la tabla identifica los pares **más correlacionados y cointegrados a
+la vez**, no una lista exhaustiva de todos los pares cointegrados del S&P
+500. Un par cointegrado cuya correlación lo situara fuera del conjunto de
+candidatos evaluados no aparece en ella.
+
+### Columnas exportadas
+
+```text
+rank, ticker_a, ticker_b, sector_a, sector_b,
+correlacion_pearson, n_sesiones_par,
+estadistico_adf, p_valor_adf, estacionario
+```
+
+`rank` se reasigna según la posición dentro de la tabla filtrada, no
+hereda el de la tabla de candidatos: el par 1 de la tabla de cointegrados es
+el de mayor correlación entre los que pasan el filtro, que no coincide con
+el par 1 de la tabla de candidatos si ese no está cointegrado.
+
+### En LaTeX
+
+```latex
+\input{outputs/tables/pearson_cointegrated_top20}
+```
+
+Requiere sólo `booktabs`, igual que el resto de tablas.
 
 ## Numeración de clusters bajo la matriz
 
@@ -409,3 +480,289 @@ son comparables para un mismo par.
   cuánto se parece el clustering a la partición oficial del S&P 500.
   Un clustering "bueno" en términos financieros (pares cointegrados)
   puede no coincidir con los sectores GICS.
+
+## Backtest básico (`PracticalPairTrading.py`)
+
+`PracticalPairTrading.py` es un notebook sencillo para probar una
+estrategia de pair trading sobre un único par.  Está dividido en dos
+partes claramente separadas:
+
+1. **Análisis descriptivo in-sample**: calcula el hedge ratio, el test
+   ADF y el proceso OU sobre todo el periodo.  Sirve para diagnosticar
+   si el par parece cointegrado, pero **no se usa para generar
+   señales**.
+2. **Backtest walk-forward**: simula la ejecución real de la
+   estrategia estimando cada día el hedge ratio y el z-score sólo con
+   datos anteriores.
+
+### Flujo del backtest walk-forward
+
+1. Descarga los precios ajustados de dos tickers mediante
+   `thesis.market_data.load_multiple_prices` y la caché CSV local.
+2. Para cada día ``t``:
+   - Estima ``alpha`` y ``beta`` por OLS sobre los últimos
+     `hedge_window` días (hasta ``t-1``).
+   - Calcula el spread histórico en los últimos `z_window` días.
+   - Normaliza el spread de ``t`` con la media y desviación de esa
+     ventana histórica.
+   - Genera señal: long spread si ``z < -entry_z``, short spread si
+     ``z > entry_z``, cierre al cruzar ``exit_z``.
+3. La posición decidida al cierre de ``t`` se ejecuta desde ``t`` hasta
+   ``t+1`` (lag de un día sin look-ahead).
+4. El beta se fija en el momento de la entrada
+   (`rebalance_hedge="on_entry"`) para no introducir turnover artificial.
+5. El retorno se normaliza por el notional bruto
+   ``1 + abs(beta)``, de modo que representa el P&L sobre el capital
+   total comprometido.
+6. Se restan costes proporcionales al turnover sobre ese notional.
+
+### Normalización por notional
+
+La estrategia largo/corto compromete ``1`` unidad en A y ``|beta|``
+unidades en B.  El retorno bruto ``ret_A - beta * ret_B`` es el P&L
+relativo a una unidad de A.  Para expresarlo sobre el capital total
+invertido se divide por ``1 + |beta|``:
+
+```python
+gross_notional = 1.0 + abs(beta)
+strategy_ret = position * (ret_A - beta * ret_B) / gross_notional
+```
+
+Esto hace comparables los resultados entre pares con distintos betas.
+
+### Parámetros principales
+
+| Parámetro | Valor por defecto | Descripción |
+|---|---|---|
+| `HEDGE_WINDOW` | `252` | Días de historia para estimar el hedge ratio. |
+| `Z_WINDOW` | `60` | Días de historia para estimar media y std del spread. |
+| `ENTRY_Z` | `2.0` | Umbral de entrada en valor absoluto. |
+| `EXIT_Z` | `0.0` | Nivel de z-score al que se cierra la posición. |
+| `COST` | `0.001` | Coste por unidad de turnover sobre notional bruto. |
+
+## Comparativa con benchmarks
+
+`PracticalPairTrading.py` contrasta la estrategia con tres alternativas sobre
+el **mismo periodo**: `SPY` (buy & hold del ETF del S&P 500) y el buy & hold
+de cada componente del par.
+
+```python
+from thesis.pair_trading import build_strategy_comparison
+
+comparativa = build_strategy_comparison(
+    bt.results["strategy_ret"],
+    {
+        "Buy & hold SPY": ret_spy,
+        "Buy & hold A": ret_a,
+        "Buy & hold B": ret_b,
+    },
+)
+print(comparativa.to_string(index=False))
+```
+
+| Columna | Significado |
+|---|---|
+| `estrategia` | Alternativa evaluada; la estrategia es siempre la primera fila. |
+| `retorno_total` | `exp(sum(retornos logarítmicos)) - 1`. |
+| `sharpe` | `media / desviación * sqrt(252)`, sin tasa libre de riesgo. |
+| `n_sesiones` | Sesiones del periodo común. |
+| `inicio` / `fin` | Extremos del periodo común. |
+
+### Mismo periodo para todos
+
+La función recorta las fechas en las que falta alguna alternativa, de modo
+que todas las filas acumulan el mismo número de sesiones y el mismo
+calendario.  Sin ese recorte la comparación no sería homogénea: un buy &
+hold con más historia acumularía más retorno por el solo hecho de haber
+existido durante más tiempo.
+
+El recorte parte del índice de resultados del backtest, así que **incluye el
+warm-up**: durante las primeras `HEDGE_WINDOW` sesiones la estrategia aún no
+puede operar y permanece en efectivo (retorno cero), mientras que los
+benchmarks sí acumulan su retorno.  Es el tratamiento honesto de "habría
+desplegado esta estrategia con estos datos en esta fecha", y hace la
+comparación conservadora para la estrategia.
+
+### Convención de las métricas
+
+Las métricas usan la misma convención que `pair_trading_backtest`, para que
+la fila de la estrategia de la tabla reproduzca `bt.total_return` y
+`bt.sharpe`.  El cuaderno lo comprueba con un `assert`.
+
+El Sharpe **no lleva tasa libre de riesgo**, por coherencia con `bt.sharpe`.
+Es la convención habitual para comparar estrategias entre sí, pero un Sharpe
+sin `rf` no es el Sharpe "de mercado": al omitir el término `rf` el valor
+queda inflado en la misma proporción que el retorno sin riesgo del periodo.
+
+### Los benchmarks se calculan desde el precio crudo
+
+Los retornos de los benchmarks se obtienen como `np.log(P).diff()`, es decir,
+aplicando el logaritmo **una sola vez** al precio.  Es un error fácil de
+cometer: si la entrada ya es un log-precio, `np.log()` produce
+`log(log(P))`, que no es un retorno.
+
+El efecto es silencioso porque el resultado sigue pareciendo plausible, pero
+subestima el rendimiento: para `FRT` entre 2006 y 2025, `log(log(P))` da
++34,7 % frente al +225,0 % real, y con ello la estrategia parecía superar al
+buy & hold de sus propios componentes.
+
+El cuaderno incluye una validación que blinda este error: para cada
+benchmark, el retorno total de la tabla se contrasta con el ratio de
+precios `P_fin / P_ini - 1`, que es la identidad exacta de un buy & hold.
+
+```python
+precios = serie.reindex(backtest_index)
+retorno_por_precios = precios.iloc[-1] / precios.iloc[0] - 1.0
+assert np.isclose(fila["retorno_total"], retorno_por_precios)
+```
+
+### Curva de capital
+
+La curva de SPY se añade a `results` como la columna `bh_equity_SPY`, siguiendo
+el patrón de `bh_equity_A` y `bh_equity_B`.  `plot_equity`,
+`plot_equity_diagnostics` y `plot_backtest_dashboard` la dibujan
+automáticamente cuando la columna está presente, y la omiten si no lo está.
+
+## Estado actual del par: última ventana
+
+`summarize_pair_window` resume el hedge ratio, el test ADF y el ajuste OU
+(vida media) de las últimas `window` observaciones y los compara con los
+de la muestra completa:
+
+```python
+from thesis.pair_trading import summarize_pair_window
+
+summary = summarize_pair_window(
+    log_prices, TICKER_A, TICKER_B, window=HEDGE_WINDOW
+)
+
+print(summary.comparison_table())
+```
+
+| Métrica | Muestra completa | Última ventana |
+|---|---|---|
+| Observaciones | ... | ... |
+| Alpha | ... | ... |
+| Beta | ... | ... |
+| R² | ... | ... |
+| ADF statistic | ... | ... |
+| ADF p-value | ... | ... |
+| ¿Estacionario? | ... | ... |
+| Half-Life (sesiones) | ... | ... |
+| Theta (OU) | ... | ... |
+| Sigma eq (OU) | ... | ... |
+| R² AR(1) | ... | ... |
+
+El resumen añade además `beta_change`, `beta_change_pct`,
+`adf_pvalue_change`, `half_life_change`, `half_life_change_pct` y
+`stationarity_lost`, que es `True` cuando el spread era estacionario en la
+muestra completa y deja de serlo en la ventana reciente.
+
+La vida media se obtiene ajustando un proceso de Ornstein-Uhlenbeck al
+spread de cada ventana (`fit_ou_process`).  Si el spread no admite un
+AR(1) estacionario, `summary.ou` es `None` y `summary.ou_error` explica el
+motivo, en lugar de propagar el error.
+
+> Esta ventana **incluye** la última observación, por lo que describe el
+> estado *actual* del par.  Es exclusivamente diagnóstica: no debe usarse
+> para generar señales históricas, porque dentro del backtest la ventana
+> disponible en cada fecha termina en `t-1`.
+
+La gráfica `plot_pair_window_summary` superpone el spread completo y el de
+la ventana reciente, muestra las bandas de equilibrio de la ventana
+reciente y contrasta los tres hedge ratio: walk-forward, muestra completa
+y ventana reciente.  El eje temporal incluye la vida media de ambas
+muestras como información auxiliar.
+
+## Diagnóstico del backtest
+
+`src/thesis/backtest_diagnostics.py` agrega métricas de diagnóstico y
+ejecuta comprobaciones automáticas para auditar que el backtest funciona
+correctamente.  Se usa desde el notebook con:
+
+```python
+from thesis.backtest_diagnostics import compute_pair_backtest_diagnostics
+
+diag = compute_pair_backtest_diagnostics(
+    bt.results,
+    bt.equity,
+    entry_z=ENTRY_Z,
+    exit_z=EXIT_Z,
+    hedge_window=HEDGE_WINDOW,
+    z_window=Z_WINDOW,
+    log_prices=log_prices,
+    ticker_a=TICKER_A,
+    ticker_b=TICKER_B,
+    max_abs_beta=5.0,
+)
+```
+
+### Bloques de métricas
+
+| Bloque | Contenido |
+|---|---|
+| `diag.hedge` | Momentos, percentiles y extremos de `beta` y `alpha`, número de cambios significativos, betas fuera de rango, número de betas efectivos distintos y si el beta es constante dentro de cada operación. |
+| `diag.signal` | NaNs del z-score, z-score máximo, fracción de tiempo en cash, entradas/salidas, round trips, Breakdown por dirección, duración media/mediana/máxima y cumplimiento de los umbrales. |
+| `diag.returns` | Turnover total y medio, turnover por operación, costes acumulados y como porcentaje del retorno bruto, notional bruto (media y percentiles), exposición media a cada activo y error máximo de cuadre de las contribuciones. |
+| `diag.risk` | Retorno total, CAGR, volatilidad, Sharpe, Sortino, Calmar, drawdown máximo y su duración, VaR y CVaR al 5%, mejor y peor operación, profit factor, win rate y ganancias/pérdidas medias. |
+| `diag.trades` | Una fila por operación con entrada, salida, z-scores, beta aplicado, duración, retorno bruto, costes, resultado neto y motivo de salida. |
+| `diag.validation` | Resultado de cada comprobación automática (`ValidationReport`). |
+
+### Comprobaciones automáticas
+
+`validate_pair_backtest` cubre:
+
+- integridad del índice temporal y rango de las posiciones;
+- respeto del warm-up (ninguna posición antes de `hedge_window`);
+- beta efectivo nulo en cash y constante dentro de cada operación;
+- alineación de un día entre la posición señalada y la aplicada;
+- cuadre de contribuciones, costes, retorno neto, equity y drawdown;
+- coherencia del turnover con la variación de los pesos;
+- cumplimiento de los umbrales de entrada y de salida.
+
+`verify_hedge_is_causal` recalcula `alpha`, `beta` y el z-score en una
+muestra de fechas usando exclusivamente datos anteriores y los compara con
+lo almacenado.  Es la comprobación que detecta look-ahead.
+
+### Gráficas de diagnóstico
+
+Las funciones de `src/thesis/plotting.py` cubren cuatro bloques:
+
+| Función | Paneles |
+|---|---|
+| `plot_hedge_diagnostics` | Beta walk-forward vs beta efectivo, alpha, cambios de beta. |
+| `plot_signal_diagnostics` | Spread con entradas/salidas, z-score con posición, días de permanencia. |
+| `plot_return_diagnostics` | Contribución de cada pata, retorno bruto/neto, notional y pesos, turnover y costes acumulados. |
+| `plot_equity_diagnostics` | Equity neta y bruta frente a benchmarks (A, B y SPY), drawdown, Sharpe y volatilidad rolling. |
+| `plot_backtest_dashboard` | Las seis anteriores condensadas en un único panel de seis subgráficos. |
+| `plot_pair_window_summary` | Spread completo vs última ventana, hedge ratio walk-forward vs completo vs reciente, z-score de la ventana reciente. |
+
+El panel del beta efectivo es la comprobación visual más importante: en
+modo `on_entry` debe verse una función escalonada con un valor distinto
+en cada operación.  Una línea plana con un único valor indica que se está
+reutilizando el beta de la última entrada.
+
+### Ejecución sin red
+
+Si ya existen los CSV de caché en `data/`, el notebook no necesita
+conexión.  Puedes ejecutarlo celda a celda con Jupytext o convertirlo
+a `.ipynb`:
+
+```bash
+uv run jupytext --to notebook notebooks/pair_trading/PracticalPairTrading.py
+uv run jupyter notebook notebooks/pair_trading/PracticalPairTrading.ipynb
+```
+
+### Limitaciones
+
+- El backtest es académico: no incluye restricciones de apalancamiento,
+  tamaño de lote, impacto de mercado ni costes de financiación de
+  cortos.
+- El test ADF y el OU in-sample no deben usarse para decidir entradas;
+   sólo describen el par.
+- La selección del par, los umbrales y las ventanas no deben
+  optimizarse sobre el mismo periodo que se evalúa; se requiere una
+  partición train/validation/test para una estimación honesta.
+- Las comprobaciones automáticas validan la coherencia interna del
+  código, pero no pueden detectar sesgos metodológicos como la
+  selección del par o el ajuste de hiperparámetros sobre la muestra.

@@ -166,7 +166,7 @@ for sector in sorted(available_sectors.unique()):
 # vectorizada.  La diagonal queda implícita en 1; los ``NaN`` se
 # descartan automáticamente par a par.
 corr_matrix = returns_full.corr(method="pearson")
-top_20_pairs = top_pairs(corr_matrix, n=50, issuer_map=issuer_map)
+top_20_pairs = top_pairs(corr_matrix, n=200, issuer_map=issuer_map)
 
 print("\nTop 20 pares por correlación de Pearson:")
 for rank, (t1, t2, val) in enumerate(top_20_pairs, 1):
@@ -357,6 +357,152 @@ export_paths = export_pair_selection_table(
 print(f"LaTeX: {export_paths['tex']}")
 
 # %%
+# ## Tabla de pares cointegrados
+#
+# La tabla anterior ordena los candidatos por **correlación de Pearson** y
+# adjunta el diagnóstico ADF de cada uno, pero mezcla pares estacionarios con
+# pares que no lo son.  Esta sección aísla los pares **cointegrados**: de los
+# candidatos ya evaluados se conservan sólo aquellos cuyo spread rechaza la
+# raíz unitaria, y de ellos se toman los ``TOP_N_COINTEGRADOS`` de mayor
+# correlación.
+#
+# ## Criterio de cointegración
+#
+# El criterio es el **p-value del test ADF**, no el t-estadístico:
+#
+# $$\text{cointegrado} \iff p_{\text{ADF}} < \alpha.$$
+#
+# Se usa el p-value y no un umbral fijo sobre el t-stat porque el valor
+# crítico del ADF depende del número de observaciones del par (a mayor
+# muestra, el mismo nivel de significancia exige un t-stat más negativo) y de
+# la especificación del test.  Fijar ``t < -3`` sería incomparable entre
+# pares con muestras de tamaños distintos; el p-value ya tiene en cuenta
+# ambos efectos.  El t-stat se conserva en la tabla como diagnóstico, porque
+# es el estadístico que el test contrasta contra su valor crítico.
+#
+# ``SIGNIFICANCIO_ADF`` (5 % por defecto) es el único parámetro que controla
+# el filtro: subirlo exige evidencia más fuerte para declarar un par
+# cointegrado.
+#
+# ## Alcance del filtro
+#
+# El filtro se aplica **dentro del conjunto de candidatos ya evaluados** por
+# el notebook (los pares con mayor correlación de Pearson), y no sobre el
+# universo completo.  Es una decisión deliberada: el ADF requiere un test por
+# par y estimarlo para los ~75.000 pares del universo completo multiplica por
+# unas dos horas el tiempo de ejecución, frente a los minutos que tarda el
+# panel ya calculado.  La consecuencia metodológica es explícita: la tabla
+# identifica los pares **más correlacionados y cointegrados a la vez**, no una
+# lista exhaustiva de todos los pares cointegrados del S&P 500.  Un par
+# cointegrado cuya correlación lo situara fuera del conjunto de candidatos
+# evaluados no aparece aquí.
+#
+# Dentro de ese conjunto, al ordenarse por correlación descendente, los
+# ``TOP_N_COINTEGRADOS`` primeros son exactamente los pares cointegrados con
+# mayor correlación.
+
+#: Número de pares cointegrados que se exports.
+TOP_N_COINTEGRADOS = 20
+
+cointegrated_df = (
+    top_pairs_df.loc[top_pairs_df["p_valor_adf"] < SIGNIFICANCIO_ADF]
+    .sort_values("correlacion_pearson", ascending=False)
+    .head(TOP_N_COINTEGRADOS)
+    .reset_index(drop=True)
+)
+
+n_cointegrados = int((top_pairs_df["p_valor_adf"] < SIGNIFICANCIO_ADF).sum())
+if n_cointegrados == 0:
+    raise ValueError(
+        f"Ninguno de los {len(top_pairs_df)} candidatos supera el filtro ADF "
+        f"con p-value < {SIGNIFICANCIO_ADF:.0%}.  Baja SIGNIFICANCIO_ADF o "
+        "amplía el conjunto de candidatos evaluados."
+    )
+
+print(
+    f"\nTop {len(cointegrated_df)} pares cointegrados "
+    f"(ADF p-value < {SIGNIFICANCIO_ADF:.0%}) por correlación de Pearson:"
+)
+print(cointegrated_df.to_string(index=False))
+print(
+    f"\nPares cointegrados en el conjunto de candidatos: "
+    f"{n_cointegrados} de {len(top_pairs_df)}."
+)
+
+# %%
+# ## Exportación de la tabla de pares cointegrados
+#
+# Se exports en el mismo formato que la tabla anterior (CSV, LaTeX y JSON),
+# con su propio ``stem`` para no sobrescribirla.  La nota del ``.tex``
+# documenta el criterio de cointegración, el número de candidatos evaluados
+# y el tamaño muestral, que es lo que hace falta para reproducir el filtro.
+#
+# ## Columnas de la tabla
+#
+# ``COLUMNAS_TABLA_COINTEGRADOS`` fija el subconjunto y el orden de las
+# columnas exportadas.  Hereda de la tabla principal las columnas de
+# identificación y de correlación, y añade el diagnóstico ADF completo
+# (t-stat, p-value y bandera de estacionariedad) más el soporte muestral.
+COLUMNAS_TABLA_COINTEGRADOS = [
+    "rank",
+    "ticker_a",
+    "ticker_b",
+    "sector_a",
+    "sector_b",
+    "correlacion_pearson",
+    "n_sesiones_par",
+    "estadistico_adf",
+    "p_valor_adf",
+    "estacionario",
+]
+
+export_paths_cointegrated = export_pair_selection_table(
+    cointegrated_df,
+    universe.report,
+    stem="pearson_cointegrated_top20",
+    columns=COLUMNAS_TABLA_COINTEGRADOS,
+    method=(
+        f"correlación de Pearson sobre log-retornos diarios, filtrando por "
+        f"cointegración (test ADF con p-value < {SIGNIFICANCIO_ADF:.0%})"
+    ),
+    caption=(
+        "Principales pares cointegrados por correlación de Pearson "
+        "(spread estacionario según ADF)"
+    ),
+    label="tab:pearson_cointegrated_top20",
+    extra_metadata={
+        "significancia_adf": SIGNIFICANCIO_ADF,
+        "sesiones_minimas_adf": MIN_SESIONES_ADF,
+        "candidatos_evaluados": len(top_pairs_df),
+        "candidatos_cointegrados": n_cointegrados,
+        "n_sesiones_adf_mediana": float(
+            cointegrated_df["n_sesiones_par"].median()
+        ),
+    },
+    notes=[
+        (
+            f"Criterio de cointegración: p-value del test ADF "
+            f"< {SIGNIFICANCIO_ADF:.0%}, sobre el spread de cada par y con "
+            f"al menos {MIN_SESIONES_ADF} sesiones; mediana de "
+            f"{cointegrated_df['n_sesiones_par'].median():.0f} sesiones "
+            f"(rango {cointegrated_df['n_sesiones_par'].min()}-"
+            f"{cointegrated_df['n_sesiones_par'].max()})."
+        ),
+        (
+            f"Filtro aplicado a los {len(top_pairs_df)} candidatos con mayor "
+            f"correlación de Pearson: {n_cointegrados} resultaron "
+            f"cointegrados."
+        ),
+        (
+            "El filtro no recorre el universo completo de pares: la tabla "
+            "lista los pares más correlacionados y cointegrados a la vez, no "
+            "todos los pares cointegrados del índice."
+        ),
+    ],
+)
+print(f"LaTeX: {export_paths_cointegrated['tex']}")
+
+# %%
 # ## Clustering jerárquico de Ward con k = número de sectores
 #
 # Para clustering se usa la distancia ``sqrt(1 - rho)`` porque cumple
@@ -451,6 +597,8 @@ plot_sector_reordered_matrix(
     cmap=CMAP_COMPARABLE,
     title="Correlación Pearson ordenada por cluster",
     cbar_label="Correlación de Pearson",
+    cluster_labels_visible = False,
+    separator_color = None,
 )
 
 # %%
@@ -561,4 +709,15 @@ print(f"GIF guardado en {OUTPUT_FILENAME}")
 final_symbols = sorted({t1 for t1, _, _ in top_20_pairs}
                        | {t2 for _, t2, _ in top_20_pairs})
 print(final_symbols)
+
+# %%
+# ## Símbolos finales de los pares cointegrados
+#
+# Los tickers de los pares que superan el filtro ADF.  Es un subconjunto
+# más restrictivo del anterior: los mismos candidatos, pero con el spread
+# verificado como estacionario.
+cointegrated_symbols = sorted(
+    set(cointegrated_df["ticker_a"]) | set(cointegrated_df["ticker_b"])
+)
+print(cointegrated_symbols)
 # %%

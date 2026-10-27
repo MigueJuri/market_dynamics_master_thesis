@@ -21,6 +21,7 @@ plt.rcParams.update(PLOT_RC)
 # Utilidades de ejes / ticks
 # =============================================================================
 
+
 def _year_ticks(
     windows: Sequence[int],
     trading_days: int = TRADING_DAYS,
@@ -47,6 +48,7 @@ def _year_ticks(
 # Visualización
 # =============================================================================
 
+
 def plot_correlation_matrix(
     corr_matrix: np.ndarray,
     lookbacks: Sequence[int],
@@ -61,8 +63,7 @@ def plot_correlation_matrix(
 ) -> None:
     """Heatmap de la matriz de correlación con ticks en fracciones de año."""
     plt.figure(figsize=(10 / 2, 8 / 2), dpi=300)
-    ax = sns.heatmap(corr_matrix, cmap=cmap, center=0,
-                     cbar_kws={"label": cbar_label})
+    ax = sns.heatmap(corr_matrix, cmap=cmap, center=0, cbar_kws={"label": cbar_label})
 
     xticks, xlabels = _year_ticks(lookbacks, trading_days, ticks_per_year)
     ax.set_xticks(xticks)
@@ -110,16 +111,22 @@ def plot_scatter_grid(
     """
     base_kwargs = {"s": 2, "alpha": 0.6}
     extra_kwargs = {
-        k: v for k, v in (scatter_kwargs or {}).items()
+        k: v
+        for k, v in (scatter_kwargs or {}).items()
         if k not in {"c", "cmap", "vmin", "vmax"}
     }
     kwargs = {**base_kwargs, **extra_kwargs}
     feature_windows = list(feature_by_window.keys())
     target_windows = list(target_by_window.keys())
 
-    fig, axes = plt.subplots(len(target_windows), len(feature_windows),
-                             figsize=figsize, sharex=False, sharey=False,
-                             constrained_layout=True)
+    fig, axes = plt.subplots(
+        len(target_windows),
+        len(feature_windows),
+        figsize=figsize,
+        sharex=False,
+        sharey=False,
+        constrained_layout=True,
+    )
 
     global_min, global_max = None, None
     for fw in feature_windows:
@@ -144,17 +151,22 @@ def plot_scatter_grid(
         for j, fw in enumerate(feature_windows):
             ax = axes[i, j]
             data = pd.concat(
-                [feature_by_window[fw].rename(feature_label),
-                 target_by_window[tw].rename(target_label)],
+                [
+                    feature_by_window[fw].rename(feature_label),
+                    target_by_window[tw].rename(target_label),
+                ],
                 axis=1,
             ).dropna()
             if data.empty:
                 continue
             if color_by_date:
                 scatter = ax.scatter(
-                    data.iloc[:, 0], data.iloc[:, 1],
+                    data.iloc[:, 0],
+                    data.iloc[:, 1],
                     c=mdates.date2num(data.index),
-                    cmap=cmap, vmin=vmin, vmax=vmax,
+                    cmap=cmap,
+                    vmin=vmin,
+                    vmax=vmax,
                     **kwargs,
                 )
                 if first_scatter is None:
@@ -169,8 +181,7 @@ def plot_scatter_grid(
                 ax.set_ylabel(f"{target_label} {target_format(tw)}")
 
     if color_by_date and first_scatter is not None:
-        cbar = fig.colorbar(first_scatter, ax=axes,
-                            fraction=0.025, pad=0.02)
+        cbar = fig.colorbar(first_scatter, ax=axes, fraction=0.025, pad=0.02)
         cbar.ax.yaxis.set_major_formatter(mdates.DateFormatter(date_format))
         cbar.set_label("Fecha")
 
@@ -231,8 +242,7 @@ def plot_feature_boxplots(
         if n_quantiles >= 2:
             labels[0] = "Q1\n(Más bajo)"
             labels[-1] = f"Q{n_quantiles}\n(Más Alto)"
-        data["quantile"] = pd.qcut(data[feature_name],
-                                    q=n_quantiles, labels=labels)
+        data["quantile"] = pd.qcut(data[feature_name], q=n_quantiles, labels=labels)
         x_label_suffix = f"{feature_name.capitalize()} cuantiles"
     else:
         f_min = float(data[feature_name].min())
@@ -243,11 +253,10 @@ def plot_feature_boxplots(
             raise ValueError(
                 "No se pueden construir bins: la característica es constante."
             )
-        bin_labels = [f"{(lo + hi) / 2:.2g}"
-                      for lo, hi in zip(edges[:-1], edges[1:])]
-        data["quantile"] = pd.cut(data[feature_name],
-                                   bins=edges, include_lowest=True,
-                                   labels=bin_labels)
+        bin_labels = [f"{(lo + hi) / 2:.2g}" for lo, hi in zip(edges[:-1], edges[1:])]
+        data["quantile"] = pd.cut(
+            data[feature_name], bins=edges, include_lowest=True, labels=bin_labels
+        )
         x_label_suffix = f"{feature_name.capitalize()}"
 
     fw_str = f"({feature_window}d) " if feature_window is not None else ""
@@ -264,8 +273,15 @@ def plot_feature_boxplots(
         divider = make_axes_locatable(ax_box)
         ax_ecdf = divider.append_axes("bottom", size="30%", pad=0.2)
 
-        sns.boxplot(data=data, x="quantile", y=target_name, ax=ax_box,
-                    palette=palette, width=0.6, fliersize=3)
+        sns.boxplot(
+            data=data,
+            x="quantile",
+            y=target_name,
+            ax=ax_box,
+            palette=palette,
+            width=0.6,
+            fliersize=3,
+        )
         ax_box.axhline(0, color="black", lw=1, ls="--", alpha=0.7)
         # Ocultamos tick labels del boxplot pero conservamos la etiqueta
         # del eje X, que aparecerá entre el boxplot y la ECDF.
@@ -288,8 +304,15 @@ def plot_feature_boxplots(
         if created_fig:
             fig, ax = plt.subplots(figsize=(6, 3))
 
-        sns.boxplot(data=data, x="quantile", y=target_name, ax=ax,
-                    palette=palette, width=0.6, fliersize=3)
+        sns.boxplot(
+            data=data,
+            x="quantile",
+            y=target_name,
+            ax=ax,
+            palette=palette,
+            width=0.6,
+            fliersize=3,
+        )
         ax.axhline(0, color="black", lw=1, ls="--", alpha=0.7)
         ax.set_xlabel(x_label_full)
         ax.set_ylabel(y_label)
@@ -325,23 +348,42 @@ def plot_cross_sectional_curves(
 
     if asset_groups is None:
         for asset in corr_matrix.columns:
-            ax.plot(tau, corr_matrix[asset], linewidth=1, alpha=0.9,
-                    marker="o", markersize=5, label=asset)
+            ax.plot(
+                tau,
+                corr_matrix[asset],
+                linewidth=1,
+                alpha=0.9,
+                marker="o",
+                markersize=5,
+                label=asset,
+            )
     else:
         for group_name, assets in asset_groups.items():
             color = (group_colors or {}).get(group_name)
             for asset in assets:
                 if asset not in corr_matrix.columns:
                     continue
-                kwargs = {"linewidth": 1, "alpha": 0.9,
-                          "marker": "o", "markersize": 5,
-                          "label": group_name}
+                kwargs = {
+                    "linewidth": 1,
+                    "alpha": 0.9,
+                    "marker": "o",
+                    "markersize": 5,
+                    "label": group_name,
+                }
                 if color is not None:
                     kwargs["color"] = color
                 ax.plot(tau, corr_matrix[asset], **kwargs)
 
-    ax.plot(tau, avg_corr, color="black", linewidth=2.5,
-            linestyle="--", marker="o", markersize=6, label=avg_label)
+    ax.plot(
+        tau,
+        avg_corr,
+        color="black",
+        linewidth=2.5,
+        linestyle="--",
+        marker="o",
+        markersize=6,
+        label=avg_label,
+    )
     ax.axhline(0, color="gray", linewidth=0.8, linestyle="--")
 
     ax.set_xlabel(xlabel)
@@ -381,11 +423,13 @@ def plot_sector_average_heatmap(
 
     fig, ax = plt.subplots(figsize=figsize)
     im = ax.imshow(
-        matrix, cmap=cmap, interpolation="nearest",
-        vmin=float(finitos.min()), vmax=float(finitos.max()),
+        matrix,
+        cmap=cmap,
+        interpolation="nearest",
+        vmin=float(finitos.min()),
+        vmax=float(finitos.max()),
     )
-    ax.set_xticks(range(len(matrix.columns)), matrix.columns,
-                  rotation=45, ha="right")
+    ax.set_xticks(range(len(matrix.columns)), matrix.columns, rotation=45, ha="right")
     ax.set_yticks(range(len(matrix.index)), matrix.index)
     ax.set_title(title, fontweight="bold")
     ax.set_xlabel(xlabel)
@@ -394,6 +438,7 @@ def plot_sector_average_heatmap(
     plt.tight_layout()
     plt.show()
     return fig
+
 
 def plot_cluster_sector_heatmap(
     contingency: pd.DataFrame,
@@ -426,9 +471,7 @@ def plot_cluster_sector_composition(
     title: str = "Composición sectorial por cluster",
 ) -> None:
     """Barras apiladas al 100 % con la composición sectorial de cada cluster."""
-    data = contingency.drop(
-        index=["cluster_size", "cluster_purity"], errors="ignore"
-    )
+    data = contingency.drop(index=["cluster_size", "cluster_purity"], errors="ignore")
     shares = data.div(data.sum(axis=0), axis=1).T
 
     fig, ax = plt.subplots(figsize=figsize)
@@ -509,7 +552,7 @@ def plot_sector_reordered_matrix(
     figsize: tuple[float, float] = (10, 9),
     title: str = "Matriz ordenada por cluster",
     cbar_label: str = "Valor",
-separator_color: str = "white",
+    separator_color: str = "white",
     sector_labels_visible: bool = False,
     cluster_labels_visible: bool = True,
     xlabel: str = "Clusters",
@@ -608,13 +651,16 @@ separator_color: str = "white",
 
     fig, ax = plt.subplots(figsize=figsize)
     im = ax.imshow(
-        ordered_matrix, cmap=cmap, interpolation="nearest",
-        vmin=vmin, vmax=vmax,
+        ordered_matrix,
+        cmap=cmap,
+        interpolation="nearest",
+        vmin=vmin,
+        vmax=vmax,
     )
     ax.set_title(title, fontweight="bold")
     fig.colorbar(im, ax=ax, label=cbar_label)
 
-# Separadores: sólo entre clusters.
+    # Separadores: sólo entre clusters.
     bloques: list[tuple[int, int]] = []
     if cluster_labels is not None:
         etiquetas = sub_clusters.loc[order]
@@ -622,10 +668,12 @@ separator_color: str = "white",
         for i in range(1, len(order) + 1):
             if i == len(order) or etiquetas.iloc[i] != etiquetas.iloc[i - 1]:
                 if inicio > 0:
-                    ax.axhline(i - 0.5, color=separator_color, linewidth=1,
-                               linestyle="--")
-                    ax.axvline(i - 0.5, color=separator_color, linewidth=1,
-                               linestyle="--")
+                    ax.axhline(
+                        i - 0.5, color=separator_color, linewidth=1, linestyle="--"
+                    )
+                    ax.axvline(
+                        i - 0.5, color=separator_color, linewidth=1, linestyle="--"
+                    )
                 bloques.append((inicio, i - 1))
                 inicio = i
 
@@ -635,7 +683,8 @@ separator_color: str = "white",
         # así que el centro del bloque ``[inicio, fin]`` es ``(inicio + fin) / 2``.
         ax.set_xticks([(ini + fin) / 2 for ini, fin in bloques])
         ax.set_xticklabels(
-            [str(i) for i in range(1, len(bloques) + 1)], fontsize=8,
+            [str(i) for i in range(1, len(bloques) + 1)],
+            fontsize=8,
         )
         ax.set_xlabel(xlabel)
     else:
@@ -645,11 +694,9 @@ separator_color: str = "white",
     if sector_labels_visible and sector_labels is not None:
         visibles = sector_labels.reindex(order)
         cambios = [
-            i for i in range(1, len(order))
-            if visibles.iloc[i] != visibles.iloc[i - 1]
+            i for i in range(1, len(order)) if visibles.iloc[i] != visibles.iloc[i - 1]
         ]
-        ax.set_yticks(cambios, [str(visibles.iloc[i]) for i in cambios],
-                      fontsize=7)
+        ax.set_yticks(cambios, [str(visibles.iloc[i]) for i in cambios], fontsize=7)
     else:
         ax.set_yticks([])
 
@@ -693,38 +740,41 @@ def plot_spread(
 
     _, ax = plt.subplots(figsize=figsize)
 
-    ax.plot(spread.index, spread.values, color="darkblue",
-            linewidth=1.5, label="Spread (Z$_t$)")
+    ax.plot(
+        spread.index,
+        spread.values,
+        color="darkblue",
+        linewidth=1.5,
+        label="Spread (Z$_t$)",
+    )
 
     if ou_params is None:
         mu = float(spread.mean())
-        ax.axhline(mu, color="black", linewidth=1.5,
-                   label=f"Media muestral ({mu:.4f})")
+        ax.axhline(mu, color="black", linewidth=1.5, label=f"Media muestral ({mu:.4f})")
         subtitle = ""
     else:
         mu = ou_params.mu
         sigma_eq = ou_params.sigma_eq
-        ax.axhline(mu, color="black", linewidth=2,
-                   label=f"Equilibrio (μ = {mu:.4f})")
+        ax.axhline(mu, color="black", linewidth=2, label=f"Equilibrio (μ = {mu:.4f})")
         for width, color, alpha in (
             (sigma_eq, "green", 0.20),
             (2 * sigma_eq, "orange", 0.15),
             (3 * sigma_eq, "red", 0.10),
         ):
-            ax.fill_between(spread.index, mu - width, mu + width,
-                            color=color, alpha=alpha)
-            ax.axhline(mu + width, color=color, linestyle="--",
-                       linewidth=1, alpha=0.7)
-            ax.axhline(mu - width, color=color, linestyle="--",
-                       linewidth=1, alpha=0.7)
-        subtitle = (f"bandas ±1/2/3 σ$_{{eq}}$ = "
-                    f"{sigma_eq:.4f} | vida media "
-                    f"{ou_params.half_life:.1f} sesiones")
+            ax.fill_between(
+                spread.index, mu - width, mu + width, color=color, alpha=alpha
+            )
+            ax.axhline(mu + width, color=color, linestyle="--", linewidth=1, alpha=0.7)
+            ax.axhline(mu - width, color=color, linestyle="--", linewidth=1, alpha=0.7)
+        subtitle = (
+            f"bandas ±1/2/3 σ$_{{eq}}$ = "
+            f"{sigma_eq:.4f} | vida media "
+            f"{ou_params.half_life:.1f} sesiones"
+        )
 
     ax.set_xlabel("Fecha")
     ax.set_ylabel("Spread")
-    ax.set_title(f"{title}\n{subtitle}" if subtitle else title,
-                 fontweight="bold")
+    ax.set_title(f"{title}\n{subtitle}" if subtitle else title, fontweight="bold")
     ax.legend(loc="best")
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
@@ -759,10 +809,8 @@ def plot_pair_prices(
         return
 
     _, ax = plt.subplots(figsize=figsize)
-    ax.plot(prices.index, prices[ticker_a], linewidth=1.6,
-            label=ticker_a)
-    ax.plot(prices.index, prices[ticker_b], linewidth=1.6,
-            label=ticker_b)
+    ax.plot(prices.index, prices[ticker_a], linewidth=1.6, label=ticker_a)
+    ax.plot(prices.index, prices[ticker_b], linewidth=1.6, label=ticker_b)
 
     if log_scale:
         ax.set_yscale("log")
@@ -815,42 +863,920 @@ def plot_pair_overview(
         return
 
     fig, axes = plt.subplots(
-        2, 1, figsize=figsize, sharex=True,
+        2,
+        1,
+        figsize=figsize,
+        sharex=True,
         gridspec_kw={"height_ratios": [2, 1]},
     )
 
-    axes[0].plot(prices.index, prices[ticker_a], linewidth=1.5,
-                 label=ticker_a)
-    axes[0].plot(prices.index, prices[ticker_b], linewidth=1.5,
-                 label=ticker_b)
-    axes[0].set_ylabel("Precio (USD, escala log)" if log_scale
-                       else "Precio (USD)")
+    axes[0].plot(prices.index, prices[ticker_a], linewidth=1.5, label=ticker_a)
+    axes[0].plot(prices.index, prices[ticker_b], linewidth=1.5, label=ticker_b)
+    axes[0].set_ylabel("Precio (USD, escala log)" if log_scale else "Precio (USD)")
     axes[0].set_title(f"{ticker_a} vs {ticker_b}", fontweight="bold")
     axes[0].legend(loc="best")
     axes[0].grid(True, alpha=0.3)
     if log_scale:
         axes[0].set_yscale("log")
 
-    axes[1].plot(spread.index, spread.values, color="darkblue",
-                 linewidth=1.3, label="Spread (Z$_t$)")
+    axes[1].plot(
+        spread.index,
+        spread.values,
+        color="darkblue",
+        linewidth=1.3,
+        label="Spread (Z$_t$)",
+    )
     if ou_params is not None:
         mu = ou_params.mu
-        axes[1].axhline(mu, color="black", linewidth=1.5,
-                        label=f"Equilibrio (μ = {mu:.4f})")
+        axes[1].axhline(
+            mu, color="black", linewidth=1.5, label=f"Equilibrio (μ = {mu:.4f})"
+        )
         for width, color, alpha in (
             (ou_params.sigma_eq, "green", 0.20),
             (2 * ou_params.sigma_eq, "orange", 0.15),
         ):
-            axes[1].fill_between(spread.index, mu - width, mu + width,
-                                 color=color, alpha=alpha)
+            axes[1].fill_between(
+                spread.index, mu - width, mu + width, color=color, alpha=alpha
+            )
     else:
-        axes[1].axhline(spread.mean(), color="black", linewidth=1.5,
-                        linestyle="--", label="Media muestral")
+        axes[1].axhline(
+            spread.mean(),
+            color="black",
+            linewidth=1.5,
+            linestyle="--",
+            label="Media muestral",
+        )
     axes[1].set_ylabel("Dispersión")
     axes[1].set_xlabel("Fecha")
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 
     # fig.suptitle("Par y spread", fontweight="bold")
+    plt.tight_layout()
+    plt.show()
+
+
+# =============================================================================
+# Diagnóstico de backtests de pair trading
+# =============================================================================
+
+
+def _entry_exit_masks(results: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """Máscaras de entrada y salida a partir de la serie de posiciones."""
+    position = results["position"]
+    entries = (position != 0) & (position.shift(1).fillna(0) == 0)
+    exits = (position == 0) & (position.shift(1).fillna(0) != 0)
+    return entries, exits
+
+
+def plot_hedge_diagnostics(
+    results: pd.DataFrame,
+    in_sample_beta: float | None = None,
+    beta_change_threshold: float = 0.01,
+    figsize: tuple[float, float] = (14.0, 10.0),
+) -> None:
+    """Diagnóstico gráfico del hedge ratio walk-forward.
+
+    Tres paneles:
+
+    1. **Hedge ratio**: beta recalculado cada día frente al beta efectivo
+       (escalonado dentro de cada operación).  Si el beta efectivo fuese
+       una única constante para toda la serie, indicaría que se está
+       reutilizando el beta de la última entrada.
+    2. **Intercepto**: evolución de ``alpha``.
+    3. **Cambios del beta**: magnitud de las variaciones diarias frente al
+       umbral de cambio significativo.
+
+    Parameters
+    ----------
+    results : pd.DataFrame
+        Salida de :func:`thesis.pair_trading.pair_trading_backtest`.
+    in_sample_beta : float | None
+        Beta estimado con toda la muestra; se dibuja como referencia.
+    beta_change_threshold : float
+        Umbral a partir del cual se considera significativo el cambio.
+    figsize : tuple
+        Tamaño de la figura.
+    """
+    if results.empty:
+        print("No hay resultados que graficar.")
+        return
+
+    _, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+
+    axes[0].plot(
+        results.index,
+        results["beta"],
+        color="darkblue",
+        linewidth=1.2,
+        label="Beta walk-forward (estimación diaria)",
+    )
+    axes[0].step(
+        results.index,
+        results["effective_beta"],
+        where="post",
+        color="darkorange",
+        linewidth=1.5,
+        label="Beta efectivo (usado por la cartera)",
+    )
+    if in_sample_beta is not None:
+        axes[0].axhline(
+            in_sample_beta,
+            color="gray",
+            linestyle="--",
+            linewidth=1.2,
+            label=f"β in-sample = {in_sample_beta:.4f}",
+        )
+    axes[0].set_ylabel("Beta")
+    axes[0].set_title(
+        "Hedge ratio: estimación diaria vs beta efectivo", fontweight="bold"
+    )
+    axes[0].legend(loc="best")
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(
+        results.index, results["alpha"], color="purple", linewidth=1.2, label="Alpha"
+    )
+    axes[1].set_ylabel("Alpha")
+    axes[1].set_title("Intercepto walk-forward", fontweight="bold")
+    axes[1].legend(loc="best")
+    axes[1].grid(True, alpha=0.3)
+
+    beta_change = results["beta"].diff().abs()
+    axes[2].bar(
+        results.index,
+        beta_change.to_numpy(),
+        width=1.0,
+        color="steelblue",
+        alpha=0.7,
+        label="|Δβ| diario",
+    )
+    axes[2].axhline(
+        beta_change_threshold,
+        color="red",
+        linestyle="--",
+        linewidth=1.2,
+        label=f"umbral = {beta_change_threshold}",
+    )
+    axes[2].set_ylabel("|Δβ|")
+    axes[2].set_xlabel("Fecha")
+    axes[2].set_title("Cambios del hedge ratio", fontweight="bold")
+    axes[2].legend(loc="best")
+    axes[2].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_signal_diagnostics(
+    results: pd.DataFrame,
+    entry_z: float = 2.0,
+    exit_z: float = 0.0,
+    figsize: tuple[float, float] = (14.0, 12.0),
+) -> None:
+    """Diagnóstico gráfico de las señales y de la ejecución.
+
+    Tres paneles:
+
+    1. **Spread** con marcadores de entrada y salida.
+    2. **Z-score** con los umbrales de entrada y salida y la posición
+       superpuesta en un eje secundario.
+    3. **Días de permanencia** de cada operación.
+
+    Parameters
+    ----------
+    results : pd.DataFrame
+        Salida del backtest.
+    entry_z, exit_z : float
+        Umbrales usados en el backtest.
+    figsize : tuple
+        Tamaño de la figura.
+    """
+    if results.empty:
+        print("No hay resultados que graficar.")
+        return
+
+    entries, exits = _entry_exit_masks(results)
+    _, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+
+    axes[0].plot(
+        results.index, results["spread"], color="navy", linewidth=1.2, label="Spread"
+    )
+    axes[0].plot(
+        results.index[entries],
+        results.loc[entries, "spread"],
+        marker="^",
+        linestyle="none",
+        color="green",
+        markersize=7,
+        label="Entrada",
+    )
+    axes[0].plot(
+        results.index[exits],
+        results.loc[exits, "spread"],
+        marker="v",
+        linestyle="none",
+        color="red",
+        markersize=7,
+        label="Salida",
+    )
+    axes[0].axhline(0, color="gray", linewidth=0.8, alpha=0.5)
+    axes[0].set_ylabel("Spread")
+    axes[0].set_title("Spread con entradas y salidas", fontweight="bold")
+    axes[0].legend(loc="best")
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(
+        results.index, results["z_score"], color="navy", linewidth=1.0, label="z-score"
+    )
+    axes[1].axhline(
+        entry_z, color="red", linestyle="--", linewidth=1.2, label=f"±{entry_z}"
+    )
+    axes[1].axhline(-entry_z, color="red", linestyle="--", linewidth=1.2)
+    axes[1].axhline(
+        exit_z, color="green", linestyle=":", linewidth=1.2, label=f"salida {exit_z}"
+    )
+    axes[1].set_ylabel("z-score")
+    axes[1].set_title("Z-score y umbrales de decisión", fontweight="bold")
+    axes[1].legend(loc="best")
+    axes[1].grid(True, alpha=0.3)
+
+    twin = axes[1].twinx()
+    twin.step(
+        results.index,
+        results["position"],
+        where="post",
+        color="orange",
+        alpha=0.6,
+        linewidth=1.0,
+        label="Posición",
+    )
+    twin.set_ylabel("Posición")
+    twin.set_yticks([-1, 0, 1])
+
+    if "holding_days" in results.columns:
+        axes[2].plot(
+            results.index,
+            results["holding_days"],
+            color="teal",
+            linewidth=1.2,
+            label="Días de permanencia",
+        )
+    axes[2].set_ylabel("Días")
+    axes[2].set_xlabel("Fecha")
+    axes[2].set_title("Duración de cada operación", fontweight="bold")
+    axes[2].legend(loc="best")
+    axes[2].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_return_diagnostics(
+    results: pd.DataFrame,
+    figsize: tuple[float, float] = (14.0, 12.0),
+) -> None:
+    """Diagnóstico gráfico del retorno, el notional y los costes.
+
+    Tres paneles:
+
+    1. **Descomposición del retorno**: contribución de cada pata, retorno
+       bruto, costes y retorno neto.
+    2. **Notional y pesos**: notional bruto ``1 + |beta|`` y peso efectivo
+       de cada activo.
+    3. **Turnover y costes acumulados**.
+
+    Parameters
+    ----------
+    results : pd.DataFrame
+        Salida del backtest.
+    figsize : tuple
+        Tamaño de la figura.
+    """
+    if results.empty:
+        print("No hay resultados que graficar.")
+        return
+
+    _, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+
+    axes[0].plot(
+        results.index,
+        results["contribution_a"],
+        color="steelblue",
+        linewidth=0.9,
+        alpha=0.8,
+        label="Contribución A",
+    )
+    axes[0].plot(
+        results.index,
+        results["contribution_b"],
+        color="darkorange",
+        linewidth=0.9,
+        alpha=0.8,
+        label="Contribución B",
+    )
+    axes[0].plot(
+        results.index,
+        results["gross_return"],
+        color="black",
+        linewidth=1.1,
+        label="Retorno bruto",
+    )
+    axes[0].plot(
+        results.index,
+        results["costs"],
+        color="red",
+        linewidth=0.9,
+        alpha=0.8,
+        label="Costes",
+    )
+    axes[0].plot(
+        results.index,
+        results["strategy_ret"],
+        color="green",
+        linewidth=1.3,
+        label="Retorno neto",
+    )
+    axes[0].axhline(0, color="gray", linewidth=0.8, alpha=0.5)
+    axes[0].set_ylabel("Retorno diario")
+    axes[0].set_title("Descomposición del retorno diario", fontweight="bold")
+    axes[0].legend(loc="best", ncol=3, fontsize=8)
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(
+        results.index,
+        results["gross_notional"],
+        color="black",
+        linewidth=1.2,
+        label="Notional bruto (1 + |β|)",
+    )
+    axes[1].plot(
+        results.index,
+        results["weight_a"].abs(),
+        color="steelblue",
+        linewidth=1.0,
+        label="|Peso A|",
+    )
+    axes[1].plot(
+        results.index,
+        results["weight_b"].abs(),
+        color="darkorange",
+        linewidth=1.0,
+        label="|Peso B|",
+    )
+    axes[1].set_ylabel("Exposición")
+    axes[1].set_title("Notional bruto y pesos efectivos", fontweight="bold")
+    axes[1].legend(loc="best")
+    axes[1].grid(True, alpha=0.3)
+
+    axes[2].bar(
+        results.index,
+        results["turnover"].to_numpy(),
+        width=1.0,
+        color="steelblue",
+        alpha=0.7,
+        label="Turnover diario",
+    )
+    twin = axes[2].twinx()
+    twin.plot(
+        results.index,
+        results["costs"].cumsum(),
+        color="red",
+        linewidth=1.4,
+        label="Costes acumulados",
+    )
+    twin.set_ylabel("Costes acumulados")
+    axes[2].set_ylabel("Turnover")
+    axes[2].set_xlabel("Fecha")
+    axes[2].set_title("Turnover y costes acumulados", fontweight="bold")
+    axes[2].legend(loc="best", fontsize=8)
+    axes[2].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_equity_diagnostics(
+    results: pd.DataFrame,
+    figsize: tuple[float, float] = (14.0, 12.0),
+    rolling_window: int = 252,
+) -> None:
+    """Diagnóstico gráfico del equity, drawdown y estabilidad temporal.
+
+    Tres paneles:
+
+    1. **Equity**: equity neta, equity bruta (sin costes) y benchmarks.
+    2. **Drawdown** de la estrategia.
+    3. **Rolling Sharpe y volatilidad** anualizada.
+
+    Parameters
+    ----------
+    results : pd.DataFrame
+        Salida del backtest.
+    figsize : tuple
+        Tamaño de la figura.
+    rolling_window : int
+        Ventana de las métricas rolling, en sesiones.
+    """
+    if results.empty:
+        print("No hay resultados que graficar.")
+        return
+
+    _, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+
+    equity = results["equity"]
+    gross_equity = np.exp(results["gross_return"].cumsum())
+    axes[0].plot(
+        equity.index, equity, color="green", linewidth=1.8, label="Estrategia (neto)"
+    )
+    axes[0].plot(
+        gross_equity.index,
+        gross_equity,
+        color="darkgreen",
+        linewidth=1.2,
+        linestyle="--",
+        label="Estrategia (sin costes)",
+    )
+    if "bh_equity_A" in results.columns:
+        axes[0].plot(
+            results.index,
+            results["bh_equity_A"],
+            color="orange",
+            linewidth=1.0,
+            linestyle=":",
+            label="Buy & Hold A",
+        )
+        axes[0].plot(
+            results.index,
+            results["bh_equity_B"],
+            color="blue",
+            linewidth=1.0,
+            linestyle=":",
+            label="Buy & Hold B",
+        )
+    if "bh_equity_SPY" in results.columns:
+        axes[0].plot(
+            results.index,
+            results["bh_equity_SPY"],
+            color="black",
+            linewidth=1.2,
+            linestyle="-.",
+            label="Buy & Hold SPY",
+        )
+    axes[0].axhline(1.0, color="gray", linewidth=0.8, alpha=0.5)
+    axes[0].set_ylabel("Capital")
+    axes[0].set_title("Curva de capital", fontweight="bold")
+    axes[0].legend(loc="best", fontsize=8)
+    axes[0].grid(True, alpha=0.3)
+    axes[0].set_yscale("log")
+
+    axes[1].fill_between(
+        results.index,
+        results["drawdown"].to_numpy(),
+        0,
+        color="red",
+        alpha=0.4,
+        label="Drawdown",
+    )
+    axes[1].set_ylabel("Drawdown")
+    axes[1].set_title("Drawdown de la estrategia", fontweight="bold")
+    axes[1].legend(loc="best")
+    axes[1].grid(True, alpha=0.3)
+
+    rolling_mean = results["strategy_ret"].rolling(rolling_window).mean()
+    rolling_std = results["strategy_ret"].rolling(rolling_window).std()
+    rolling_sharpe = rolling_mean / rolling_std * np.sqrt(252)
+    rolling_vol = rolling_std * np.sqrt(252)
+    axes[2].plot(
+        results.index,
+        rolling_sharpe,
+        color="purple",
+        linewidth=1.2,
+        label=f"Sharpe rolling ({rolling_window}d)",
+    )
+    axes[2].axhline(0, color="gray", linewidth=0.8, alpha=0.5)
+    twin = axes[2].twinx()
+    twin.plot(
+        results.index,
+        rolling_vol,
+        color="brown",
+        linewidth=1.0,
+        alpha=0.7,
+        label="Volatilidad anualizada",
+    )
+    twin.set_ylabel("Volatilidad anualizada")
+    axes[2].set_ylabel("Sharpe rolling")
+    axes[2].set_xlabel("Fecha")
+    axes[2].set_title("Estabilidad temporal de la estrategia", fontweight="bold")
+    axes[2].legend(loc="best", fontsize=8)
+    axes[2].grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_equity(
+    results: pd.DataFrame,
+    figsize: tuple[float, float] = (14.0, 12.0),
+    rolling_window: int = 252,
+) -> None:
+    """Diagnóstico gráfico del equity, drawdown y estabilidad temporal.
+
+    Tres paneles:
+
+    1. **Equity**: equity neta, equity bruta (sin costes) y benchmarks.
+    2. **Drawdown** de la estrategia.
+    3. **Rolling Sharpe y volatilidad** anualizada.
+
+    Parameters
+    ----------
+    results : pd.DataFrame
+        Salida del backtest.
+    figsize : tuple
+        Tamaño de la figura.
+    rolling_window : int
+        Ventana de las métricas rolling, en sesiones.
+    """
+    if results.empty:
+        print("No hay resultados que graficar.")
+        return
+
+    plt.figure(figsize=figsize)
+
+    equity = results["equity"]
+    gross_equity = np.exp(results["gross_return"].cumsum())
+    plt.plot(
+        equity.index, equity, color="green", linewidth=1.8, label="Estrategia (neto)"
+    )
+    plt.plot(
+        gross_equity.index,
+        gross_equity,
+        color="darkgreen",
+        linewidth=1.2,
+        linestyle="--",
+        label="Estrategia (sin costes)",
+    )
+    if "bh_equity_A" in results.columns:
+        plt.plot(
+            results.index,
+            results["bh_equity_A"],
+            color="orange",
+            linewidth=1.0,
+            linestyle=":",
+            label="Buy & Hold A",
+        )
+        plt.plot(
+            results.index,
+            results["bh_equity_B"],
+            color="blue",
+            linewidth=1.0,
+            linestyle=":",
+            label="Buy & Hold B",
+        )
+    if "bh_equity_SPY" in results.columns:
+        plt.plot(
+            results.index,
+            results["bh_equity_SPY"],
+            color="black",
+            linewidth=1.2,
+            linestyle="-.",
+            label="Buy & Hold SPY",
+        )
+    plt.axhline(1.0, color="gray", linewidth=0.8, alpha=0.5)
+    plt.set_ylabel("Capital")
+    plt.set_title("Curva de capital", fontweight="bold")
+    plt.legend(loc="best", fontsize=8)
+    plt.grid(True, alpha=0.3)
+    plt.set_yscale("log")
+
+
+def plot_backtest_dashboard(
+    results: pd.DataFrame,
+    entry_z: float = 2.0,
+    exit_z: float = 0.0,
+    in_sample_beta: float | None = None,
+    figsize: tuple[float, float] = (16.0, 22.0),
+) -> None:
+    """Dashboard de seis paneles para auditar un backtest de pair trading.
+
+    Los paneles son, de arriba abajo:
+
+    1. Beta walk-forward frente al beta efectivo.
+    2. Spread con entradas y salidas marcadas.
+    3. Z-score con umbrales y posición superpuesta.
+    4. Contribución de cada pata, retorno bruto y retorno neto.
+    5. Equity de la estrategia frente a los benchmarks.
+    6. Drawdown y turnover diario.
+
+    Parameters
+    ----------
+    results : pd.DataFrame
+        Salida de :func:`thesis.pair_trading.pair_trading_backtest`.
+    entry_z, exit_z : float
+        Umbrales usados en el backtest.
+    in_sample_beta : float | None
+        Beta in-sample usado como referencia visual.
+    figsize : tuple
+        Tamaño de la figura.
+    """
+    if results.empty:
+        print("No hay resultados que graficar.")
+        return
+
+    entries, exits = _entry_exit_masks(results)
+    _, axes = plt.subplots(6, 1, figsize=figsize, sharex=True)
+
+    axes[0].plot(
+        results.index,
+        results["beta"],
+        color="darkblue",
+        linewidth=1.0,
+        label="Beta walk-forward",
+    )
+    axes[0].step(
+        results.index,
+        results["effective_beta"],
+        where="post",
+        color="darkorange",
+        linewidth=1.5,
+        label="Beta efectivo",
+    )
+    if in_sample_beta is not None:
+        axes[0].axhline(
+            in_sample_beta,
+            color="gray",
+            linestyle="--",
+            linewidth=1.0,
+            label=f"β in-sample = {in_sample_beta:.4f}",
+        )
+    axes[0].set_ylabel("Beta")
+    axes[0].set_title("1. Hedge ratio walk-forward vs beta efectivo", fontweight="bold")
+    axes[0].legend(loc="best", fontsize=8)
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(
+        results.index, results["spread"], color="navy", linewidth=1.0, label="Spread"
+    )
+    axes[1].plot(
+        results.index[entries],
+        results.loc[entries, "spread"],
+        marker="^",
+        linestyle="none",
+        color="green",
+        markersize=6,
+        label="Entrada",
+    )
+    axes[1].plot(
+        results.index[exits],
+        results.loc[exits, "spread"],
+        marker="v",
+        linestyle="none",
+        color="red",
+        markersize=6,
+        label="Salida",
+    )
+    axes[1].set_ylabel("Spread")
+    axes[1].set_title("2. Spread y operaciones", fontweight="bold")
+    axes[1].legend(loc="best", fontsize=8)
+    axes[1].grid(True, alpha=0.3)
+
+    axes[2].plot(
+        results.index, results["z_score"], color="navy", linewidth=0.9, label="z-score"
+    )
+    axes[2].axhline(entry_z, color="red", linestyle="--", linewidth=1.0)
+    axes[2].axhline(-entry_z, color="red", linestyle="--", linewidth=1.0)
+    axes[2].axhline(exit_z, color="green", linestyle=":", linewidth=1.0)
+    twin = axes[2].twinx()
+    twin.step(
+        results.index,
+        results["position"],
+        where="post",
+        color="orange",
+        alpha=0.6,
+        linewidth=0.9,
+    )
+    twin.set_yticks([-1, 0, 1])
+    axes[2].set_ylabel("z-score")
+    axes[2].set_title("3. Señales y posición", fontweight="bold")
+    axes[2].grid(True, alpha=0.3)
+
+    axes[3].plot(
+        results.index,
+        results["contribution_a"],
+        color="steelblue",
+        linewidth=0.8,
+        alpha=0.8,
+        label="Contribución A",
+    )
+    axes[3].plot(
+        results.index,
+        results["contribution_b"],
+        color="darkorange",
+        linewidth=0.8,
+        alpha=0.8,
+        label="Contribución B",
+    )
+    axes[3].plot(
+        results.index,
+        results["strategy_ret"],
+        color="green",
+        linewidth=1.1,
+        label="Retorno neto",
+    )
+    axes[3].axhline(0, color="gray", linewidth=0.8, alpha=0.5)
+    axes[3].set_ylabel("Retorno diario")
+    axes[3].set_title("4. Descomposición del retorno", fontweight="bold")
+    axes[3].legend(loc="best", fontsize=8, ncol=3)
+    axes[3].grid(True, alpha=0.3)
+
+    axes[4].plot(
+        results.index,
+        results["equity"],
+        color="green",
+        linewidth=1.6,
+        label="Estrategia",
+    )
+    if "bh_equity_A" in results.columns:
+        axes[4].plot(
+            results.index,
+            results["bh_equity_A"],
+            color="orange",
+            linewidth=1.0,
+            linestyle=":",
+            label="Buy & Hold A",
+        )
+        axes[4].plot(
+            results.index,
+            results["bh_equity_B"],
+            color="blue",
+            linewidth=1.0,
+            linestyle=":",
+            label="Buy & Hold B",
+        )
+    if "bh_equity_SPY" in results.columns:
+        axes[4].plot(
+            results.index,
+            results["bh_equity_SPY"],
+            color="black",
+            linewidth=1.2,
+            linestyle="-.",
+            label="Buy & Hold SPY",
+        )
+    axes[4].axhline(1.0, color="gray", linewidth=0.8, alpha=0.5)
+    axes[4].set_ylabel("Capital")
+    axes[4].set_title("5. Equity y benchmarks", fontweight="bold")
+    axes[4].legend(loc="best", fontsize=8)
+    axes[4].grid(True, alpha=0.3)
+
+    axes[5].fill_between(
+        results.index,
+        results["drawdown"].to_numpy(),
+        0,
+        color="red",
+        alpha=0.35,
+        label="Drawdown",
+    )
+    twin = axes[5].twinx()
+    twin.bar(
+        results.index,
+        results["turnover"].to_numpy(),
+        width=1.0,
+        color="steelblue",
+        alpha=0.5,
+        label="Turnover",
+    )
+    twin.set_ylabel("Turnover")
+    axes[5].set_ylabel("Drawdown")
+    axes[5].set_xlabel("Fecha")
+    axes[5].set_title("6. Drawdown y turnover", fontweight="bold")
+    axes[5].legend(loc="best", fontsize=8)
+    axes[5].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_pair_window_summary(
+    summary,
+    full_spread: pd.Series | None = None,
+    beta_history: pd.Series | None = None,
+    figsize: tuple[float, float] = (14.0, 11.0),
+) -> None:
+    """Compara el estado completo del par con su ventana más reciente.
+
+    Tres paneles:
+
+    1. **Spread**: spread completo en línea fina y spread de la ventana
+       reciente en línea gruesa, con las bandas ``±1σ`` y ``±2σ``
+       calculadas sobre la ventana reciente.
+    2. **Hedge ratio**: beta walk-forward (si se aporta) frente al beta
+       de la muestra completa y al de la ventana reciente.
+    3. **Z-score de la ventana reciente**: spread normalizado con la media
+       y desviación de la propia ventana reciente, con los umbrales de
+       entrada y salida.
+
+    Parameters
+    ----------
+    summary : thesis.pair_trading.PairWindowSummary
+        Resumen de la ventana reciente.
+    full_spread : pd.Series | None
+        Spread de la muestra completa; si se omite se usa el spread
+        reconstruido con el hedge ratio de la muestra completa.
+    beta_history : pd.Series | None
+        Serie con el hedge ratio walk-forward para contrastar.
+    figsize : tuple
+        Tamaño de la figura.
+    """
+    if summary is None or summary.spread.empty:
+        print("No hay datos de la ventana reciente para graficar.")
+        return
+
+    spread = summary.spread
+
+    _, axes = plt.subplots(3, 1, figsize=figsize, sharex=False)
+
+    if full_spread is not None and not full_spread.empty:
+        axes[0].plot(
+            full_spread.index,
+            full_spread,
+            color="gray",
+            linewidth=0.8,
+            alpha=0.7,
+            label="Spread muestra completa",
+        )
+    axes[0].plot(
+        spread.index,
+        spread,
+        color="navy",
+        linewidth=1.6,
+        label=f"Spread última ventana ({summary.n_obs} obs.)",
+    )
+
+    mu = float(spread.mean())
+    sigma = float(spread.std())
+    for width, color, alpha in ((sigma, "green", 0.18), (2 * sigma, "orange", 0.14)):
+        axes[0].fill_between(
+            spread.index,
+            mu - width,
+            mu + width,
+            color=color,
+            alpha=alpha,
+        )
+    axes[0].axhline(mu, color="black", linewidth=1.2, label=f"μ = {mu:.4f}")
+    axes[0].axhline(mu + 2 * sigma, color="orange", linestyle="--", linewidth=0.9)
+    axes[0].axhline(mu - 2 * sigma, color="orange", linestyle="--", linewidth=0.9)
+    axes[0].set_ylabel("Spread")
+    axes[0].set_title("Spread: muestra completa vs última ventana", fontweight="bold")
+    axes[0].legend(loc="best", fontsize=8)
+    axes[0].grid(True, alpha=0.3)
+
+    if beta_history is not None and not beta_history.empty:
+        axes[1].plot(
+            beta_history.index,
+            beta_history,
+            color="darkblue",
+            linewidth=1.0,
+            label="Beta walk-forward",
+        )
+    if summary.full_hedge is not None:
+        axes[1].axhline(
+            summary.full_hedge.beta,
+            color="gray",
+            linestyle="--",
+            linewidth=1.2,
+            label=f"β muestra completa = {summary.full_hedge.beta:.4f}",
+        )
+    axes[1].axhline(
+        summary.hedge.beta,
+        color="darkorange",
+        linewidth=1.6,
+        label=f"β última ventana = {summary.hedge.beta:.4f}",
+    )
+    axes[1].set_ylabel("Beta")
+    axes[1].set_title("Hedge ratio: completo vs ventana reciente", fontweight="bold")
+    axes[1].legend(loc="best", fontsize=8)
+    axes[1].grid(True, alpha=0.3)
+
+    z_recent = (spread - mu) / sigma if sigma > 0 else spread * np.nan
+    axes[2].plot(
+        spread.index, z_recent, color="navy", linewidth=1.3, label="z-score (ventana)"
+    )
+    axes[2].axhline(2.0, color="red", linestyle="--", linewidth=1.1, label="±2")
+    axes[2].axhline(-2.0, color="red", linestyle="--", linewidth=1.1)
+    axes[2].axhline(0.0, color="green", linestyle=":", linewidth=1.1, label="salida")
+    axes[2].set_ylabel("z-score")
+    axes[2].set_xlabel("Fecha")
+    axes[2].set_title("Z-score de la ventana reciente", fontweight="bold")
+    axes[2].legend(loc="best", fontsize=8)
+    axes[2].grid(True, alpha=0.3)
+
+    # Banda informative con la vida media de la reversión en ambas muestras.
+    if summary.ou is not None or summary.full_ou is not None:
+        etiqueta = []
+        if summary.full_ou is not None:
+            etiqueta.append(f"completa: {summary.full_ou.half_life:.1f} sesiones")
+        if summary.ou is not None:
+            etiqueta.append(f"reciente: {summary.ou.half_life:.1f} sesiones")
+        axes[2].set_xlabel(f"Fecha   (vida media OU — {'; '.join(etiqueta)})")
+
     plt.tight_layout()
     plt.show()

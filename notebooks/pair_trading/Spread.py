@@ -88,9 +88,9 @@ from thesis.plotting import plot_pair_overview, plot_pair_prices, plot_spread
 # ``extract_and_construct_spread`` descarga ambos activos con la
 # caché CSV de ``market_data``, aplica log-precios, ajusta la OLS,
 # construye el spread y aplica el test ADF, imprimiendo un resumen.
-TICKER_A = "FRT"
-TICKER_B = "REG"
-START_DATE = "2005-01-01"
+TICKER_A = "MLM"
+TICKER_B = "VMC"
+START_DATE = "2020-01-01"
 END_DATE = "2026-01-01"
 
 spread_series, hedge_ratio = extract_and_construct_spread(

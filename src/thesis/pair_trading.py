@@ -44,6 +44,7 @@ from thesis.config import (
     SEED,
     START,
     TABLES_DIR,
+    TRADING_DAYS,
 )
 from thesis.market_data import load_multiple_prices
 
@@ -171,9 +172,8 @@ def filter_duplicate_issuers(
         removed = pd.DataFrame(columns=["Symbol", "Issuer", "Representative"])
         return work, removed
 
-    first_per_issuer = (
-        work[work["Issuer"].isin(multi_issuer)]
-        .drop_duplicates(subset="Issuer", keep="first")
+    first_per_issuer = work[work["Issuer"].isin(multi_issuer)].drop_duplicates(
+        subset="Issuer", keep="first"
     )
     representative = first_per_issuer.set_index("Issuer")["Symbol"].to_dict()
     duplicates = work[
@@ -181,10 +181,7 @@ def filter_duplicate_issuers(
         & ~work["Symbol"].isin(representative.values())
     ].copy()
     duplicates["Representative"] = duplicates["Issuer"].map(representative)
-    removed = (
-        duplicates[["Symbol", "Issuer", "Representative"]]
-        .reset_index(drop=True)
-    )
+    removed = duplicates[["Symbol", "Issuer", "Representative"]].reset_index(drop=True)
 
     keepers_mask = ~work["Symbol"].isin(removed["Symbol"])
     kept = work.loc[keepers_mask].reset_index(drop=True)
@@ -310,8 +307,11 @@ def filter_by_history(
 
 def _extremes(prices: pd.DataFrame, which: str) -> pd.Series:
     """Primera o última fecha con precio válido de cada columna."""
-    return prices.apply(lambda col: col.dropna().index.min() if which == "min"
-                        else col.dropna().index.max())
+    return prices.apply(
+        lambda col: (
+            col.dropna().index.min() if which == "min" else col.dropna().index.max()
+        )
+    )
 
 
 def _empty_drop_table() -> pd.DataFrame:
@@ -486,8 +486,7 @@ def print_dataset_report(
     max_dropped : int
         Número máximo de activos descartados que se listan en detalle.
     """
-    print(f"\nVentana solicitada : {report.requested_start} → "
-          f"{report.requested_end}")
+    print(f"\nVentana solicitada : {report.requested_start} → {report.requested_end}")
     print(
         f"Ventana efectiva   : {report.first_date:%Y-%m-%d} → "
         f"{report.last_date:%Y-%m-%d}"
@@ -503,13 +502,10 @@ def print_dataset_report(
         f"{report.window_pct:.1%} de la ventana solicitada"
     )
     umbral = (
-        f" (exige ≥ {min_history_obs} sesiones)"
-        if min_history_obs is not None
-        else ""
+        f" (exige ≥ {min_history_obs} sesiones)" if min_history_obs is not None else ""
     )
     print(
-        f"Activos            : {report.n_assets} de "
-        f"{report.n_assets_requested}{umbral}"
+        f"Activos            : {report.n_assets} de {report.n_assets_requested}{umbral}"
     )
     historia = report.history_per_asset
     if not historia.empty:
@@ -626,9 +622,7 @@ def prepare_pair_selection_universe(
         min_history_obs,
     )
 
-    sectors = kept.set_index("Symbol")["GICS Sector"].reindex(
-        returns.columns
-    ).dropna()
+    sectors = kept.set_index("Symbol")["GICS Sector"].reindex(returns.columns).dropna()
     issuers = kept.set_index("Symbol")["Issuer"].reindex(returns.columns)
 
     if verbose:
@@ -697,10 +691,13 @@ def _latex_tabular(display: pd.DataFrame, decimals: int) -> str:
     controlan con exactitud el escapado, los valores ausentes y la
     alineación por tipo de columna.
     """
-    aligns = "".join(
-        "r" if pd.api.types.is_numeric_dtype(display[col]) else "l"
-        for col in display.columns
-    ) or "l"
+    aligns = (
+        "".join(
+            "r" if pd.api.types.is_numeric_dtype(display[col]) else "l"
+            for col in display.columns
+        )
+        or "l"
+    )
     header = " & ".join(_latex_escape(col) for col in display.columns)
     # La cadena cruda es imprescindible: en una f-string normal ``"\\\\"``
     # colapsaría a un único "\", que rompe la alineación de LaTeX.
@@ -760,10 +757,7 @@ def table_conditions(
     """
     lineas = [
         f"Método de selección: {method}.",
-        (
-            f"Ventana solicitada: {report.requested_start} a "
-            f"{report.requested_end}."
-        ),
+        (f"Ventana solicitada: {report.requested_start} a {report.requested_end}."),
         (
             f"Ventana efectiva: {report.first_date:%Y-%m-%d} a "
             f"{report.last_date:%Y-%m-%d}."
@@ -981,9 +975,7 @@ def export_pair_selection_table(
     # de ``threeparttable`` tanto ``itemize`` como los párrafos sueltos
     # abortan la compilación, y así sólo hace falta ``booktabs``.
     cuerpo += [r"\begin{minipage}{0.98\linewidth}", r"\footnotesize"]
-    cuerpo += [
-        rf"\textbullet\ {_latex_escape(linea)}\par" for linea in lineas
-    ]
+    cuerpo += [rf"\textbullet\ {_latex_escape(linea)}\par" for linea in lineas]
     cuerpo += [r"\end{minipage}", r"\end{table}"]
     tex_path.write_text("\n".join(cuerpo) + "\n", encoding="utf-8")
 
@@ -1072,7 +1064,13 @@ def load_returns_panel(
         raise ValueError("No quedan observaciones tras el alineamiento.")
 
     report = _build_dataset_report(
-        log_ret, panel, dropped, start, end, n_requested, min_history_obs,
+        log_ret,
+        panel,
+        dropped,
+        start,
+        end,
+        n_requested,
+        min_history_obs,
     )
     _warn_on_low_coverage(report)
     return log_ret, report
@@ -1121,7 +1119,13 @@ def load_log_prices(
         Log-precios con índice temporal y un ticker por columna.
     """
     prices = _load_aligned_prices(
-        tickers, start, end, cache_dir, refresh, min_valid_obs, min_history_obs,
+        tickers,
+        start,
+        end,
+        cache_dir,
+        refresh,
+        min_valid_obs,
+        min_history_obs,
     )
 
     log_prices = np.log(prices.where(prices > 0)).dropna(how="any")
@@ -1166,7 +1170,13 @@ def load_log_returns(
         Retornos logarítmicos con índice temporal y un ticker por columna.
     """
     log_ret, _ = load_returns_panel(
-        tickers, start, end, cache_dir, refresh, min_valid_obs, min_history_obs,
+        tickers,
+        start,
+        end,
+        cache_dir,
+        refresh,
+        min_valid_obs,
+        min_history_obs,
     )
     return log_ret
 
@@ -1218,9 +1228,7 @@ class ADFResult:
     is_stationary: bool
 
 
-def compute_hedge_ratio(
-    log_a: pd.Series, log_b: pd.Series
-) -> HedgeResult:
+def compute_hedge_ratio(log_a: pd.Series, log_b: pd.Series) -> HedgeResult:
     """Estima ``log(A) = alpha + beta * log(B) + epsilon`` por OLS.
 
     El residuo de la regresión es el spread cointegrado candidato:
@@ -1419,9 +1427,9 @@ def fit_ou_process(spread: pd.Series, dt: float = 1.0) -> OUParameters:
     var_eps = float(np.var(model.resid, ddof=2))
     theta = -np.log(b) / dt
     mu = a / (1 - b)
-    sigma = np.sqrt((2 * theta * var_eps) / (1 - b ** 2))
+    sigma = np.sqrt((2 * theta * var_eps) / (1 - b**2))
     half_life = np.log(2) / theta
-    sigma_eq = np.sqrt(sigma ** 2 / (2 * theta))
+    sigma_eq = np.sqrt(sigma**2 / (2 * theta))
 
     return OUParameters(
         theta=float(theta),
@@ -1440,6 +1448,7 @@ def simulate_ou_process(
     x0: float,
     T: float,
     dt: float,
+    seed: int | None = None,
 ) -> np.ndarray:
     """Simula una trayectoria del proceso de Ornstein-Uhlenbeck.
 
@@ -1460,6 +1469,10 @@ def simulate_ou_process(
         Horizonte total en las mismas unidades que ``dt``.
     dt : float
         Paso de discretización.
+    seed : int | None
+        Si se indica, la simulación usa un generador propio con esa semilla
+        y el resultado es reproducible.  Si es ``None`` se usa el generador
+        global de NumPy.
 
     Returns
     -------
@@ -1470,14 +1483,20 @@ def simulate_ou_process(
     x = np.zeros(n)
     x[0] = x0
     sqrt_dt = np.sqrt(dt)
+    rng = np.random.default_rng(seed) if seed is not None else np.random
     for t in range(1, n):
-        dW = sqrt_dt * np.random.normal()
+        dW = sqrt_dt * rng.normal()
         x[t] = x[t - 1] + theta * (mu - x[t - 1]) * dt + sigma * dW
     return x
 
 
 def simulate_gbm(
-    s0: float, mu: float, sigma: float, T: float, dt: float
+    s0: float,
+    mu: float,
+    sigma: float,
+    T: float,
+    dt: float,
+    seed: int | None = None,
 ) -> np.ndarray:
     """Simula un Movimiento Browniano Geométrico en escala lineal.
 
@@ -1499,6 +1518,10 @@ def simulate_gbm(
         Horizonte total en años.
     dt : float
         Paso de discretización en años (1/252 para datos diarios).
+    seed : int | None
+        Si se indica, la simulación usa un generador propio con esa semilla
+        y el resultado es reproducible.  Si es ``None`` se usa el generador
+        global de NumPy.
 
     Returns
     -------
@@ -1507,9 +1530,846 @@ def simulate_gbm(
     """
     n = int(T / dt)
     t = np.linspace(0.0, T, n)
-    w = np.cumsum(np.random.standard_normal(size=n)) * np.sqrt(dt)
-    log_s = (mu - 0.5 * sigma ** 2) * t + sigma * w
+    rng = np.random.default_rng(seed) if seed is not None else np.random
+    w = np.cumsum(rng.standard_normal(size=n)) * np.sqrt(dt)
+    log_s = (mu - 0.5 * sigma**2) * t + sigma * w
     return s0 * np.exp(log_s)
+
+
+# =============================================================================
+# Backtest básico de pair trading (hedge ratio estático)
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class PairBacktestResult:
+    """Resultado de un backtest sencillo de pair trading.
+
+    Attributes
+    ----------
+    results : pd.DataFrame
+        DataFrame índice temporal con la trazabilidad completa del backtest:
+        spread, alpha, beta, beta efectivo, z-score, posición, pesos,
+        contribuciones del retorno, turnover, costes, retorno neto,
+        drawdown y benchmarks.
+    equity : pd.Series
+        Curva de capital acumulada de la estrategia.
+    sharpe : float
+        Ratio de Sharpe anualizado usando retornos logarítmicos diarios.
+    total_return : float
+        Retorno total de la estrategia en el periodo.
+    max_drawdown : float
+        Drawdown máximo observado (expresado como retorno relativo negativo).
+    trades : int
+        Número de operaciones completadas (cambios de posición distintos de cero).
+    """
+
+    results: pd.DataFrame
+    equity: pd.Series
+    sharpe: float
+    total_return: float
+    max_drawdown: float
+    trades: int
+
+
+def build_z_score(
+    spread: pd.Series,
+    window: int = 60,
+    min_periods: int | None = None,
+) -> pd.DataFrame:
+    """Construye el z-score móvil de un spread estacionario.
+
+    Parameters
+    ----------
+    spread : pd.Series
+        Serie del spread ``Z_t``.
+    window : int
+        Ventana de la media y desviación móvil.
+    min_periods : int | None
+        Mínimo de observaciones requeridas.  Si es ``None`` usa ``window``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columnas ``spread``, ``mean``, ``std`` y ``z_score``.
+    """
+    if min_periods is None:
+        min_periods = window
+
+    df = pd.DataFrame({"spread": spread})
+    df["mean"] = spread.rolling(window=window, min_periods=min_periods).mean()
+    df["std"] = spread.rolling(window=window, min_periods=min_periods).std()
+    df["z_score"] = (spread - df["mean"]) / df["std"]
+    return df
+
+
+def z_score_positions(
+    z_score: pd.Series,
+    entry_z: float = 2.0,
+    exit_z: float = 0.0,
+) -> pd.Series:
+    """Genera posiciones de pair trading a partir del z-score.
+
+    La lógica es iterativa y sin look-ahead: la posición se decide con el
+    ``z_score`` del día actual y se mantiene al día siguiente.
+
+    Parameters
+    ----------
+    z_score : pd.Series
+        Serie del z-score (puede contener ``NaN`` durante el warm-up).
+    entry_z : float
+        Umbral de entrada en valor absoluto.
+    exit_z : float
+        Nivel de z-score al que se cierra la posición actual.
+
+    Returns
+    -------
+    pd.Series
+        Posición diaria: ``1`` (long spread), ``-1`` (short spread),
+        ``0`` (neutral).
+    """
+    positions = []
+    curr_pos = 0
+    for z in z_score:
+        if pd.isna(z):
+            positions.append(0)
+            continue
+
+        if curr_pos == 0:
+            if z > entry_z:
+                curr_pos = -1
+            elif z < -entry_z:
+                curr_pos = 1
+        elif (curr_pos == 1 and z >= exit_z) or (curr_pos == -1 and z <= exit_z):
+            curr_pos = 0
+
+        positions.append(curr_pos)
+
+    return pd.Series(positions, index=z_score.index, dtype=float)
+
+
+def _rolling_hedge_zscore(
+    log_a: pd.Series,
+    log_b: pd.Series,
+    t_idx: int,
+    hedge_window: int,
+    z_window: int,
+) -> tuple[float, float, float]:
+    """Calcula alpha, beta y z-score en ``t_idx`` usando solo información pasada.
+
+    Esta función es el núcleo del backtest walk-forward.  En el día
+    ``t_idx`` del índice común:
+
+    1. Toma los log-precios desde ``t_idx - hedge_window`` hasta
+       ``t_idx - 1``.
+    2. Ajusta la regresión OLS ``log_a = alpha + beta * log_b``.
+    3. Con el ``alpha`` y ``beta`` estimados, calcula los residuos
+       históricos del spread en la ventana ``[t_idx - z_window, t_idx - 1]``.
+    4. Calcula la media y desviación estándar de esos residuos históricos.
+    5. Evalúa el z-score del día ``t_idx`` usando esa media y desviación.
+
+    Si no hay suficientes datos anteriores o la desviación es nula, devuelve
+    ``(np.nan, np.nan, np.nan)`` para que ese día no genere señal.
+
+    Parameters
+    ----------
+    log_a, log_b : pd.Series
+        Log-precios de los dos activos, alineados y con el mismo índice.
+    t_idx : int
+        Posición entera dentro del índice común para la que se calcula el
+        z-score.
+    hedge_window : int
+        Número de observaciones anteriores a ``t_idx`` usadas para estimar
+        el hedge ratio.
+    z_window : int
+        Número de observaciones anteriores a ``t_idx`` usadas para estimar
+        la media y desviación del spread.
+
+    Returns
+    -------
+    tuple[float, float, float]
+        ``(alpha, beta, z_score)`` calculados sin usar datos de ``t_idx``
+        ni posteriores.
+    """
+    if t_idx < hedge_window:
+        return np.nan, np.nan, np.nan
+
+    # Ventana de estimación del hedge ratio: [t_idx - hedge_window, t_idx - 1].
+    hist_a = log_a.iloc[t_idx - hedge_window : t_idx]
+    hist_b = log_b.iloc[t_idx - hedge_window : t_idx]
+
+    # Eliminamos pares con valores ausentes para no falsear la OLS.
+    mask = hist_a.notna() & hist_b.notna()
+    valid_a, valid_b = hist_a[mask], hist_b[mask]
+    if len(valid_a) < 3:
+        return np.nan, np.nan, np.nan
+
+    try:
+        hedge = compute_hedge_ratio(valid_a, valid_b)
+    except ValueError:
+        return np.nan, np.nan, np.nan
+
+    # Ventana de normalización del z-score: últimas ``z_window`` observaciones
+    # de la ventana del hedge, es decir, [t_idx - z_window, t_idx - 1].
+    spread_series = hist_a - (hedge.alpha + hedge.beta * hist_b)
+    spread_hist = spread_series.iloc[-z_window:].dropna()
+    if len(spread_hist) < 2:
+        return np.nan, np.nan, np.nan
+    spread_std = float(spread_hist.std())
+    if not np.isfinite(spread_std) or spread_std == 0.0:
+        return np.nan, np.nan, np.nan
+
+    # z-score del día t_idx con la media y std de la ventana anterior.
+    z_t = log_a.iloc[t_idx] - (hedge.alpha + hedge.beta * log_b.iloc[t_idx])
+    if pd.isna(z_t):
+        return np.nan, np.nan, np.nan
+    z_score = (z_t - spread_hist.mean()) / spread_std
+
+    return float(hedge.alpha), float(hedge.beta), float(z_score)
+
+
+def pair_trading_backtest(
+    log_prices: pd.DataFrame,
+    ticker_a: str,
+    ticker_b: str,
+    hedge_window: int = 252,
+    z_window: int = 60,
+    entry_z: float = 2.0,
+    exit_z: float = 0.0,
+    max_holding_period: int | None = None,
+    cost: float = 0.001,
+    rebalance_hedge: str = "on_entry",
+) -> PairBacktestResult:
+    """Backtest walk-forward de pair trading sin look-ahead.
+
+    El backtest simula lo que una estrategia real podría haber hecho:
+
+    1. Cada día ``t`` estima ``alpha`` y ``beta`` sólo con datos hasta
+       ``t-1``.
+    2. Calcula el z-score del spread de ``t`` usando la media y desviación
+       históricas (también hasta ``t-1``).
+    3. Si no hay posición y ``|z| > entry_z``, abre operación al cierre de
+       ``t`` y fija el hedge ratio para la operación.
+    4. Si hay posición y el z-score cruza ``exit_z``, cierra al cierre de
+       ``t``.
+    5. El retorno se aplica desde ``t`` hasta ``t+1`` (posición con lag de
+       un día).
+    6. Los costes se aplican al cambio de posición sobre el notional bruto
+       ``1 + |beta|``.
+
+    El DataFrame ``results`` incluye toda la trazabilidad necesaria para
+    auditar el backtest:
+
+    - ``beta`` y ``alpha``: estimación walk-forward de cada día.
+    - ``effective_beta``: hedge ratio asociado a la posición decidida en
+      cada fecha (0 si la estrategia está en cash).  En modo ``on_entry``
+      es constante dentro de cada operación.
+    - ``held_beta`` y ``held_position``: valores realmente aplicados al
+      retorno de cada fila (los decididos en ``t-1``).
+    - ``target_weight_a`` / ``target_weight_b`` y ``weight_a`` / ``weight_b``:
+      pesos objetivo y pesos mantenidos, normalizados por notional bruto.
+    - ``contribution_a`` / ``contribution_b`` / ``gross_return``:
+      descomposición del retorno.
+    - ``turnover`` / ``costs`` / ``strategy_ret``: costes y retorno neto.
+    - ``holding_days`` y ``exit_reason``: duración y motivo de cada salida.
+
+    Parameters
+    ----------
+    log_prices : pd.DataFrame
+        Log-precios con una columna por ticker.
+    ticker_a, ticker_b : str
+        Nombres de las columnas que forman el par.
+    hedge_window : int
+        Observaciones históricas para estimar el hedge ratio.
+    z_window : int
+        Observaciones históricas para estimar media y std del spread.  No
+        puede superar ``hedge_window``.
+    entry_z : float
+        Umbral de entrada en valor absoluto.
+    exit_z : float
+        Umbral de salida.
+    max_holding_period : int | None
+        Número máximo de días que se mantiene una operación.  Si es
+        ``None`` no se fuerza el cierre por tiempo.
+    cost : float
+        Coste de transacción por unidad de turnover sobre notional bruto.
+    rebalance_hedge : {"on_entry", "daily"}
+        ``on_entry`` mantiene el hedge ratio fijo durante cada operación;
+        ``daily`` lo recalcula cada día (aumenta el turnover real).
+
+    Returns
+    -------
+    PairBacktestResult
+        Resultado completo del backtest.
+    """
+    required = {ticker_a, ticker_b}
+    missing = required - set(log_prices.columns)
+    if missing:
+        raise ValueError(f"Faltan columnas en log_prices: {missing}")
+    if rebalance_hedge not in {"on_entry", "daily"}:
+        raise ValueError("rebalance_hedge debe ser 'on_entry' o 'daily'.")
+    if hedge_window < 3:
+        raise ValueError("hedge_window debe ser al menos 3 observaciones.")
+    if z_window < 2:
+        raise ValueError("z_window debe ser al menos 2 observaciones.")
+    if z_window > hedge_window:
+        raise ValueError(
+            "z_window no puede superar hedge_window: la ventana de "
+            "normalización del spread debe estar contenida en la ventana de "
+            "estimación del hedge ratio."
+        )
+
+    log_a = log_prices[ticker_a]
+    log_b = log_prices[ticker_b]
+    common = log_a.index.intersection(log_b.index)
+    if common.empty:
+        raise ValueError("No hay fechas comunes entre los dos activos.")
+
+    # Alineamos ambas series al índice común para indexar por posición entera.
+    log_a = log_a.loc[common]
+    log_b = log_b.loc[common]
+    n = len(common)
+
+    alphas = np.full(n, np.nan)
+    betas = np.full(n, np.nan)
+    z_scores = np.full(n, np.nan)
+
+    # -------------------------------------------------------------------------
+    # Paso walk-forward: para cada día, estimamos todo con información pasada.
+    # -------------------------------------------------------------------------
+    for t in range(1, n):
+        alpha, beta, z = _rolling_hedge_zscore(log_a, log_b, t, hedge_window, z_window)
+        alphas[t] = alpha
+        betas[t] = beta
+        z_scores[t] = z
+
+    z_score = pd.Series(z_scores, index=common)
+
+    # -------------------------------------------------------------------------
+    # Generación de señales.
+    #
+    # ``signal_position[t]`` es la posición decidida al cierre de t y
+    # ``signal_beta[t]`` el hedge ratio asociado a esa posición (0 si la
+    # estrategia está en cash).  Ambas series se construyen día a día: usar
+    # un único escalar ``entry_beta`` reutilizado para toda la serie hacía
+    # que todas las operaciones mostraran el beta de la última entrada.
+    # -------------------------------------------------------------------------
+    signal_position = np.zeros(n)
+    signal_beta = np.zeros(n)
+    signal_holding_days = np.zeros(n)
+    exit_reasons: list[str] = [""] * n
+
+    curr_pos = 0
+    curr_beta = 0.0
+    holding_days = 0
+
+    for t in range(n):
+        z = z_scores[t]
+        if not pd.isna(z):
+            # Si estamos en posición, comprobamos salida por z-score o tiempo.
+            if curr_pos != 0:
+                holding_days += 1
+                crossed_exit = (curr_pos == 1 and z >= exit_z) or (
+                    curr_pos == -1 and z <= exit_z
+                )
+                timeout = (
+                    max_holding_period is not None
+                    and holding_days >= max_holding_period
+                )
+                if crossed_exit or timeout:
+                    exit_reasons[t] = "zscore" if crossed_exit else "timeout"
+                    curr_pos = 0
+                    curr_beta = 0.0
+                    holding_days = 0
+
+            # Entrada sólo si estamos en cash.
+            if curr_pos == 0:
+                if z > entry_z:
+                    curr_pos = -1
+                    curr_beta = betas[t]
+                    holding_days = 1
+                elif z < -entry_z:
+                    curr_pos = 1
+                    curr_beta = betas[t]
+                    holding_days = 1
+
+        signal_position[t] = curr_pos
+        signal_holding_days[t] = holding_days
+        if curr_pos == 0:
+            signal_beta[t] = 0.0
+        elif rebalance_hedge == "daily":
+            # Beta diario: se recalcula cada día (aumenta el turnover real).
+            signal_beta[t] = betas[t]
+        else:
+            # Beta congelado desde la entrada hasta el cierre de la operación.
+            signal_beta[t] = curr_beta
+
+    if curr_pos != 0:
+        exit_reasons[-1] = "end"
+
+    position = pd.Series(signal_position, index=common, dtype=float)
+    effective_beta = pd.Series(signal_beta, index=common, dtype=float)
+    holding_days_series = pd.Series(signal_holding_days, index=common, dtype=float)
+    exit_reason = pd.Series(exit_reasons, index=common, dtype=object)
+
+    # -------------------------------------------------------------------------
+    # Pesos objetivo y pesos realmente mantenidos.
+    #
+    # La posición se decide al cierre de t y se materializa desde el periodo
+    # siguiente, por lo que los pesos que aplican al retorno de la fila t son
+    # los decididos en t-1.
+    # -------------------------------------------------------------------------
+    target_weight_a = position / (1.0 + effective_beta.abs())
+    target_weight_b = -position * effective_beta / (1.0 + effective_beta.abs())
+
+    held_position = position.shift(1).fillna(0.0)
+    held_beta = effective_beta.shift(1).fillna(0.0)
+    held_weight_a = held_position / (1.0 + held_beta.abs())
+    held_weight_b = -held_position * held_beta / (1.0 + held_beta.abs())
+
+    # -------------------------------------------------------------------------
+    # Retornos: contribución de cada pata, retorno bruto, costes y neto.
+    # -------------------------------------------------------------------------
+    ret_a = log_a.diff()
+    ret_b = log_b.diff()
+
+    contribution_a = held_weight_a * ret_a
+    contribution_b = held_weight_b * ret_b
+    gross_return = (contribution_a + contribution_b).fillna(0.0)
+
+    # Turnover nocional: variación del valor absoluto de cada peso.
+    turnover = target_weight_a.diff().abs().fillna(
+        0.0
+    ) + target_weight_b.diff().abs().fillna(0.0)
+    costs = turnover * cost
+    strategy_ret = gross_return - costs
+
+    gross_notional = 1.0 + held_beta.abs()
+
+    equity = np.exp(strategy_ret.cumsum())
+    running_max = equity.cummax()
+    drawdown = (equity - running_max) / running_max
+
+    bh_equity_a = np.exp(ret_a.fillna(0.0).cumsum())
+    bh_equity_b = np.exp(ret_b.fillna(0.0).cumsum())
+
+    valid_rets = strategy_ret
+    sharpe = 0.0
+    if len(valid_rets) > 1 and valid_rets.std() > 0:
+        sharpe = (valid_rets.mean() / valid_rets.std()) * np.sqrt(252)
+
+    total_return = equity.iloc[-1] - 1.0 if not equity.empty else 0.0
+    max_drawdown = float(drawdown.min())
+    position_change = position.diff().fillna(0.0)
+    trades = int((position_change != 0).sum())
+
+    results = pd.DataFrame(
+        {
+            "spread": log_a - (alphas + betas * log_b),
+            "alpha": alphas,
+            "beta": betas,
+            "effective_beta": effective_beta,
+            "held_beta": held_beta,
+            "z_score": z_score,
+            "position": position,
+            "held_position": held_position,
+            "holding_days": holding_days_series,
+            "exit_reason": exit_reason,
+            "target_weight_a": target_weight_a,
+            "target_weight_b": target_weight_b,
+            "weight_a": held_weight_a,
+            "weight_b": held_weight_b,
+            "gross_notional": gross_notional,
+            "contribution_a": contribution_a.fillna(0.0),
+            "contribution_b": contribution_b.fillna(0.0),
+            "gross_return": gross_return,
+            "turnover": turnover,
+            "costs": costs,
+            "strategy_ret": strategy_ret,
+            "equity": equity,
+            "drawdown": drawdown,
+            "cost_rate": cost,
+            "rebalance_hedge": rebalance_hedge,
+            "bh_equity_A": bh_equity_a,
+            "bh_equity_B": bh_equity_b,
+        },
+        index=common,
+    )
+
+    return PairBacktestResult(
+        results=results,
+        equity=equity,
+        sharpe=float(sharpe),
+        total_return=float(total_return),
+        max_drawdown=float(max_drawdown),
+        trades=trades,
+    )
+
+
+# =============================================================================
+# Comparativa de la estrategia frente a benchmarks
+# =============================================================================
+
+
+def build_strategy_comparison(
+    strategy_returns: pd.Series,
+    benchmarks: Mapping[str, pd.Series],
+    periods_per_year: int = TRADING_DAYS,
+) -> pd.DataFrame:
+    """Compara la estrategia con una serie de benchmarks en el mismo periodo.
+
+    Todas las alternativas se miden sobre el **mismo conjunto de fechas**:
+    se descartan las fechas en las que falta alguna de ellas.  Sin ese
+    recorte la comparación no es homogénea, porque un benchmark con más
+    historia acumularía más retorno por el solo hecho de existir durante más
+    tiempo.
+
+    Las métricas usan la misma convención que
+    :func:`pair_trading_backtest`:
+
+    - **Retorno total**: capital final menos uno, calculado sobre retornos
+      logarítmicos acumulados.
+    - **Sharpe**: ``media / desviación * sqrt(periods_per_year)``, sin tasa
+      libre de riesgo, para que sea comparable con ``bt.sharpe``.
+
+    Parameters
+    ----------
+    strategy_returns : pd.Series
+        Retornos diarios de la estrategia (logarítmicos, como
+        ``results["strategy_ret"]``).
+    benchmarks : Mapping[str, pd.Series]
+        Retornos diarios de cada benchmark, indexados por fecha.
+    periods_per_year : int
+        Factor de anualización del Sharpe.
+
+    Returns
+    -------
+    pd.DataFrame
+        Una fila por alternativa con las columnas ``estrategia``,
+        ``retorno_total``, ``sharpe``, ``n_sesiones``, ``inicio`` y ``fin``.
+        La estrategia es siempre la primera fila.
+    """
+    if strategy_returns.empty:
+        raise ValueError("La estrategia no tiene retornos que comparar.")
+
+    series: dict[str, pd.Series] = {"Estrategia pair trading": strategy_returns}
+    for name, returns in benchmarks.items():
+        if name in series:
+            raise ValueError(f"Nombre de benchmark duplicado: {name!r}.")
+        series[name] = returns
+
+    # Periodo común: se concatenan las series y se descartan las filas en
+    # las que falta alguna alternativa.  Así todas las filas de la tabla
+    # comparten exactamente el mismo periodo y el mismo número de sesiones.
+    frame = pd.concat(series, axis=1).dropna(how="any")
+    if frame.empty:
+        raise ValueError(
+            "No hay fechas comunes entre la estrategia y los benchmarks."
+        )
+
+    filas = []
+    for name in frame.columns:
+        ret = frame[name].astype(float)
+        equity = float(np.exp(ret.sum()) - 1.0)
+        std = float(ret.std(ddof=1))
+        sharpe = (
+            float(ret.mean() / std * np.sqrt(periods_per_year))
+            if std > 0
+            else 0.0
+        )
+        filas.append(
+            {
+                "estrategia": name,
+                "retorno_total": equity,
+                "sharpe": sharpe,
+                "n_sesiones": len(ret),
+                "inicio": ret.index[0],
+                "fin": ret.index[-1],
+            }
+        )
+
+    return pd.DataFrame(filas)
+
+
+# =============================================================================
+# Estado del par en una ventana reciente
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class PairWindowSummary:
+    """Estado de un par cointegrado en una ventana reciente.
+
+    Resume el hedge ratio, el test ADF, el spread y el ajuste del proceso
+    de Ornstein-Uhlenbeck de las últimas ``window`` observaciones, y los
+    compara con los valores calculados sobre la muestra completa.
+
+    Es una herramienta **diagnóstica**: describe el estado actual del par
+    (por ejemplo, tras el final de la muestra) y no debe usarse para
+    generar señales dentro de un backtest, donde la ventana disponible en
+    cada fecha termina en ``t-1``.
+
+    Attributes
+    ----------
+    ticker_a, ticker_b : str
+        Tickers del par.
+    start, end : pd.Timestamp
+        Fechas de la ventana reciente.
+    n_obs : int
+        Observaciones efectivas de la ventana.
+    hedge : HedgeResult
+        Hedge ratio, intercepto y R² de la ventana reciente.
+    adf : ADFResult
+        Test ADF sobre el spread de la ventana reciente.
+    spread : pd.Series
+        Spread de la ventana reciente.
+    ou : OUParameters | None
+        Ajuste del proceso OU sobre el spread de la ventana reciente.
+        ``None`` si el spread no admite un AR(1) estacionario.
+    ou_error : str | None
+        Motivo por el que no se pudo ajustar el OU, si procede.
+    full_hedge : HedgeResult | None
+        Hedge ratio sobre la muestra completa.
+    full_adf : ADFResult | None
+        Test ADF sobre el spread de la muestra completa.
+    full_ou : OUParameters | None
+        Ajuste del proceso OU sobre el spread de la muestra completa.
+    beta_change : float | None
+        Diferencia ``beta_reciente - beta_completo``.
+    beta_change_pct : float | None
+        Variación relativa del beta respecto a la muestra completa.
+    adf_pvalue_change : float | None
+        Diferencia ``p_reciente - p_completo``.
+    half_life_change : float | None
+        Diferencia ``half_life_reciente - half_life_completa``.
+    half_life_change_pct : float | None
+        Variación relativa de la vida media respecto a la muestra completa.
+    stationarity_lost : bool | None
+        ``True`` si el spread era estacionario en la muestra completa y deja
+        de serlo en la ventana reciente.
+    """
+
+    ticker_a: str
+    ticker_b: str
+    start: pd.Timestamp
+    end: pd.Timestamp
+    n_obs: int
+    hedge: HedgeResult
+    adf: ADFResult
+    spread: pd.Series
+    ou: OUParameters | None = None
+    ou_error: str | None = None
+    full_hedge: HedgeResult | None = None
+    full_adf: ADFResult | None = None
+    full_ou: OUParameters | None = None
+    beta_change: float | None = None
+    beta_change_pct: float | None = None
+    adf_pvalue_change: float | None = None
+    half_life_change: float | None = None
+    half_life_change_pct: float | None = None
+    stationarity_lost: bool | None = None
+
+    def comparison_table(self) -> pd.DataFrame:
+        """Tabla con la muestra completa y la ventana reciente lado a lado."""
+        filas = {
+            "Observaciones": [self.n_obs, self.n_obs],
+            "Alpha": [
+                self.full_hedge.alpha if self.full_hedge else np.nan,
+                self.hedge.alpha,
+            ],
+            "Beta": [
+                self.full_hedge.beta if self.full_hedge else np.nan,
+                self.hedge.beta,
+            ],
+            "R²": [
+                self.full_hedge.r_squared if self.full_hedge else np.nan,
+                self.hedge.r_squared,
+            ],
+            "ADF statistic": [
+                self.full_adf.statistic if self.full_adf else np.nan,
+                self.adf.statistic,
+            ],
+            "ADF p-value": [
+                self.full_adf.pvalue if self.full_adf else np.nan,
+                self.adf.pvalue,
+            ],
+            "Estacionario": [
+                bool(self.full_adf.is_stationary) if self.full_adf else None,
+                bool(self.adf.is_stationary),
+            ],
+            "Half-Life (sesiones)": [
+                self.full_ou.half_life if self.full_ou else np.nan,
+                self.ou.half_life if self.ou else np.nan,
+            ],
+            "Theta (OU)": [
+                self.full_ou.theta if self.full_ou else np.nan,
+                self.ou.theta if self.ou else np.nan,
+            ],
+            "Sigma eq (OU)": [
+                self.full_ou.sigma_eq if self.full_ou else np.nan,
+                self.ou.sigma_eq if self.ou else np.nan,
+            ],
+            "R² AR(1)": [
+                self.full_ou.r_squared if self.full_ou else np.nan,
+                self.ou.r_squared if self.ou else np.nan,
+            ],
+        }
+        return pd.DataFrame(filas, index=["Muestra completa", "Última ventana"]).T
+
+
+def summarize_pair_window(
+    log_prices: pd.DataFrame,
+    ticker_a: str,
+    ticker_b: str,
+    window: int = 252,
+    significance: float = 0.05,
+    compare_full: bool = True,
+    min_obs: int = 30,
+    dt: float = 1.0,
+) -> PairWindowSummary:
+    """Resume el estado de un par en las últimas ``window`` observaciones.
+
+    Calcula sobre la ventana reciente el hedge ratio por OLS, el spread
+    residual, el test ADF y el ajuste del proceso de Ornstein-Uhlenbeck (de
+    donde se obtiene la vida media de la reversión), y lo compara con los
+    mismos estadísticos calculados sobre la muestra completa.
+
+    La ventana reciente incluye la última observación disponible, por lo que
+    el resultado describe el estado *actual* del par y no puede usarse para
+    generar señales dentro de un backtest histórico.  Para eso está
+    :func:`pair_trading_backtest`, que usa sólo información anterior a cada
+    fecha.
+
+    Parameters
+    ----------
+    log_prices : pd.DataFrame
+        Log-precios con una columna por ticker.
+    ticker_a, ticker_b : str
+        Tickers del par.
+    window : int
+        Número de observaciones de la ventana reciente.
+    significance : float
+        Nivel de significancia del test ADF.
+    compare_full : bool
+        Si ``True``, calcula también los estadísticos de la muestra
+        completa y las diferencias entre ambos.
+    min_obs : int
+        Mínimo de observaciones necesarias en la ventana reciente.
+    dt : float
+        Paso temporal usado en el ajuste OU (1.0 para datos diarios).
+
+    Returns
+    -------
+    PairWindowSummary
+        Resumen de la ventana reciente y su comparación con la muestra
+        completa.
+    """
+    missing = {ticker_a, ticker_b} - set(log_prices.columns)
+    if missing:
+        raise ValueError(f"Faltan columnas en log_prices: {missing}")
+    if window < 2:
+        raise ValueError("window debe ser al menos 2 observaciones.")
+
+    log_a = log_prices[ticker_a]
+    log_b = log_prices[ticker_b]
+    common = log_a.index.intersection(log_b.index)
+    if common.empty:
+        raise ValueError("No hay fechas comunes entre los dos activos.")
+
+    log_a = log_a.loc[common]
+    log_b = log_b.loc[common]
+
+    recent = slice(-window, None) if len(log_a) > window else slice(None)
+    window_a = log_a.iloc[recent]
+    window_b = log_b.iloc[recent]
+
+    if len(window_a) < min_obs:
+        raise ValueError(
+            f"La ventana reciente sólo tiene {len(window_a)} observaciones "
+            f"y se requieren al menos {min_obs}."
+        )
+
+    hedge = compute_hedge_ratio(window_a, window_b)
+    spread = window_a - (hedge.alpha + hedge.beta * window_b)
+    adf = adf_test(spread, significance=significance)
+    ou, ou_error = _fit_ou_safe(spread, dt=dt)
+
+    full_hedge = None
+    full_adf = None
+    full_ou = None
+    beta_change = None
+    beta_change_pct = None
+    adf_pvalue_change = None
+    half_life_change = None
+    half_life_change_pct = None
+    stationarity_lost = None
+
+    if compare_full:
+        full_hedge = compute_hedge_ratio(log_a, log_b)
+        full_spread = log_a - (full_hedge.alpha + full_hedge.beta * log_b)
+        full_adf = adf_test(full_spread, significance=significance)
+        full_ou, _ = _fit_ou_safe(full_spread, dt=dt)
+
+        beta_change = float(hedge.beta - full_hedge.beta)
+        if full_hedge.beta != 0:
+            beta_change_pct = float(beta_change / abs(full_hedge.beta))
+        adf_pvalue_change = float(adf.pvalue - full_adf.pvalue)
+        stationarity_lost = bool(full_adf.is_stationary and not adf.is_stationary)
+
+        if ou is not None and full_ou is not None:
+            half_life_change = float(ou.half_life - full_ou.half_life)
+            if full_ou.half_life != 0:
+                half_life_change_pct = float(half_life_change / abs(full_ou.half_life))
+
+    return PairWindowSummary(
+        ticker_a=ticker_a,
+        ticker_b=ticker_b,
+        start=window_a.index[0],
+        end=window_a.index[-1],
+        n_obs=len(window_a),
+        hedge=hedge,
+        adf=adf,
+        spread=spread,
+        ou=ou,
+        ou_error=ou_error,
+        full_hedge=full_hedge,
+        full_adf=full_adf,
+        full_ou=full_ou,
+        beta_change=beta_change,
+        beta_change_pct=beta_change_pct,
+        adf_pvalue_change=adf_pvalue_change,
+        half_life_change=half_life_change,
+        half_life_change_pct=half_life_change_pct,
+        stationarity_lost=stationarity_lost,
+    )
+
+
+def _fit_ou_safe(
+    spread: pd.Series, dt: float = 1.0
+) -> tuple[OUParameters | None, str | None]:
+    """Ajusta el proceso OU capturando los fallos de identificación.
+
+    Un spread no estacionario produce un coeficiente AR(1) mayor o igual que
+    uno, y :func:`fit_ou_process` lo rechaza con ``ValueError``.  En un
+    resumen descriptivo interesa que el fallo se reporte, no que se
+    propague.
+
+    Parameters
+    ----------
+    spread : pd.Series
+        Serie del spread.
+    dt : float
+        Paso temporal del ajuste OU.
+
+    Returns
+    -------
+    tuple[OUParameters | None, str | None]
+        Los parámetros ajustados (``None`` si falló) y el mensaje de error.
+    """
+    try:
+        return fit_ou_process(spread, dt=dt), None
+    except ValueError as exc:
+        return None, str(exc)
 
 
 # =============================================================================
@@ -1700,20 +2560,26 @@ def cached_ksg_mi_matrix(
     matrix = ksg_mi_matrix(clean, k_neighbors=k_neighbors, seed=seed)
 
     payload = {**meta, "created_at": datetime.now(timezone.utc).isoformat()}
-    with tempfile.NamedTemporaryFile(
-        delete=False, dir=cache_dir, suffix=".pkl.tmp",
-    ) as tmp_matrix, tempfile.NamedTemporaryFile(
-        delete=False, dir=cache_dir, suffix=".json.tmp", mode="w",
-    ) as tmp_meta:
+    with (
+        tempfile.NamedTemporaryFile(
+            delete=False,
+            dir=cache_dir,
+            suffix=".pkl.tmp",
+        ) as tmp_matrix,
+        tempfile.NamedTemporaryFile(
+            delete=False,
+            dir=cache_dir,
+            suffix=".json.tmp",
+            mode="w",
+        ) as tmp_meta,
+    ):
         pd.to_pickle(matrix, tmp_matrix.name)
         json.dump(payload, tmp_meta, indent=2, sort_keys=True)
         tmp_meta.flush()
         os.replace(tmp_matrix.name, str(matrix_path))
         os.replace(tmp_meta.name, str(meta_path))
 
-    print(
-        f"[caché] Matriz MI KSG guardada en {matrix_path.relative_to(cache_dir)}"
-    )
+    print(f"[caché] Matriz MI KSG guardada en {matrix_path.relative_to(cache_dir)}")
     return matrix
 
 
@@ -1748,8 +2614,7 @@ def top_pairs(
             if issuers is not None:
                 a_issuer = issuers.iloc[i]
                 b_issuer = issuers.iloc[j]
-                if (pd.notna(a_issuer) and pd.notna(b_issuer)
-                        and a_issuer == b_issuer):
+                if pd.notna(a_issuer) and pd.notna(b_issuer) and a_issuer == b_issuer:
                     continue
             pairs.append((cols[i], cols[j], float(val)))
     pairs.sort(key=lambda t: t[2], reverse=not ascending)
@@ -1811,11 +2676,7 @@ def unmapped_gics_sectors(sectors: pd.Series) -> list[str]:
     sin avisar en la tesis.
     """
     return sorted(
-        {
-            str(s)
-            for s in pd.unique(sectors.dropna())
-            if str(s) not in GICS_SECTOR_ES
-        }
+        {str(s) for s in pd.unique(sectors.dropna()) if str(s) not in GICS_SECTOR_ES}
     )
 
 
@@ -1901,7 +2762,7 @@ def hhi(series: pd.Series) -> float:
     el cluster en un único sector.  Equivale a una pureza de orden 2.
     """
     shares = series.value_counts(normalize=True)
-    return float(np.sum(shares ** 2))
+    return float(np.sum(shares**2))
 
 
 @dataclass(frozen=True)
@@ -2051,9 +2912,7 @@ def sector_average_matrix(
     operation : {"mean", "median", "min", "max"}
         Reducción aplicada dentro de cada bloque sectorial.
     """
-    common = matrix.index.intersection(sector_labels.index).intersection(
-        matrix.columns
-    )
+    common = matrix.index.intersection(sector_labels.index).intersection(matrix.columns)
     if len(common) == 0:
         raise ValueError("No hay tickers comunes entre la matriz y los sectores.")
 
@@ -2115,9 +2974,7 @@ def hierarchical_clustering(
     return labels, order
 
 
-def correlation_distance(
-    corr: pd.DataFrame, use_sqrt: bool = True
-) -> np.ndarray:
+def correlation_distance(corr: pd.DataFrame, use_sqrt: bool = True) -> np.ndarray:
     """Convierte una matriz de correlación en distancia para clustering.
 
     Por defecto devuelve ``dist = sqrt(1 - rho)``.  Esta distancia
@@ -2133,7 +2990,8 @@ def correlation_distance(
 
 
 def mi_distance(
-    mi_matrix: pd.DataFrame, fill_value: float | None = None,
+    mi_matrix: pd.DataFrame,
+    fill_value: float | None = None,
 ) -> np.ndarray:
     """Convierte una matriz de Información Mutua en distancia para clustering.
 
