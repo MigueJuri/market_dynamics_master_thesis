@@ -1,45 +1,75 @@
 # Instrucciones de trabajo
 
-Estas instrucciones ajustan cómo actúo en este repositorio.
+Repositorio de código cuantitativo para tesis de física/finanzas: análisis de LOB,
+volatilidad (HAR-RV, LSTM), backtests de momentum y *vol-timing*, y hechos
+estilizados de SPY. El texto de la tesis vive en otro repo; no lo leo ni edito.
 
-## 1. Diffs siempre visibles
+## 1. Mapa del proyecto
 
-Después de cada modificación en archivos del proyecto, muestro el diff resultante
-antes de continuar. Para archivos nuevos, los preparo (`git add`) y muestro el
-diff de la zona de preparación (`git diff --cached`).
+- `src/thesis/` — módulos de mercado, features, volatilidad, modelos, backtest,
+  pares, correlación, series temporales, eventos, visualización y config.
+- `tests/` — suite con `pytest`; tests de integración con datos reales marcados.
+- `notebooks/` — orquestación y experimentos; `.ipynb` se ignora en Git.
+- `data/` y `outputs/` — datos y artefactos generados; **nunca** se versionan.
 
-## 2. Commits agrupados por unidad lógica
+## 2. Comandos habituales
 
-No creo commits automáticos.  Antes de hacer commit pregunto al usuario
-para confirmar el alcance y el mensaje.  Cuando se confirma, agrupo los
-cambios relacionados en un único commit por unidad lógica en lugar de
-fragmentar cada edición individual.
+```bash
+source .venv/bin/activate        # o usa `uv run ...`
+uv run pytest                    # suite por defecto (sin integración)
+uv run pytest -m integration     # tests con red/datos reales
+uv run ruff check src tests
+python3 scripts/df_peek.py <ruta.csv|parquet>
+bash scripts/nb_to_py.sh [dir_destino]
+```
 
-No hago commit de cambios que no sean parte de una modificación intencionada
-(por ejemplo, archivos temporales o secretos).
+## 3. Reglas de datos
 
-## 3. Preguntar antes de hacer push en modificaciones grandes
+- Nunca leer datos crudos grandes ni el JSON de `.ipynb` completo.
+- Inspeccionar con `scripts/df_peek.py` o `head -n <archivo>`.
+- Los notebooks se leen vía `scripts/nb_to_py.sh` (`py:percent`) si es necesario.
 
-En cambios pequeños o triviales puedo subirlos automáticamente si ya existe
-configuración de acceso a GitHub y el remoto está disponible.
+## 4. Reglas de código cuantitativo
 
-En modificaciones grandes (múltiples archivos, refactorizaciones, cambios de
-interfaz, etc.), pregunto antes de ejecutar `git push`. No fuerzo pushes
-(`--force`).
+- **Sin look-ahead**: las señales usan datos ≤ `t-1`; estadísticas rodantes con
+  `shift(1)`; normalización se ajusta solo en train.
+- **Splits ordenados en el tiempo**; semillas fijas; vectorizar con pandas/numpy.
+- Usar `np.linspace` o grillas con índices enteros; evitar `np.arange` con paso
+  flotante.
+- Manejar valores centinela del LOB (0, -9999999999, etc.) de forma explícita.
+- Documentar unidades; DataFrames ordenados (una variable por columna).
 
-## 4. Revertir a estados anteriores
+## 5. Salidas
 
-Si el usuario solicita volver a un estado anterior del código, uso los comandos
-apropiados de Git:
+- Nombres descriptivos y estables: `<estrategia>_<dataset>_<metrica>.pdf/png`.
+- Cada figura/tabla debe ser producida por un único script o celda.
+- **No** crear carpetas de exportación ni scripts de sincronización entre repos.
 
-- Revertir cambios no confirmados: `git checkout -- <archivo>` o `git restore`.
-- Deshacer el último commit conservando los cambios: `git reset --soft HEAD~1`.
-- Deshacer el último commit descartando los cambios: `git reset --hard HEAD~1`.
-- Volver a un commit específico: `git checkout <hash>` o `git reset --hard <hash>`.
+## 6. Tabla de enrutamiento de modelos
 
-Antes de operaciones destructivas, advierto y pido confirmación.
+| Agente      | Modelo                           | Cuándo usarlo                     |
+|-------------|----------------------------------|-----------------------------------|
+| default     | `opencode-go/minimax-m3`         | tareas generales de implementación|
+| `build`     | `opencode-go/minimax-m3`         | ejecutar un plan y correr tests   |
+| `plan`      | `opencode-go/deepseek-v4-pro`    | análisis y planificación          |
+| `explore`   | `opencode-go/mimo-v2.6-flash`    | localizar definiciones            |
+| `reviewer`  | `opencode-go/kimi-k3.1-pro`      | revisión de rigor y leakage       |
+| tareas      | `opencode-go/deepseek-v4.1-flash`| títulos y tareas livianas         |
 
-## 5. Seguridad básica
+DeepSeek requiere región *Global* habilitada en Console → Privacy.
 
-- No commiteo secretos, tokens, claves ni archivos de configuración sensibles.
-- No ejecuto `git push --force` ni reescribo historial público sin autorización.
+## 7. Reglas de tokens/sesiones
+
+- Una tarea por sesión; planear con `/plan <tarea>` (`plan`).
+- Implementar en una **sesión nueva** con `/exec <plan-file>` (`build`).
+- No cambiar de modelo en medio de sesión.
+- Compactar contexto antes de ~80K tokens; limitar salida de herramientas.
+- Pedir diffs, no reescrituras completas de archivos.
+- Si algo excede el tamaño de la sesión, delegar a una skill o a `docs/ai/`.
+
+## 8. Git y seguridad
+
+- Diffs visibles antes de continuar; commits agrupados por unidad lógica.
+- No commitear secretos, tokens, claves ni archivos de configuración sensibles.
+- Preguntar antes de `git push` en cambios grandes; nunca `push --force`.
+- Antes de operaciones destructivas, advertir y pedir confirmación.

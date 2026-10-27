@@ -1,0 +1,82 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode-go/minimax-m3",
+  "small_model": "opencode-go/deepseek-v4.1-flash",
+  "enabled_providers": ["opencode-go"],
+  "autoupdate": false,
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "reserved": 10000
+  },
+  "watcher": {
+    "ignore": [
+      "data/**",
+      "outputs/**",
+      "notebooks/**",
+      "__pycache__/**",
+      ".ipynb_checkpoints/**",
+      ".venv/**",
+      "*.parquet",
+      "*.csv",
+      "*.npy",
+      "*.npz",
+      "*.pt",
+      "*.pth",
+      "*.ckpt",
+      "*.safetensors"
+    ]
+  },
+  "instructions": ["AGENTS.md"],
+  "permission": {
+    "read": {
+      "*": "allow",
+      "*.env": "ask",
+      "*.env.*": "ask",
+      "data/**": "ask",
+      "*.csv": "ask",
+      "*.parquet": "ask",
+      "*.npy": "ask",
+      "*.npz": "ask",
+      "*.pt": "ask",
+      "*.pth": "ask",
+      "*.ckpt": "ask",
+      "*.safetensors": "ask",
+      "*.ipynb": "ask"
+    },
+    "edit": {
+      "*": "ask",
+      "AGENTS.md": "allow",
+      "opencode.jsonc": "allow",
+      ".opencode/**": "allow",
+      "docs/ai/**": "allow",
+      "docs/plans/**": "allow",
+      "scripts/**": "allow"
+    },
+    "bash": {
+      "*": "ask",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "git branch*": "allow",
+      "grep *": "allow",
+      "rg *": "allow",
+      "uv run *": "allow",
+      "python3 scripts/*": "allow",
+      "scripts/*.sh*": "allow"
+    },
+    "skill": "allow",
+    "task": "allow",
+    "question": "allow"
+  },
+  "agent": {
+    "build": {
+      "model": "opencode-go/minimax-m3",
+      "prompt": "{file:.opencode/agents/build.md}"
+    },
+    "plan": {
+      "model": "opencode-go/deepseek-v4-pro",
+      "prompt": "{file:.opencode/agents/plan.md}"
+    }
+  }
+}

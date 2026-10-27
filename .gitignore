@@ -48,6 +48,8 @@ figures/
 *.npz
 *.pt
 *.pth
+*.ckpt
+*.safetensors
 *.pkl
 *.pickle
 *.json
