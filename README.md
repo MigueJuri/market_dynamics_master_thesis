@@ -48,12 +48,14 @@ pip install -e ".[dev]"
 │   ├── volatility.py            # Features y target de volatilidad
 │   ├── volatility_models.py     # LSTM, HAR-RV y entrenamiento
 │   ├── volatility_evaluation.py # Métricas, backtest y gráficos
+│   ├── btc.py                   # OHLCV de BTC, power-law y ciclos
 │   └── plotting.py              # Visualizaciones reutilizables
 │
 ├── tests/                       # Tests del paquete
 │   └── test_pair_trading.py     # Tests de pair_trading
 │
 ├── notebooks/
+│   ├── btc/                     # Análisis de BTC (power-law y ciclos)
 │   ├── feature_analysis/        # Análisis de predictibilidad
 │   ├── pair_trading/            # Selección de pares, OU y trading
 │   ├── trend_following_strategy/# Estrategia de momentum
