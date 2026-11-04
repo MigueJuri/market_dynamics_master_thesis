@@ -49,18 +49,20 @@ bash scripts/nb_to_py.sh [dir_destino]
 
 | Agente      | Modelo                           | Cuándo usarlo                     |
 |-------------|----------------------------------|-----------------------------------|
-| default     | `opencode-go/minimax-m3`         | tareas generales de implementación|
-| `build`     | `opencode-go/minimax-m3`         | ejecutar un plan y correr tests   |
-| `plan`      | `opencode-go/deepseek-v4-pro`    | análisis y planificación          |
+| `build`     | `opencode-go/minimax-m3`         | default; ejecutar un plan y tests |
+| `planner`   | `opencode-go/deepseek-v4-pro`    | análisis y planificación (escribe `docs/plans/`) |
 | `explore`   | `opencode-go/mimo-v2.6-flash`    | localizar definiciones            |
 | `reviewer`  | `opencode-go/kimi-k3.1-pro`      | revisión de rigor y leakage       |
-| tareas      | `opencode-go/deepseek-v4.1-flash`| títulos y tareas livianas         |
+| `small_model` | `opencode-go/deepseek-v4.1-flash`| títulos y tareas livianas         |
+
+`plan` (agente nativo de opencode) queda disponible en modo solo lectura: no
+escribe nada. Para planificar y persistir el plan se usa `planner`.
 
 DeepSeek requiere región *Global* habilitada en Console → Privacy.
 
 ## 7. Reglas de tokens/sesiones
 
-- Una tarea por sesión; planear con `/plan <tarea>` (`plan`).
+- Una tarea por sesión; planear con `/plan <tarea>` (`planner`).
 - Implementar en una **sesión nueva** con `/exec <plan-file>` (`build`).
 - No cambiar de modelo en medio de sesión.
 - Compactar contexto antes de ~80K tokens; limitar salida de herramientas.

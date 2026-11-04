@@ -4,14 +4,7 @@ mode: primary
 model: opencode-go/minimax-m3
 permission:
   edit: allow
-  bash:
-    "*": ask
-    "git status*": allow
-    "git diff*": allow
-    "git log*": allow
-    "uv run *": allow
-    "python3 scripts/*": allow
-    "scripts/*.sh*": allow
+  bash: allow
 ---
 
 You are the build agent. Implement only from `docs/plans/<task>.md`. Make minimal

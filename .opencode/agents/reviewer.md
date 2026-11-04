@@ -1,7 +1,7 @@
 ---
 description: Read-only rigor reviewer for leakage and numerical issues
 mode: subagent
-model: opencode-go/kimi-k3.1-pro
+model: opencode-go/deepseek-v4.1-flash
 permission:
   edit: deny
   bash:

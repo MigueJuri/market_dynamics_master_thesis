@@ -1,6 +1,6 @@
 ---
 description: Write a compact implementation plan to docs/plans
-agent: plan
+agent: planner
 subtask: true
 model: opencode-go/deepseek-v4-pro
 ---

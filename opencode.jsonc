@@ -61,9 +61,13 @@
       "git branch*": "allow",
       "grep *": "allow",
       "rg *": "allow",
+      "git show*": "allow",
+      "git ls-files*": "allow",
       "uv run *": "allow",
+      "python3 -m py_compile*": "allow",
       "python3 scripts/*": "allow",
-      "scripts/*.sh*": "allow"
+      "scripts/*.sh*": "allow",
+      "bash scripts/*.sh*": "allow"
     },
     "skill": "allow",
     "task": "allow",
@@ -74,9 +78,9 @@
       "model": "opencode-go/minimax-m3",
       "prompt": "{file:.opencode/agents/build.md}"
     },
-    "plan": {
+    "planner": {
       "model": "opencode-go/deepseek-v4-pro",
-      "prompt": "{file:.opencode/agents/plan.md}"
+      "prompt": "{file:.opencode/agents/planner.md}"
     }
   }
 }
