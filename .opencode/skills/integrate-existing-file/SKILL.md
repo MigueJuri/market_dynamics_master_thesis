@@ -17,7 +17,8 @@ directorio de trabajo.
 Un archivo integrado no debe quedar como una isla. Al terminar:
 
 - Toda lógica reutilizable vive en `src/<paquete>/` y se **importa**.
-- El cuaderno o script es un **orquestador**: configura, invoca y reporta.
+- El cuaderno o script es un **orquestador por etapas**: configura, invoca y
+  reporta, con una celda por sección del pipeline.
 - Cada pieza nueva tiene tests y documentación.
 - El árbol de trabajo del usuario queda intacto fuera del alcance.
 
@@ -111,10 +112,45 @@ raíz no debe fallar por una dependencia opcional ausente.
    imports mutantes.
 3. Conserva el comportamiento numérico del original. Si corriges un
    defecto, documéntalo en el commit.
-4. Deja el cuaderno como orquestador con una función `run_experiment()`
-   (o equivalente) y un guard `if __name__ == "__main__":`.
+4. Deja el cuaderno como orquestador **por etapas**, en formato `py:percent`
+   (jupytext): una celda por sección del pipeline (datos, features, modelo,
+   evaluación, figuras), de modo que cada sección pueda re-ejecutarse de
+   forma independiente.  Una función `run_experiment()` es sólo un atajo
+   programático opcional, nunca la única vía de ejecución del cuaderno.
+   Ver «Cuadernos interactivos» más abajo.
 5. Actualiza `pyproject.toml` si aparecen dependencias nuevas.
 6. Muestra el diff después de cada modificación (ver Fase 6).
+
+### Cuadernos interactivos (`py:percent`)
+
+Un cuaderno de experimento se escribe para que el autor pueda **iterar in
+situ**: cambiar un parámetro o una figura y re-ejecutar sólo lo afectado, sin
+volver a correr el pipeline entero (y sin reentrenar ni volver a descargar
+datos).  Reglas:
+
+- **Formato**: cabecera jupytext `percent` (`# %%` como separador de celdas,
+  celdas markdown con títulos `##`), como en
+  `notebooks/volatility/Volatilidad_LSTM.py`.  El archivo sigue siendo
+  ejecutable como script (`python notebooks/<dominio>/<script>.py`).
+- **Una celda por etapa**: cada sección del pipeline (carga de datos,
+  preparación, ajuste, evaluación, cada figura) va en su propia celda.  Las
+  etapas son funciones en `src/`; la celda las invoca y **deja el resultado en
+  el espacio de nombres** (`btc_df`, `reg_df`, `fit`, ...) para poder
+  explorarlo y re-ejecutar las celdas siguientes.
+- **Ejecución idempotente por celda**: la celda de una etapa debe poder
+  re-ejecutarse sin repetir las anteriores.  Si una etapa depende de otra,
+  que la dependencia sea explícita (el resultado de la etapa previa vive en
+  una variable) y no un efecto colateral oculto.
+- **Guardas de script**: las celdas de ejecución se envuelven en
+  `if __name__ == "__main__":` si el archivo también se usa como script o
+  módulo importable.  En Jupyter la condición es verdadera, de modo que las
+  celdas siguen ejecutándose de forma interactiva.
+- **`run_experiment()` es opcional**: puede existir como atajo para tests y
+  scripts (encadena las etapas y devuelve los resultados), pero no debe
+  sustituir a las celdas ni ser la única forma de ejecutar el cuaderno.
+- **Figuras in situ**: las figuras del experimento se dibujan en el cuaderno,
+  una por celda, para poder personalizarlas sin tocar `src/` ni reiniciar el
+  kernel.  Sólo la lógica reutilizable va a `src/<paquete>/<dominio>.py`.
 
 ## Fase 4 — Documentación
 
@@ -178,6 +214,9 @@ como el resto del historial del repo.
 
 - Dejar el archivo original intacto y añadir una copia en `src/`.
 - Mover todo a `src/` y dejar el cuaderno vacío de explicación.
+- Compactar todo el cuaderno en una única función `run_experiment()`: obliga a
+  re-ejecutar el pipeline completo para cambiar un parámetro o una figura y
+  elimina la posibilidad de iterar celda a celda.
 - Un módulo gigante con todo mezclado.
 - Fragmentar en archivos de una sola función.
 - Declarar dependencias que el código no usa.
