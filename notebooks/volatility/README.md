@@ -14,13 +14,14 @@ modelo HAR-RV canónico?**
 
 ```text
 notebooks/volatility/
-├── README.md              ← este archivo
-└── Volatilidad_LSTM.py    ← cuaderno Jupytext del experimento
+├── README.md                       ← este archivo
+├── Volatilidad_LSTM.py             ← cuaderno Jupytext del experimento
+└── Volatilidad_LSTM_Descripcion.py ← figuras descriptivas del problema
 
 src/thesis/
 ├── volatility.py          ← features, target, splits y secuencias
 ├── volatility_models.py   ← HAR-RV, LSTM, pérdida LINEX y entrenamiento
-└── volatility_evaluation.py ← métricas, backtest y gráficos
+└── volatility_evaluation.py ← métricas y backtest (sin figuras)
 ```
 
 ---
@@ -42,10 +43,17 @@ src/thesis/
    gradient clipping y early stopping.
 8. **Evaluación**: R², RMSE, MAE, Spearman, precisión direccional,
    QLIKE, Mincer-Zarnowitz y test de Diebold-Mariano.
-9. **Backtest**: estrategia de vol-timing que escala una señal de
-   momentum por la volatilidad predicha inversa.
-10. **Diagnóstico**: figura de 6 paneles con pérdidas, predicciones,
-    adaptabilidad post-shock, rangos y equity.
+9. **Backtest**: estrategia de vol-timing que escala por la volatilidad
+   predicha inversa una señal base de momentum (signo de la media móvil de los
+   retornos, con desplazamiento causal de una barra).
+10. **Diagnóstico**: seis figuras independientes, dibujadas *in situ* en el
+    cuaderno (pérdida, predicho vs real, series de volatilidad,
+    adaptabilidad post-shock, equity del backtest y rangos), con estilo
+    clásico de fondo blanco.
+
+Las figuras se dibujan en celdas propias del cuaderno y no en
+``src/thesis``, de modo que se pueden personalizar y volver a ejecutar sin
+tocar las funciones generales ni repetir el entrenamiento.
 
 ---
 
@@ -100,13 +108,10 @@ src/thesis/
   Test de igualdad de precisión predictiva bajo MSE.
 
 * ``run_vol_timing_backtest(ret, pred_vol, sigma_bar, cost_bps) -> dict``
-  Backtest de vol-timing con momentum y costos.
+  Backtest de vol-timing con señal base de momentum y costos.
 
 * ``calculate_adaptability(y_true, y_pred, horizon, threshold) -> tuple``
   Curva Event-MAE y vida media tras shocks de volatilidad.
-
-* ``generate_plots(...) -> None``
-  Figura diagnóstica de 6 paneles.
 
 ---
 
@@ -178,7 +183,53 @@ trabajo actual:
 | ``target_scaler.pkl`` | Escalador del target. |
 | ``metrics.csv`` | Métricas de LSTM y HAR-RV. |
 | ``report.md`` | Reporte de resultados (reservado). |
-| ``lstm_vol_report.png`` | Figura diagnóstica. |
+
+Las figuras las guarda la sección de gráficos del cuaderno:
+
+| Archivo | Contenido |
+| ------- | --------- |
+| ``lstm_vol_loss.png`` | Pérdida LINEX por época. |
+| ``lstm_vol_predictions.png`` | Predicción LSTM frente a realidad. |
+| ``lstm_vol_timeseries.png`` | Volatilidad real, LSTM y HAR-RV en el test. |
+| ``lstm_vol_adaptability.png`` | Decaimiento del Event-MAE post-shock. |
+| ``lstm_vol_backtest.png`` | Retorno acumulado del backtest de vol-timing. |
+| ``lstm_vol_ranks.png`` | Correlación de rangos LSTM vs HAR-RV. |
+
+---
+
+## Figuras descriptivas
+
+``Volatilidad_LSTM_Descripcion.py`` es un cuaderno paralelo que produce las
+figuras de apoyo para describir el problema y el modelo en el texto de la
+tesis.  No entrena la LSTM ni evalúa el modelo: sólo descarga la misma
+serie que usa el experimento y la describe.
+
+```bash
+uv run python notebooks/volatility/Volatilidad_LSTM_Descripcion.py
+```
+
+| Archivo | Contenido |
+| ------- | --------- |
+| ``vol_desc_acf_squared_returns.png`` | Autocorrelación de los retornos cuadrados (persistencia de la volatilidad). |
+| ``vol_desc_acf_returns.png`` | Autocorrelación de los retornos simples (efecto apalancamiento). |
+| ``vol_desc_logprice_realized_vol.png`` | Precio logarítmico y volatilidad realizada, con las fechas de división de datos. |
+| ``vol_desc_forward_vol_5d.png`` | Volatilidad hacia adelante a 5 sesiones (objetivo del modelo) frente a la causal de 20 sesiones. |
+
+Detalles:
+
+* La volatilidad realizada de la tercera figura es **hacia atrás** (ventana
+  móvil de 20 sesiones, anualizada), por lo que no introduce look-ahead.  El
+  objetivo del modelo es su versión *forward* a 5 sesiones.
+* La cuarta figura muestra ese objetivo: el rolling hacia adelante de 5
+  sesiones de los retornos cuadrados y su raíz cuadrada
+  (``σ^H_t = sqrt(Σ_{i=1..H} r_{t+i}²)``), anualizado con el factor ``252/H``
+  para compartir escala con la serie causal.  Usa información futura **por
+  diseño** (es la etiqueta, no una feature) y sus últimas ``H`` observaciones
+  son ``NaN`` porque no existe futuro para ellas.
+* Las autocorrelaciones se calculan sobre la muestra completa: describen el
+  proceso, no son una entrada del modelo.
+* Las fechas de división (`train_end`, `val_end`) están replicadas en el
+  ``CONFIG`` del cuaderno y deben coincidir con las de ``Volatilidad_LSTM.py``.
 
 ---
 

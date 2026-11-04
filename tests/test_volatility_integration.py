@@ -27,6 +27,7 @@ from thesis.volatility import (
     count_extreme_moves,
     download_ohlcv,
     make_sequences,
+    purge_boundary_labels,
     scale_splits,
     temporal_split,
 )
@@ -270,6 +271,41 @@ def test_real_lstm_trains_and_predicts(
     assert np.isfinite(preds).all()
 
 
+def test_real_purged_labels_do_not_cross_split_boundaries(
+    real_ohlcv: pd.DataFrame,
+) -> None:
+    """Los labels del train purgado no dependen de los retornos de validación.
+
+    Se corrompe la cola de la serie (validación y test) y se comprueba que los
+    targets del train purgado no cambian; sin purga, los últimos ``HORIZON``
+    labels del train sí cambian.
+    """
+    data = build_volatility_dataset(real_ohlcv, horizon=HORIZON)
+    train, _, _ = temporal_split(data, TRAIN_END, VAL_END)
+    purged = purge_boundary_labels(train, HORIZON)
+
+    corrupta = real_ohlcv.copy()
+    futura = corrupta.index > train.index[-1]
+    corrupta.loc[futura, ["Open", "High", "Low", "Close"]] *= 3.0
+    data_corrupta = build_volatility_dataset(corrupta, horizon=HORIZON)
+    train_corrupto, _, _ = temporal_split(data_corrupta, TRAIN_END, VAL_END)
+    purged_corrupto = purge_boundary_labels(train_corrupto, HORIZON)
+
+    assert len(purged) == len(purged_corrupto)
+    np.testing.assert_allclose(
+        purged["target_log_vol"].to_numpy(),
+        purged_corrupto["target_log_vol"].to_numpy(),
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+    # Sin purga, los últimos labels del train sí dependen de la validación.
+    assert not np.allclose(
+        train["target_log_vol"].to_numpy()[-HORIZON:],
+        train_corrupto["target_log_vol"].to_numpy()[-HORIZON:],
+    )
+
+
 def test_real_backtest_and_metrics(
     real_splits: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
     real_ohlcv: pd.DataFrame,
@@ -280,7 +316,7 @@ def test_real_backtest_and_metrics(
         diebold_mariano_test,
         evaluate_forecasts,
         run_vol_timing_backtest,
-        summarize_log_returns,
+        summarize_returns,
     )
 
     _, _, test = real_splits
@@ -297,12 +333,18 @@ def test_real_backtest_and_metrics(
         np.log(real_ohlcv["Close"]).diff().reindex(test.index).fillna(0.0).values[:500]
     )
     sigma_bar = float(np.median(y_true))
+    # Señal base de momentum: se calcula dentro del backtest (signo de la
+    # media móvil de los retornos, con desplazamiento de una barra).
     bt = run_vol_timing_backtest(ret, y_pred, sigma_bar, cost_bps=5)
     assert len(bt["ret_vol"]) == len(ret)
     assert np.isfinite(bt["sharpe_vol"])
+    # El backtest devuelve retornos simples: buy & hold es ``expm1`` de los
+    # log-retornos.
+    np.testing.assert_allclose(bt["ret_bh"], np.expm1(ret), rtol=1e-12)
 
-    asset = summarize_log_returns(ret)
+    asset = summarize_returns(np.expm1(ret))
     assert np.isfinite(asset["total_return"])
+    assert asset["total_return"] == pytest.approx(float(np.prod(1.0 + np.expm1(ret))) - 1.0)
 
     mae, _ = calculate_adaptability(y_true, y_pred, horizon=10)
     assert len(mae) == 10
@@ -427,6 +469,23 @@ def test_notebook_import_does_not_run_pipeline() -> None:
     assert "features" in module.CONFIG
 
 
+def test_descriptive_notebook_import_does_not_download() -> None:
+    """Importar el cuaderno descriptivo no debe descargar datos ni graficar."""
+    notebook = (
+        Path(__file__).resolve().parents[1]
+        / "notebooks"
+        / "volatility"
+        / "Volatilidad_LSTM_Descripcion.py"
+    )
+    spec = importlib.util.spec_from_file_location("volatility_desc_notebook", notebook)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["volatility_desc_notebook"] = module
+    spec.loader.exec_module(module)
+    assert module.CONFIG["ticker"] == "SPY"
+    assert module.CONFIG["train_end"] < module.CONFIG["val_end"]
+
+
 def test_notebook_end_to_end_with_real_data(tmp_path: Path) -> None:
     """Pipeline completo del notebook con datos reales y entrenamiento corto."""
     pytest.importorskip("torch")
@@ -456,7 +515,6 @@ def test_notebook_end_to_end_with_real_data(tmp_path: Path) -> None:
         "target_scaler_path": str(tmp_path / "target_scaler.pkl"),
         "metrics_path": str(tmp_path / "metrics.csv"),
         "config_path": str(tmp_path / "config.json"),
-        "plot_path": str(tmp_path / "report.png"),
     }
 
     import matplotlib
@@ -470,9 +528,31 @@ def test_notebook_end_to_end_with_real_data(tmp_path: Path) -> None:
     assert (tmp_path / "model.pt").exists()
     assert (tmp_path / "metrics.csv").exists()
     assert (tmp_path / "config.json").exists()
-    assert (tmp_path / "report.png").exists()
     assert (tmp_path / "scaler.pkl").exists()
     assert (tmp_path / "target_scaler.pkl").exists()
 
     metrics_csv = pd.read_csv(tmp_path / "metrics.csv")
     assert list(metrics_csv["model"]) == ["LSTM", "HAR-RV (Baseline)"]
+
+    # --- Alineación del backtest (forecast ↔ retorno operado) ---
+    smoothed = module.smooth_predictions(config)
+    n_eval = len(smoothed["y_lstm"])
+    assert len(smoothed["dates"]) == n_eval
+    assert len(smoothed["ret_te_aligned"]) == n_eval - 1
+    assert len(smoothed["bt_dates"]) == n_eval - 1
+
+    # ``bt_dates[j]`` es el día en que se realiza el retorno operado por el
+    # forecast ``j``.
+    log_ret = np.log(results["raw"]["Close"] / results["raw"]["Close"].shift(1))
+    expected_ret = log_ret.reindex(smoothed["bt_dates"]).fillna(0.0).to_numpy()
+    np.testing.assert_allclose(
+        smoothed["ret_te_aligned"], expected_ret, rtol=1e-12, atol=1e-12
+    )
+
+    # --- Métricas primarias raw-vs-raw (la verdad no recibe EWMA) ---
+    from sklearn.metrics import r2_score
+
+    np.testing.assert_allclose(smoothed["y_true"], smoothed["y_true_raw"])
+    assert results["metrics"]["lstm"]["R2"] == pytest.approx(
+        r2_score(smoothed["y_true"], smoothed["y_lstm_raw"])
+    )

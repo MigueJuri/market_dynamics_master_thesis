@@ -18,6 +18,7 @@ from thesis.volatility import (
     count_extreme_moves,
     download_ohlcv,
     make_sequences,
+    purge_boundary_labels,
     scale_splits,
     temporal_split,
     validate_ohlcv,
@@ -115,6 +116,57 @@ def test_temporal_split_disjoint() -> None:
     assert val.index.max() <= pd.Timestamp("2000-05-15")
     assert test.index.min() > pd.Timestamp("2000-05-15")
     assert len(train) + len(val) + len(test) == len(data)
+
+
+def test_purge_boundary_labels_removes_last_rows() -> None:
+    """La purga elimina las últimas ``horizon`` filas de la partición."""
+    data = build_volatility_dataset(_make_ohlcv(120), horizon=5)
+    train, _, _ = temporal_split(data, "2020-03-15", "2020-04-15")
+
+    purged = purge_boundary_labels(train, 5)
+
+    assert len(purged) == len(train) - 5
+    assert purged.index.equals(train.index[:-5])
+    # No se toca el DataFrame original.
+    assert len(train) == len(purged) + 5
+
+
+def test_purge_boundary_labels_labels_independent_of_next_split() -> None:
+    """Los labels del train purgado no dependen de los retornos de validación.
+
+    Se corrompe la cola de la serie (validación y test) y se comprueba que los
+    targets del train purgado son idénticos; sin purga, las últimas ``horizon``
+    filas del train sí cambian.
+    """
+    horizon = 5
+    df = _make_ohlcv(200)
+    data = build_volatility_dataset(df, horizon=horizon)
+    train, _, _ = temporal_split(data, "2020-03-15", "2020-04-15")
+
+    # Serie corrupta: se multiplica el precio de toda la cola posterior al
+    # train, lo que altera los retornos que usan sus labels de frontera.
+    df_corrupta = df.copy()
+    futura = df_corrupta.index > train.index[-1]
+    df_corrupta.loc[futura, ["Open", "High", "Low", "Close"]] *= 3.0
+    data_corrupta = build_volatility_dataset(df_corrupta, horizon=horizon)
+    train_corrupto, _, _ = temporal_split(data_corrupta, "2020-03-15", "2020-04-15")
+
+    purgado = purge_boundary_labels(train, horizon)
+    purgado_corrupto = purge_boundary_labels(train_corrupto, horizon)
+
+    assert len(purgado) == len(purgado_corrupto)
+    np.testing.assert_allclose(
+        purgado["target_log_vol"].to_numpy(),
+        purgado_corrupto["target_log_vol"].to_numpy(),
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+    # Sin purga, los últimos labels del train sí dependen de la validación.
+    assert not np.allclose(
+        train["target_log_vol"].to_numpy()[-horizon:],
+        train_corrupto["target_log_vol"].to_numpy()[-horizon:],
+    )
 
 
 def test_make_sequences_shape() -> None:

@@ -284,6 +284,41 @@ def temporal_split(
     return train, val, test
 
 
+def purge_boundary_labels(
+    df: pd.DataFrame,
+    horizon: int,
+) -> pd.DataFrame:
+    """Elimina las filas cuyo label forward cruza la frontera del split.
+
+    El target de :func:`compute_log_vol_target` en la posición ``t`` usa los
+    retornos de las posiciones ``t+1 ... t+horizon``.  Por tanto, las últimas
+    ``horizon`` filas de una partición tienen labels apoyados en observaciones
+    de la partición siguiente: los últimos labels del train usan retornos de
+    validación y los últimos de validación usan retornos de test.
+
+    La purga es **posicional** porque el target se construye con ventanas
+    móviles sobre filas (no sobre calendario): aunque falten sesiones, la
+    ventana del label sigue siendo de ``horizon`` observaciones consecutivas.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Partición de entrenamiento o validación.
+    horizon : int
+        Horizonte de predicción en sesiones.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copia de ``df`` sin sus últimas ``horizon`` filas.
+    """
+    if horizon <= 0:
+        return df.copy()
+    if horizon >= len(df):
+        return df.iloc[:0].copy()
+    return df.iloc[:-horizon].copy()
+
+
 def make_sequences(
     X: np.ndarray,
     y: np.ndarray,

@@ -1,20 +1,18 @@
-"""Evaluación, backtest y visualización de pronósticos de volatilidad.
+"""Evaluación y backtest de pronósticos de volatilidad.
 
 Incluye métricas de error estándar, test de Diebold-Mariano, backtest de
-vol-timing, análisis de adaptabilidad post-shock y figuras diagnósticas.
+vol-timing y análisis de adaptabilidad post-shock.  Las figuras se dibujan
+en el cuaderno ``notebooks/volatility/Volatilidad_LSTM.py`` para que puedan
+personalizarse sin tocar este módulo.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import matplotlib
-import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
-from matplotlib.gridspec import GridSpec
 from scipy import stats
 from scipy.optimize import curve_fit
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -148,28 +146,65 @@ def diebold_mariano_test(
 
 
 def sharpe_ratio(r: np.ndarray) -> float:
-    """Sharpe anualizado asumiendo retornos logarítmicos diarios."""
-    return float(np.sqrt(252) * np.mean(r) / (np.std(r) + 1e-10))
+    """Sharpe anualizado sobre retornos simples (tasa libre de riesgo nula)."""
+    r = np.asarray(r, dtype=float)
+    if r.size == 0:
+        return float("nan")
+    return float(np.sqrt(252.0) * np.mean(r) / (np.std(r) + 1e-10))
 
 
 def max_drawdown(r: np.ndarray) -> float:
-    """Máximo drawdown sobre retornos logarítmicos."""
-    eq = np.exp(np.cumsum(r))
-    peak = np.maximum.accumulate(eq)
-    return float(np.min((eq - peak) / (peak + 1e-10)))
+    """Máximo drawdown sobre retornos simples.
+
+    La riqueza se construye como ``cumprod(1 + r)`` **anteponiendo el capital
+    inicial (1.0)**, de modo que una caída desde el primer día también cuenta
+    como drawdown.  El valor devuelto es negativo (o cero).
+    """
+    r = np.asarray(r, dtype=float)
+    equity = np.concatenate(([1.0], np.cumprod(1.0 + r)))
+    peak = np.maximum.accumulate(equity)
+    return float(np.min((equity - peak) / (peak + 1e-10)))
 
 
 def calmar_ratio(r: np.ndarray) -> float:
-    """Ratio de Calmar anualizado."""
+    """Ratio de Calmar sobre retornos simples: ``CAGR / |MDD|``.
+
+    El CAGR anualizado se calcula como ``prod(1 + r) ** (252 / n) - 1``.
+    """
+    r = np.asarray(r, dtype=float)
+    n = r.size
+    if n == 0:
+        return float("nan")
     mdd = abs(max_drawdown(r))
-    return float(np.sqrt(252) * np.mean(r) / (mdd + 1e-10))
+    total = float(np.prod(1.0 + r))
+    if total <= 0.0:
+        return float("nan")
+    cagr = total ** (252.0 / n) - 1.0
+    if mdd <= 0.0:
+        if cagr > 0.0:
+            return float("inf")
+        return 0.0 if cagr == 0.0 else float("-inf")
+    return float(cagr / mdd)
 
 
-def summarize_log_returns(r: np.ndarray) -> dict[str, float]:
-    """Resumen de una serie de retornos logarítmicos diarios."""
-    equity = np.exp(np.cumsum(r))
+def summarize_returns(r: np.ndarray) -> dict[str, float]:
+    """Resumen de una serie de retornos simples diarios.
+
+    Parameters
+    ----------
+    r : np.ndarray
+        Retornos **simples** (no logarítmicos) de la estrategia.
+
+    Returns
+    -------
+    dict
+        ``total_return`` (``prod(1 + r) - 1``), ``sharpe``, ``maxdd`` y
+        ``calmar``.
+    """
+    r = np.asarray(r, dtype=float)
+    total_return = float(np.prod(1.0 + r)) - 1.0
     return {
-        "total_return": float(equity[-1] - 1.0),
+        "total_return": total_return,
         "sharpe": sharpe_ratio(r),
         "maxdd": max_drawdown(r),
         "calmar": calmar_ratio(r),
@@ -184,15 +219,20 @@ def run_vol_timing_backtest(
 ) -> dict[str, Any]:
     """Estrategia de vol-timing sobre una señal de momentum.
 
-    La señal base es el signo del retorno medio de los últimos 63 días.
-    La posición se escala por la volatilidad predicha inversa:
+    La señal base es el signo del retorno medio de los últimos 63 días
+    (ventana adaptativa ``min(252, n // 4)``, con un mínimo de 5
+    observaciones).  El ``shift(1)`` hace que la posición de ``t`` use
+    únicamente retornos hasta ``t-1`` (sin look-ahead).  La posición se escala
+    por la volatilidad predicha inversa:
 
         ``pos_vol(t) = clip(signo(t) / (σ̂(t) / σ̄), -1, 1)``
 
     Parameters
     ----------
     ret : np.ndarray
-        Retornos logarítmicos alineados con ``pred_vol``.
+        Retornos **logarítmicos** alineados con ``pred_vol``.  La señal de
+        momentum se calcula sobre ellos; la aritmética de la cartera usa
+        retornos simples (``expm1``).
     pred_vol : np.ndarray
         Volatilidad predicha.
     sigma_bar : float
@@ -203,15 +243,20 @@ def run_vol_timing_backtest(
     Returns
     -------
     dict
-        Series de retornos y métricas de Vol-Timed, baseline y buy & hold.
+        Series de retornos **simples** netos de costos y métricas de
+        Vol-Timed, baseline y buy & hold.
     """
     n = len(pred_vol)
-    ret_arr = ret[:n]
+    ret_arr = np.asarray(ret, dtype=float)[:n]
 
-    mom_win = min(63, n // 4)
-    mom = pd.Series(ret_arr).rolling(mom_win, min_periods=5).mean().shift(1)
-    sig = np.sign(mom.fillna(0).values)
-    sig[np.isnan(sig)] = 0.0
+    # Señal de momentum: media móvil de los retornos con desplazamiento de una
+    # barra, de modo que la posición de ``t`` use sólo información de ``t-1``
+    # o anterior.  Los ``NaN`` del warm-up se tratan explícitamente (flat).
+    mom_win = min(252, max(1, n // 4))
+    mom = (
+        pd.Series(ret_arr).rolling(mom_win, min_periods=min(5, mom_win)).mean().shift(1)
+    )
+    sig = np.sign(mom.fillna(0.0).to_numpy())
 
     vol_scale = pred_vol / sigma_bar
 
@@ -224,13 +269,16 @@ def run_vol_timing_backtest(
     tc_base = cost * np.abs(np.diff(np.r_[0.0, pos_base]))
     tc_bh = np.zeros_like(ret_arr, dtype=float)
 
-    ret_vol = pos_vol * ret_arr - tc_vol
-    ret_base = pos_base * ret_arr - tc_base
-    ret_bh = pos_bh * ret_arr - tc_bh
+    # Retornos simples: la aritmética de la cartera y los costos viven en el
+    # mismo espacio (no se mezclan retornos logarítmicos con costos).
+    r_simple = np.expm1(ret_arr)
+    ret_vol = pos_vol * r_simple - tc_vol
+    ret_base = pos_base * r_simple - tc_base
+    ret_bh = pos_bh * r_simple - tc_bh
 
-    vol_stats = summarize_log_returns(ret_vol)
-    base_stats = summarize_log_returns(ret_base)
-    bh_stats = summarize_log_returns(ret_bh)
+    vol_stats = summarize_returns(ret_vol)
+    base_stats = summarize_returns(ret_base)
+    bh_stats = summarize_returns(ret_bh)
 
     return {
         "ret_vol": ret_vol,
@@ -323,200 +371,3 @@ def calculate_adaptability(
         half_life = np.nan
 
     return mean_mae, float(half_life)
-
-
-def generate_plots(
-    y_true: np.ndarray,
-    y_pred_lstm: np.ndarray,
-    y_pred_har: np.ndarray,
-    test_dates: pd.DatetimeIndex,
-    history: dict[str, list[float]],
-    bt: dict[str, Any],
-    config: dict[str, Any],
-) -> None:
-    """Figura diagnóstica de 6 paneles para el experimento de volatilidad.
-
-    Parameters
-    ----------
-    y_true : np.ndarray
-        Volatilidad real en test.
-    y_pred_lstm : np.ndarray
-        Predicciones de la LSTM.
-    y_pred_har : np.ndarray
-        Predicciones del HAR-RV.
-    test_dates : pd.DatetimeIndex
-        Fechas del período de test.
-    history : dict
-        Historial de pérdida de entrenamiento.
-    bt : dict
-        Resultado del backtest de vol-timing.
-    config : dict
-        Configuración con ``plot_path``.
-    """
-    matplotlib.rcParams.update({"font.family": "monospace"})
-
-    BG = "#0d1117"
-    CELL = "#161b22"
-    GRID = "#21262d"
-    TEXT = "#c9d1d9"
-    C = {
-        "actual": "#58a6ff",
-        "lstm": "#f78166",
-        "har": "#3fb950",
-        "volbt": "#d2a8ff",
-        "basebt": "#ffa657",
-        "white": "#ffffff",
-    }
-
-    fig = plt.figure(figsize=(20, 24), facecolor=BG)
-    gs = GridSpec(4, 2, figure=fig, hspace=0.45, wspace=0.3)
-
-    def ax_style(ax: plt.Axes, title: str = "") -> None:
-        ax.set_facecolor(CELL)
-        for side in ax.spines.values():
-            side.set_color(GRID)
-        ax.tick_params(colors=TEXT, labelsize=9)
-        ax.xaxis.label.set_color(TEXT)
-        ax.yaxis.label.set_color(TEXT)
-        ax.grid(True, color=GRID, linewidth=0.5, alpha=0.7)
-        if title:
-            ax.set_title(title, color=TEXT, fontweight="bold", pad=8, fontsize=10)
-
-    n = len(y_true)
-    td = test_dates[-n:] if len(test_dates) >= n else pd.RangeIndex(n)
-
-    ax = fig.add_subplot(gs[0, 0])
-    ax_style(ax, "Pérdida LINEX por Época (Train / Val)")
-    ax.plot(history["train_loss"], color=C["lstm"], lw=1.5, label="Train")
-    ax.plot(history["val_loss"], color=C["har"], lw=1.5, label="Validación")
-    ax.set_xlabel("Época")
-    ax.set_ylabel("LINEX")
-    ax.legend(facecolor=CELL, labelcolor=TEXT)
-
-    ax = fig.add_subplot(gs[0, 1])
-    ax_style(ax, "LSTM: Predicho vs Real (Test)")
-    ax.scatter(y_true, y_pred_lstm, alpha=0.35, s=6, color=C["lstm"])
-    lo = min(y_true.min(), y_pred_lstm.min())
-    hi = max(y_true.max(), y_pred_lstm.max())
-    ax.plot([lo, hi], [lo, hi], "--", color=C["white"], lw=1.0, alpha=0.5)
-    ax.text(
-        0.05,
-        0.93,
-        f"R² = {r2_score(y_true, y_pred_lstm):.4f}",
-        transform=ax.transAxes,
-        color=TEXT,
-        fontsize=10,
-    )
-    ax.set_xlabel("Vol Real (anualizada)")
-    ax.set_ylabel("Vol Predicha (anualizada)")
-
-    ax = fig.add_subplot(gs[1, :])
-    ax_style(ax, "Volatilidad Realizada Forward (5 días) — Período de Test")
-    ax.plot(td, y_true, color=C["actual"], lw=1.2, label="Real", alpha=0.9)
-    ax.plot(td, y_pred_lstm, color=C["lstm"], lw=1.0, label="LSTM", alpha=0.8)
-    ax.plot(
-        td,
-        y_pred_har,
-        color=C["har"],
-        lw=1.0,
-        label="HAR-RV",
-        alpha=0.8,
-        ls="--",
-    )
-    ax.set_xlabel("Fecha")
-    ax.set_ylabel("Vol Anualizada")
-    ax.legend(facecolor=CELL, labelcolor=TEXT)
-    if hasattr(td[0], "strftime"):
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=25, ha="right")
-
-    ax = fig.add_subplot(gs[3, 0])
-    ax_style(ax, "Adaptabilidad Post-Shock (Decaimiento Event-MAE)")
-    horizon = 11
-    mae_lstm, hl_lstm = calculate_adaptability(
-        y_true, y_pred_lstm, horizon=horizon, threshold=2.5
-    )
-    mae_har, hl_har = calculate_adaptability(
-        y_true, y_pred_har, horizon=horizon, threshold=2.5
-    )
-    x_k = np.arange(1, horizon + 1)
-    lbl_lstm = f"LSTM (t_1/2 = {hl_lstm:.1f}d)" if not np.isnan(hl_lstm) else "LSTM"
-    lbl_har = f"HAR-RV (t_1/2 = {hl_har:.1f}d)" if not np.isnan(hl_har) else "HAR-RV"
-    ax.plot(
-        x_k, mae_lstm, color=C["lstm"], marker="o", markersize=4, lw=1.5, label=lbl_lstm
-    )
-    ax.plot(
-        x_k,
-        mae_har,
-        color=C["har"],
-        marker="s",
-        markersize=4,
-        lw=1.5,
-        ls="--",
-        label=lbl_har,
-    )
-    ax.set_xlabel("Días Hábiles Post-Shock (k)")
-    ax.set_ylabel("Error Medio Absoluto (MAE)")
-    ax.set_xticks(x_k[::2])
-    ax.legend(facecolor=CELL, labelcolor=TEXT)
-
-    ax = fig.add_subplot(gs[3, 1])
-    ax_style(ax, "Correlación de Rangos: LSTM vs HAR-RV")
-    rank_true = stats.rankdata(y_true)
-    ax.scatter(
-        rank_true,
-        stats.rankdata(y_pred_lstm),
-        color=C["lstm"],
-        alpha=0.3,
-        s=5,
-        label="LSTM",
-    )
-    ax.scatter(
-        rank_true,
-        stats.rankdata(y_pred_har),
-        color=C["har"],
-        alpha=0.3,
-        s=5,
-        label="HAR-RV",
-    )
-    ax.set_xlabel("Rango: Vol Real")
-    ax.set_ylabel("Rango: Vol Predicha")
-    ax.legend(facecolor=CELL, labelcolor=TEXT)
-
-    ax = fig.add_subplot(gs[2, :])
-    ax_style(ax, "Backtest Estratégico — Retorno Acumulado (Test)")
-    eq_vol = np.cumprod(1.0 + bt["ret_vol"])
-    eq_base = np.cumprod(1.0 + bt["ret_base"])
-    ax.plot(
-        td,
-        eq_vol,
-        color=C["volbt"],
-        lw=1.5,
-        label=f"Vol-Timed (SR={bt['sharpe_vol']:.2f})",
-    )
-    ax.plot(
-        td,
-        eq_base,
-        color=C["basebt"],
-        lw=1.5,
-        ls="--",
-        label=f"Baseline  (SR={bt['sharpe_base']:.2f})",
-    )
-    ax.set_xlabel("Fecha")
-    ax.set_ylabel("Retorno Acumulado")
-    ax.legend(facecolor=CELL, labelcolor=TEXT)
-    if hasattr(td[0], "strftime"):
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=25, ha="right")
-
-    fig.suptitle(
-        "Sistema LSTM de Predicción de Volatilidad — Diagnóstico de Adaptación",
-        color=TEXT,
-        fontsize=16,
-        fontweight="bold",
-        y=0.92,
-    )
-
-    plt.savefig(config["plot_path"], dpi=150, bbox_inches="tight", facecolor=BG)
-    plt.show()
-    print(f"  Figura guardada → {config['plot_path']}")

@@ -47,7 +47,7 @@ pip install -e ".[dev]"
 │   ├── pair_trading.py          # Spread, OU, MI y clustering
 │   ├── volatility.py            # Features y target de volatilidad
 │   ├── volatility_models.py     # LSTM, HAR-RV y entrenamiento
-│   ├── volatility_evaluation.py # Métricas, backtest y gráficos
+│   ├── volatility_evaluation.py # Métricas y backtest de volatilidad
 │   ├── btc.py                   # OHLCV de BTC, power-law y ciclos
 │   └── plotting.py              # Visualizaciones reutilizables
 │
