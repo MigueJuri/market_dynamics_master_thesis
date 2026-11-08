@@ -50,6 +50,7 @@ bash scripts/nb_to_py.sh [dir_destino]
 | Agente      | Modelo                           | Cuándo usarlo                     |
 |-------------|----------------------------------|-----------------------------------|
 | `build`     | `opencode-go/minimax-m3`         | default; ejecutar un plan y tests |
+| `quick`     | `opencode-go/minimax-m3`         | cambios de código pequeños y rápidos con mínimo gasto de tokens |
 | `planner`   | `opencode-go/deepseek-v4-pro`    | análisis y planificación (escribe `docs/plans/`) |
 | `explore`   | `opencode-go/mimo-v2.6-flash`    | localizar definiciones            |
 | `reviewer`  | `opencode-go/kimi-k3.1-pro`      | revisión de rigor y leakage       |
