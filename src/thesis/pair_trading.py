@@ -15,7 +15,7 @@ import os
 import re
 import tempfile
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import StringIO
@@ -59,6 +59,25 @@ KSG_CACHE_VERSION = "v1"
 # =============================================================================
 # Universo y precios
 # =============================================================================
+
+
+#: Constituyentes del S&P 500 cuyos tickers **no se pueden descargar** de
+#: forma consistente de ``yfinance``: la consulta devuelve
+#: ``Data doesn't exist for startDate ...`` incluso para ventanas de un año.
+#:
+#: Son Spin-offs y renombramientos recientes cuyo símbolo en el índice aún no
+#: está publicado en Yahoo Finance:
+#:
+#: - ``FDXF``: FedEx Freight (Industrials).
+#: - ``HONA``: Honeywell Aerospace (Industrials).
+#: - ``VYLR``: Vylor (Consumer Staples).
+#:
+#: Excluirlos **no cambia ningún resultado**: al no devolver datos, ya
+#: quedaban fuera del panel de retornos.  La exclusión se aplica antes de
+#: descargar para evitar el ruido de los reintentos y para que el
+#: diagnóstico del universo informe del número de activos realmente
+#: solicitados.
+TICKERS_NO_DESCARGABLES: frozenset[str] = frozenset({"FDXF", "HONA", "VYLR"})
 
 
 def get_sp500_constituents() -> pd.DataFrame:
@@ -185,6 +204,48 @@ def filter_duplicate_issuers(
 
     keepers_mask = ~work["Symbol"].isin(removed["Symbol"])
     kept = work.loc[keepers_mask].reset_index(drop=True)
+    return kept, removed
+
+
+def exclude_undownloadable(
+    constituents: pd.DataFrame,
+    excluded: Iterable[str] = TICKERS_NO_DESCARGABLES,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Quita del universo los tickers cuya descarga falla de forma consistente.
+
+    Los constituyentes del S&P 500 se scrapean de Wikipedia, pero no todos
+    los símbolos tienen historia en ``yfinance``: los Spin-offs recientes
+    (``FDXF``, ``HONA``, ``VYLR``) devuelven ``Data doesn't exist`` en
+    cualquier ventana.  Se excluyen antes de descargar para no generar
+    reintentos fallidos en cada ejecución.
+
+    Parameters
+    ----------
+    constituents : pd.DataFrame
+        Tabla de constituyentes con la columna ``Symbol``.
+    excluded : Iterable[str]
+        Símbolos a excluir.  Por defecto, :data:`TICKERS_NO_DESCARGABLES`.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame]
+        ``kept``: constituyentes sin los símbolos excluidos, con el índice
+        reiniciado.  ``removed``: filas excluidas (con ``Symbol`` y
+        ``Security``) para poder documentar la decisión.
+    """
+    if "Symbol" not in constituents.columns:
+        raise ValueError(
+            "constituents debe contener la columna 'Symbol'. "
+            "Usa get_sp500_constituents()."
+        )
+
+    work = constituents.copy()
+    work["Symbol"] = work["Symbol"].astype(str).str.strip().str.upper()
+    objetivo = {str(t).strip().upper() for t in excluded}
+
+    mask = work["Symbol"].isin(objetivo)
+    removed = work.loc[mask].copy()
+    kept = work.loc[~mask].reset_index(drop=True)
     return kept, removed
 
 
@@ -546,6 +607,9 @@ class PairSelectionUniverse:
         Número de sectores GICS distintos presentes.
     removed_duplicate_issuers : pd.DataFrame
         Filas descartadas por compartir emisor con otra clase de acción.
+    excluded_undownloadable : pd.DataFrame
+        Filas descartadas porque su ticker no se puede descargar de forma
+        consistente (ver :data:`TICKERS_NO_DESCARGABLES`).
     """
 
     returns: pd.DataFrame
@@ -554,6 +618,7 @@ class PairSelectionUniverse:
     issuers: pd.Series
     n_sectors: int
     removed_duplicate_issuers: pd.DataFrame
+    excluded_undownloadable: pd.DataFrame
 
 
 def prepare_pair_selection_universe(
@@ -564,14 +629,16 @@ def prepare_pair_selection_universe(
     refresh: bool = False,
     min_history_obs: int = PAIR_SELECTION_MIN_HISTORY_OBS,
     min_valid_obs: int = 3,
+    excluded: Iterable[str] = TICKERS_NO_DESCARGABLES,
     verbose: bool = True,
 ) -> PairSelectionUniverse:
     """Prepara el universo común de los cuadernos de selección de pares.
 
-    Encadena la fase compartida por ambos cuadernos: elimina una clase de
-    acción por emisor, construye el panel de log-retornos con
-    :func:`load_returns_panel` (que filtra por historia **antes** de alinear)
-    y alinea sectores y emisores con los tickers que sobreviven.
+    Encadena la fase compartida por ambos cuadernos: descarta los tickers
+    sin descarga consistente, elimina una clase de acción por emisor,
+    construye el panel de log-retornos con :func:`load_returns_panel` (que
+    filtra por historia **antes** de alinear) y alinea sectores y emisores
+    con los tickers que sobreviven.
 
     Mantener esta fase en un único sitio garantiza que la matriz de Pearson
     y la de Información Mutua se estimen sobre exactamente la misma muestra.
@@ -591,6 +658,10 @@ def prepare_pair_selection_universe(
         Mínimo de sesiones por ticker dentro de la ventana.
     min_valid_obs : int
         Mínimo absoluto de observaciones válidas por ticker.
+    excluded : Iterable[str]
+        Símbolos que se descartan antes de descargar por no tener
+        descarga consistente.  Por defecto,
+        :data:`TICKERS_NO_DESCARGABLES`.
     verbose : bool
         Si ``True``, imprime el tamaño del universo, los emisores
         descartados y el diagnóstico completo de cobertura.
@@ -603,11 +674,17 @@ def prepare_pair_selection_universe(
     if constituents is None:
         constituents = get_sp500_constituents()
 
-    kept, removed = filter_duplicate_issuers(constituents)
+    descargables, excluded_df = exclude_undownloadable(constituents, excluded)
+    kept, removed = filter_duplicate_issuers(descargables)
     tickers = kept["Symbol"].tolist()
 
     if verbose:
         print(f"Tamaño del universo S&P 500: {len(tickers)} activos únicos")
+        if not excluded_df.empty:
+            print(
+                "Símbolos excluidos (sin descarga consistente en yfinance): "
+                f"{sorted(excluded_df['Symbol'])}"
+            )
         if not removed.empty:
             print("Símbolos descartados (mismo emisor que otro ya presente):")
             print(removed.to_string(index=False))
@@ -636,6 +713,7 @@ def prepare_pair_selection_universe(
         issuers=issuers,
         n_sectors=int(sectors.nunique()),
         removed_duplicate_issuers=removed,
+        excluded_undownloadable=excluded_df,
     )
 
 

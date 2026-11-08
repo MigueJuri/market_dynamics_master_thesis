@@ -20,6 +20,7 @@ import pytest
 
 from thesis.pair_trading import (
     GICS_SECTOR_ES,
+    TICKERS_NO_DESCARGABLES,
     ADFResult,
     ClusterSectorReport,
     DatasetReport,
@@ -35,6 +36,7 @@ from thesis.pair_trading import (
     compute_hedge_ratio,
     correlation_distance,
     evaluate_cluster_sector_alignment,
+    exclude_undownloadable,
     export_pair_selection_table,
     filter_by_history,
     fit_ou_process,
@@ -552,6 +554,116 @@ def test_prepare_universo_imprime_diagnostico(
     assert "Sesiones" in salida
     assert "Cobertura" in salida
     assert "Sectores GICS presentes" in salida
+
+
+def test_exclude_undownloadable_quita_tickers_sin_descarga() -> None:
+    """Los constituyentes sin descarga consistente salen del universo."""
+    constituyentes = pd.DataFrame(
+        {
+            "Symbol": ["AAPL", "FDXF", "HONA", "VYLR", "MSFT"],
+            "Security": [
+                "Apple",
+                "FedEx Freight",
+                "Honeywell Aerospace",
+                "Vylor",
+                "Microsoft",
+            ],
+            "GICS Sector": ["Tech", "Ind", "Ind", "Cons", "Tech"],
+        }
+    )
+
+    kept, removed = exclude_undownloadable(constituyentes)
+
+    assert list(kept["Symbol"]) == ["AAPL", "MSFT"]
+    assert sorted(removed["Symbol"]) == ["FDXF", "HONA", "VYLR"]
+
+
+def test_exclude_undownloadable_normaliza_simbolos() -> None:
+    """La comparación ignora mayúsculas y espacios en los símbolos."""
+    constituyentes = pd.DataFrame(
+        {
+            "Symbol": ["AAPL", " fdxf "],
+            "Security": ["Apple", "FedEx Freight"],
+            "GICS Sector": ["Tech", "Ind"],
+        }
+    )
+
+    kept, removed = exclude_undownloadable(constituyentes, {"FDXF"})
+
+    assert list(kept["Symbol"]) == ["AAPL"]
+    assert list(removed["Symbol"]) == ["FDXF"]
+
+
+def test_exclude_undownloadable_exige_columna_symbol() -> None:
+    """Una tabla sin ``Symbol`` es un error de uso, no un universo vacío."""
+    with pytest.raises(ValueError, match="Symbol"):
+        exclude_undownloadable(pd.DataFrame({"Security": ["Apple"]}))
+
+
+def test_prepare_universo_no_descarga_tickers_sin_descarga(
+    monkeypatch, panel_con_ipo_reciente
+) -> None:
+    """Los tickers sin descarga no llegan a descargarse y quedan documentados."""
+    solicitados: list[str] = []
+
+    def _captura(*args, **kwargs):
+        solicitados.extend(list(args[0]))
+        return panel_con_ipo_reciente.rename(
+            columns={"A": "AAPL", "B": "MSFT", "C": "FDXF"}
+        )
+
+    monkeypatch.setattr("thesis.pair_trading.load_multiple_prices", _captura)
+
+    constituyentes = pd.DataFrame(
+        {
+            "Symbol": ["AAPL", "MSFT", "FDXF"],
+            "Security": ["Apple", "Microsoft", "FedEx Freight"],
+            "GICS Sector": ["Tech", "Tech", "Ind"],
+        }
+    )
+
+    universo = prepare_pair_selection_universe(
+        constituents=constituyentes,
+        start="2019-01-01",
+        end="2020-08-01",
+        min_history_obs=250,
+        verbose=False,
+    )
+
+    assert "FDXF" not in solicitados
+    assert list(universo.excluded_undownloadable["Symbol"]) == ["FDXF"]
+    assert list(universo.returns.columns) == ["AAPL", "MSFT"]
+
+
+def test_prepare_universo_anuncia_los_tickers_excluidos(
+    monkeypatch, panel_con_ipo_reciente, capsys
+) -> None:
+    """El diagnóstico deja visibles los símbolos excluidos."""
+    _patch_prices(monkeypatch, panel_con_ipo_reciente.rename(columns={"A": "AAPL"}))
+
+    constituyentes = pd.DataFrame(
+        {
+            "Symbol": ["AAPL", "HONA"],
+            "Security": ["Apple", "Honeywell Aerospace"],
+            "GICS Sector": ["Tech", "Ind"],
+        }
+    )
+
+    prepare_pair_selection_universe(
+        constituents=constituyentes,
+        start="2019-01-01",
+        end="2020-08-01",
+        min_history_obs=250,
+    )
+
+    salida = capsys.readouterr().out
+    assert "sin descarga consistente" in salida
+    assert "HONA" in salida
+
+
+def test_tickers_no_descargables_estan_declarados() -> None:
+    """La lista de tickers excluidos está fijada en el código."""
+    assert TICKERS_NO_DESCARGABLES == frozenset({"FDXF", "HONA", "VYLR"})
 
 
 def test_print_dataset_report_resume_y_mitiga_descarte(capsys) -> None:

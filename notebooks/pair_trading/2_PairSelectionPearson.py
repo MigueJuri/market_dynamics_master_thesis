@@ -97,9 +97,11 @@ from thesis.plotting import (
 # ## Universo, ventana de análisis y retornos
 #
 # ``prepare_pair_selection_universe`` ejecuta la fase compartida con
-# ``1_PairSelectionMutualInformation.py``: elimina una clase de acción por
-# emisor (ej. ``GOOGL``/``GOOG`` o ``FOXA``/``FOX``), construye el panel de
-# log-retornos con ``load_returns_panel`` y alinea sectores y emisores.
+# ``1_PairSelectionMutualInformation.py``: descarta los constituyentes cuyo
+# ticker no se puede descargar de forma consistente (``FDXF``, ``HONA`` y
+# ``VYLR``), elimina una clase de acción por emisor (ej. ``GOOGL``/``GOOG`` o
+# ``FOXA``/``FOX``), construye el panel de log-retornos con
+# ``load_returns_panel`` y alinea sectores y emisores.
 #
 # ## Por qué el panel filtra por historia antes de alinear
 #
@@ -143,6 +145,11 @@ universe = prepare_pair_selection_universe(
 returns_full = universe.returns
 issuer_map = universe.issuers
 n_clusters = universe.n_sectors
+
+#: Constituyentes excluidos del universo porque su ticker no se puede
+#: descargar de forma consistente.  Se documentan en los metadatos y en las
+#: notas de las tablas exportadas para que el universo sea reproducible.
+TICKERS_SIN_DESCARGA = sorted(universe.excluded_undownloadable["Symbol"])
 
 # Los sectores GICS llegan en inglés desde Wikipedia y se traducen aquí para
 # que toda la salida de la tesis (métricas, figuras y tablas) esté en
@@ -338,6 +345,7 @@ export_paths = export_pair_selection_table(
             top_pairs_df["n_sesiones_par"].median()
         ),
         "pares_estacionarios": int(top_pairs_df["estacionario"].sum()),
+        "tickers_sin_descarga": TICKERS_SIN_DESCARGA,
     },
     notes=[
         (
@@ -351,6 +359,10 @@ export_paths = export_pair_selection_table(
             f"Spread estacionario en "
             f"{int(top_pairs_df['estacionario'].sum())} de "
             f"{len(top_pairs_df)} pares."
+        ),
+        (
+            "Activos excluidos del universo por no tener descarga "
+            f"consistente: {', '.join(TICKERS_SIN_DESCARGA)}."
         ),
     ],
 )
@@ -478,6 +490,7 @@ export_paths_cointegrated = export_pair_selection_table(
         "n_sesiones_adf_mediana": float(
             cointegrated_df["n_sesiones_par"].median()
         ),
+        "tickers_sin_descarga": TICKERS_SIN_DESCARGA,
     },
     notes=[
         (
@@ -497,6 +510,10 @@ export_paths_cointegrated = export_pair_selection_table(
             "El filtro no recorre el universo completo de pares: la tabla "
             "lista los pares más correlacionados y cointegrados a la vez, no "
             "todos los pares cointegrados del índice."
+        ),
+        (
+            "Activos excluidos del universo por no tener descarga "
+            f"consistente: {', '.join(TICKERS_SIN_DESCARGA)}."
         ),
     ],
 )
