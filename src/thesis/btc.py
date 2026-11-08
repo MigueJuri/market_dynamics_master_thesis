@@ -4,7 +4,10 @@ El módulo concentra la lógica reutilizable del cuaderno ``notebooks/btc/BTC.py
 
 1. descarga del OHLCV diario de Bitstamp con caché local en ``DATA_DIR``;
 2. regresión cuantílica power-law ``log10(price) = α + β·log10(days)``;
-3. detección de picos y valles macro con ``scipy.signal.find_peaks``.
+3. detección de picos y valles macro con ``scipy.signal.find_peaks``;
+4. detrend por banda de cuantil, candidatos de extremos locales y
+   construcción del **ciclo idealizado** (poligonal por los extremos
+   elegidos por el autor).
 
 Importar el módulo **no** descarga datos ni dibuja figuras: los efectos con
 red, disco o pantalla viven dentro de funciones explícitas.  El módulo no se
@@ -43,6 +46,18 @@ BTC_GENESIS: str = "2009-01-03"
 
 #: Cuantililes por defecto de la regresión power-law.
 BTC_QUANTILES: tuple[float, ...] = (0.10, 0.50, 0.90)
+
+#: Cuantil de la banda usada para detrender el precio (suelo del power-law).
+BTC_CYCLE_QUANTILE: float = 0.10
+
+#: Distancia mínima (días) entre extremos candidatos del ciclo idealizado.
+BTC_CYCLE_DISTANCE: int = 200
+
+#: Prominencia mínima (en log10) de los extremos candidatos del ciclo.
+BTC_CYCLE_PROMINENCE: float = 0.05
+
+#: Ventana por defecto (en días) del promedio móvil del precio dettrendizado.
+BTC_CYCLE_SMOOTH_WINDOW: int = 30
 
 #: Halvings del protocolo (anotaciones descriptivas, no señales).
 BTC_HALVINGS: tuple[str, ...] = (
@@ -301,6 +316,362 @@ def fit_power_law_quantiles(
     return results
 
 
+def detrend_power_law_quantile(
+    df: pd.DataFrame,
+    fit: dict[float, dict[str, Any]] | None = None,
+    quantile: float = BTC_CYCLE_QUANTILE,
+) -> pd.DataFrame:
+    """Resta la banda de un cuantil del power-law al precio de BTC.
+
+    La banda ajustada es la recta ``log10(band) = α + β·log10(days)`` del
+    cuantil elegido (0,10 por defecto: el "suelo" del power-law).  Al
+    restarla, el precio queda en escala logarítmica y sus **mínimos locales
+    quedan cerca de cero**: los valles que tocan la banda inferior se
+    materializan alrededor de 0.
+
+    Columnas añadidas al frame de entrada:
+
+    - ``band``: precio de la banda ajustada (misma unidad que ``close``);
+    - ``log_band``: ``log10(band)``;
+    - ``resid_log``: ``log_price - log_band`` (residuo logarítmico);
+    - ``ratio``: ``close / band`` (precio relativo a la banda; equivale a
+      ``10 ** resid_log``).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV diario de BTC o frame ya preparado con ``prepare_power_law_frame``.
+    fit : dict[float, dict[str, Any]] | None
+        Ajuste de ``fit_power_law_quantiles``.  Si es ``None`` se recalcula
+        para el cuantil pedido.
+    quantile : float
+        Cuantil de la banda que se resta (0,10 por defecto).
+
+    Returns
+    -------
+    pd.DataFrame
+        Copia del frame con ``band``, ``log_band``, ``resid_log`` y ``ratio``.
+
+    Raises
+    ------
+    ValueError
+        Si el cuantil no está en ``fit`` o si la banda no cubre el índice
+        del frame (ajustes incompatibles).
+    """
+    frame = df
+    if "log_days" not in df.columns or "log_price" not in df.columns:
+        frame = prepare_power_law_frame(df)
+
+    if fit is None:
+        fit = fit_power_law_quantiles(frame, quantiles=[quantile])
+    if quantile not in fit:
+        available = sorted(float(q) for q in fit)
+        raise ValueError(
+            f"El cuantil {quantile} no está en el ajuste; disponibles: {available}."
+        )
+
+    prediction = fit[quantile]["prediction"].astype(float)
+    band = prediction.reindex(frame.index)
+    if band.isna().any():
+        raise ValueError(
+            "La banda ajustada no cubre el índice del frame "
+            "(¿se ajustó la regresión sobre otra serie?)."
+        )
+
+    out = frame.copy()
+    out["band"] = band
+    out["log_band"] = np.log10(out["band"])
+    out["resid_log"] = out["log_price"] - out["log_band"]
+    out["ratio"] = out["close"] / out["band"]
+    return out
+
+
+def smooth_cycle_residual(
+    resid: pd.Series,
+    window: int = BTC_CYCLE_SMOOTH_WINDOW,
+    min_periods: int | None = None,
+    centered: bool = False,
+) -> pd.Series:
+    """Promedio móvil (ventana fija) del residuo logarítmico del ciclo.
+
+    Suaviza el precio dettrendizado con una media móvil **trailing** (sólo
+    datos hasta ``t``): los primeros ``window - 1`` valores quedan en ``NaN``
+    porque la ventana aún no está completa.  La serie suavizada es la que se
+    usa después para detectar los extremos locales y para construir el ciclo
+    idealizado, de modo que el ruido diario no genere candidatos espurios.
+
+    Con ``centered=True`` la ventana se **centra** en cada fecha: la media
+    usa también datos posteriores, de modo que los giros de la serie
+    suavizada coinciden con los del precio y no aparecen desplazados.  Es un
+    uso descriptivo (alinear los extremos con el ciclo real), no una señal
+    causal: con la ventana completa quedan ``NaN`` en los bordes, del orden de
+    ``window // 2`` al principio y al final.
+
+    Parameters
+    ----------
+    resid : pd.Series
+        Residuo logarítmico (``resid_log``) indexado por fecha.
+    window : int
+        Tamaño de la ventana en días (por defecto ``30``).
+    min_periods : int | None
+        Mínimo de observaciones por ventana.  Por defecto es ``window``
+        (ventana completa); con un valor menor la media usa ventanas
+        parciales en los bordes de la serie.
+    centered : bool
+        Si es ``True``, la ventana se centra en cada fecha en lugar de
+        terminar en ella (media móvil centrada en lugar de *trailing*).
+
+    Returns
+    -------
+    pd.Series
+        Media móvil del residuo, en el índice de ``resid``.
+
+    Raises
+    ------
+    ValueError
+        Si ``window`` o ``min_periods`` no son positivos.
+    """
+    win = int(window)
+    if win < 1:
+        raise ValueError(f"La ventana debe ser >= 1, se recibió {window}.")
+
+    mp = win if min_periods is None else int(min_periods)
+    if mp < 1:
+        raise ValueError(f"`min_periods` debe ser >= 1, se recibió {min_periods}.")
+
+    series = resid.astype(float)
+    smoothed = series.rolling(window=win, min_periods=mp, center=bool(centered)).mean()
+    smoothed.name = "resid_ma"
+    return smoothed
+
+
+def find_local_extrema(
+    series: pd.Series,
+    distance: int = BTC_CYCLE_DISTANCE,
+    prominence: float = BTC_CYCLE_PROMINENCE,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Detecta mínimos y máximos locales candidatos de una serie.
+
+    Usa ``scipy.signal.find_peaks`` sobre la serie (máximos) y sobre su
+    negación (mínimos), con una distancia mínima en muestras y una
+    prominencia mínima.  Los candidatos se numeran por orden cronológico
+    (``B1``, ``B2``, ... para los valles; ``P1``, ``P2``, ... para los
+    picos) para que el autor pueda elegir los que interesen.
+
+    Los valores ``NaN`` (por ejemplo, el comienzo de una serie suavizada con
+    ventana) se descartan antes de la detección: no son candidatos ni
+    desplazan la numeración.
+
+    Parameters
+    ----------
+    series : pd.Series
+        Serie a analizar (por ejemplo, el residuo logarítmico).
+    distance : int
+        Distancia mínima entre candidatos, en muestras (días).
+    prominence : float
+        Prominencia mínima, en las unidades de la serie.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame]
+        ``(bottoms, peaks)`` indexados por fecha, con las columnas ``id``,
+        ``value`` y ``prominence``.
+    """
+    clean = series.dropna()
+    values = clean.to_numpy(dtype=float)
+
+    def _candidates(
+        indices: np.ndarray,
+        props: dict[str, Any],
+        prefix: str,
+    ) -> pd.DataFrame:
+        sub = clean.iloc[indices]
+        out = pd.DataFrame(
+            {
+                "value": sub.to_numpy(dtype=float),
+                "prominence": np.asarray(props["prominences"], dtype=float),
+            },
+            index=sub.index,
+        )
+        out.index.name = series.index.name
+        out = out.sort_index()
+        out.insert(0, "id", [f"{prefix}{i}" for i in range(1, len(out) + 1)])
+        return out
+
+    min_idx, min_props = find_peaks(
+        -values, distance=distance, prominence=prominence
+    )
+    max_idx, max_props = find_peaks(
+        values, distance=distance, prominence=prominence
+    )
+
+    return _candidates(min_idx, min_props, "B"), _candidates(max_idx, max_props, "P")
+
+
+def select_extrema(
+    candidates: pd.DataFrame,
+    selection: Sequence[Any],
+) -> pd.DataFrame:
+    """Resuelve la selección del autor sobre una tabla de candidatos.
+
+    Cada elemento de ``selection`` puede ser:
+
+    - el ``id`` del candidato (``"B3"``, ``"P7"``);
+    - una fecha (texto ISO ``"2015-01-14"`` o ``pandas.Timestamp``);
+    - el número de orden (1-based) tal como aparece en la tabla impresa.
+
+    Los candidatos resueltos se devuelven sin duplicados y ordenados por
+    fecha.
+
+    Parameters
+    ----------
+    candidates : pd.DataFrame
+        Tabla de candidatos con columna ``id`` e índice de fechas.
+    selection : Sequence[Any]
+        Selección del autor (ids, fechas o números de orden).
+
+    Returns
+    -------
+    pd.DataFrame
+        Subconjunto de ``candidates`` con la selección resuelta.
+
+    Raises
+    ------
+    ValueError
+        Si algún elemento no corresponde a un candidato.
+    """
+    if candidates.empty:
+        return candidates.copy()
+
+    ids = candidates["id"].astype(str)
+    positions_by_id = {rid: pos for pos, rid in enumerate(ids)}
+
+    chosen: list[int] = []
+    for item in selection:
+        if isinstance(item, (int, np.integer)) and not isinstance(item, bool):
+            pos = int(item) - 1
+            if not 0 <= pos < len(candidates):
+                raise ValueError(
+                    f"Selección {item} fuera de rango (1..{len(candidates)})."
+                )
+        else:
+            key = str(item).strip()
+            if key in positions_by_id:
+                pos = positions_by_id[key]
+            else:
+                try:
+                    stamp = pd.Timestamp(key)
+                except ValueError as exc:
+                    disponibles = list(positions_by_id)
+                    vista = ", ".join(disponibles[:12])
+                    if len(disponibles) > 12:
+                        vista += ", ..."
+                    raise ValueError(
+                        f"'{key}' no es un id válido ni una fecha. "
+                        f"Ids disponibles: {vista}."
+                    ) from exc
+                matches = np.flatnonzero(candidates.index == stamp)
+                if len(matches) == 0:
+                    raise ValueError(
+                        f"'{key}' no está en la tabla de candidatos "
+                        f"({len(candidates)} candidatos disponibles)."
+                    )
+                pos = int(matches[0])
+        if pos not in chosen:
+            chosen.append(pos)
+
+    return candidates.iloc[sorted(chosen)].copy()
+
+
+_NS_PER_DAY: float = 86_400_000_000_000.0
+
+
+def _to_days_since_epoch(
+    index: pd.DatetimeIndex,
+    origin: float | None = None,
+) -> np.ndarray:
+    """Convierte fechas a días (float) desde una época de referencia.
+
+    Normaliza a nanoseconds porque ``pandas`` 3 usa microsegundos en
+    ``date_range`` y nanosegundos en ``Timestamp.value``: mezclar ambas
+    escalas rompería la interpolación.
+    """
+    nanos = index.to_numpy(dtype="datetime64[ns]").astype("float64")
+    if origin is None:
+        origin = 0.0
+    return (nanos - origin) / _NS_PER_DAY
+
+
+def idealized_cycle(
+    resid: pd.Series,
+    bottoms: pd.DataFrame,
+    peaks: pd.DataFrame,
+) -> pd.Series:
+    """Construye el ciclo idealizado a partir de los extremos elegidos.
+
+    La poligonal une los extremos seleccionados **en orden cronológico**:
+    cada valle (mínimo local elegido) queda anclado en ``0`` y cada pico
+    queda a la **amplitud de su ciclo**, es decir, su residuo menos el
+    residuo del valle elegido que lo precede.  Entre vértices la interpolación
+    es lineal y fuera del rango cubierto la serie vale ``NaN``.
+
+    Parameters
+    ----------
+    resid : pd.Series
+        Residuo logarítmico (o cualquier serie) indexada por fecha.
+    bottoms : pd.DataFrame
+        Tabla de mínimos elegidos (con índice de fechas).
+    peaks : pd.DataFrame
+        Tabla de máximos elegidos (con índice de fechas).
+
+    Returns
+    -------
+    pd.Series
+        Ciclo idealizado en el índice de ``resid``.
+
+    Raises
+    ------
+    TypeError
+        Si el residuo no está indexado por fechas.
+    ValueError
+        Si se seleccionan menos de dos extremos.
+    """
+    series = resid.astype(float)
+    if not isinstance(series.index, pd.DatetimeIndex):
+        raise TypeError("El residuo debe estar indexado por fechas.")
+
+    events: list[tuple[pd.Timestamp, str]] = []
+    events.extend((pd.Timestamp(ts), "B") for ts in bottoms.index)
+    events.extend((pd.Timestamp(ts), "P") for ts in peaks.index)
+    events.sort(key=lambda item: item[0])
+
+    if len(events) < 2:
+        raise ValueError(
+            "Se necesitan al menos dos extremos seleccionados para ajustar "
+            "el ciclo idealizado."
+        )
+
+    floor = 0.0
+    vertices: dict[pd.Timestamp, float] = {}
+    for stamp, kind in events:
+        value = float(series.loc[stamp]) if stamp in series.index else 0.0
+        if kind == "B":
+            floor = value
+            vertices[stamp] = 0.0
+        else:
+            vertices[stamp] = value - floor
+
+    ordered = sorted(vertices)
+    stamps = pd.DatetimeIndex(ordered)
+    origin = stamps.to_numpy(dtype="datetime64[ns]").astype("float64")[0]
+    x = _to_days_since_epoch(stamps, origin)
+    y = np.array([vertices[stamp] for stamp in ordered], dtype=float)
+
+    full_x = _to_days_since_epoch(series.index, origin)
+    interpolated = np.interp(full_x, x, y, left=np.nan, right=np.nan)
+    return pd.Series(interpolated, index=series.index, name="idealized")
+
+
 def plot_btc_quantreg(
     df: pd.DataFrame,
     halvings: Sequence[Any] | None = None,
@@ -308,11 +679,12 @@ def plot_btc_quantreg(
     bottoms: Sequence[Any] | None = None,
     ax: Sequence[plt.Axes] | None = None,
     quantiles: Sequence[float] = BTC_QUANTILES,
-) -> plt.Figure:
+) -> tuple[plt.Figure, plt.Figure, plt.Figure]:
     """Dibuja el precio de BTC con las rectas de la regresión quantílica.
 
-    Dos paneles: el superior con eje temporal y el inferior con los días
-    desde la génesis; ambos en escala logarítmica.
+    Devuelve tres gráficos independientes: la evolución temporal del precio
+    en escala lineal, el eje temporal en escala logarítmica y los días desde
+    la génesis en escala log-log.
 
     Parameters
     ----------
@@ -322,15 +694,15 @@ def plot_btc_quantreg(
         Fechas anotadas en el gráfico.  Por defecto se usan
         ``BTC_HALVINGS``, ``BTC_PEAKS`` y ``BTC_BOTTOMS``.
     ax : Sequence[plt.Axes] | None
-        Dos ejes donde dibujar; si es ``None`` se crea una figura nueva.
+        Tres ejes donde dibujar; si es ``None`` se crean tres figuras nuevas.
     quantiles : Sequence[float]
         Cuantililes del power-law que se ajustan y se dibujan (por defecto
         ``BTC_QUANTILES``).
 
     Returns
     -------
-    plt.Figure
-        La figura con los dos paneles.
+    tuple[plt.Figure, plt.Figure, plt.Figure]
+        Las figuras lineal, temporal logarítmica y power-law, respectivamente.
     """
     reg_df = prepare_power_law_frame(df)
     fit = fit_power_law_quantiles(reg_df, quantiles=quantiles)
@@ -340,20 +712,38 @@ def plot_btc_quantreg(
     bottom_dates = _as_dates(BTC_BOTTOMS if bottoms is None else bottoms)
 
     if ax is None:
-        fig, axes = plt.subplots(2, 1, figsize=(12, 10))
+        linear_fig, ax0 = plt.subplots(figsize=(12, 5))
+        temporal_fig, ax1 = plt.subplots(figsize=(12, 5))
+        power_law_fig, ax2 = plt.subplots(figsize=(12, 5))
     else:
         axes = list(ax)
-        if len(axes) != 2:
-            raise ValueError("`ax` debe contener exactamente dos ejes.")
-        fig = axes[0].get_figure()
+        if len(axes) != 3:
+            raise ValueError("`ax` debe contener exactamente tres ejes.")
+        ax0, ax1, ax2 = axes
+        linear_fig = ax0.get_figure()
+        temporal_fig = ax1.get_figure()
+        power_law_fig = ax2.get_figure()
 
-    ax1, ax2 = axes
+    # --- Evolución temporal en escala lineal ---
+    ax0.plot(
+        reg_df.index,
+        reg_df["close"],
+        label="Cierre de BTC",
+        color="black",
+        alpha=0.7,
+        linewidth=1,
+    )
+    ax0.set_title("Evolución del precio de Bitcoin")
+    ax0.set_xlabel("Fecha")
+    ax0.set_ylabel("Precio (USD)")
+    ax0.legend()
+    ax0.grid(True, ls="--", alpha=0.4)
 
-    # --- Panel superior: eje temporal ---
+    # --- Gráfico temporal ---
     ax1.plot(
         reg_df.index,
         reg_df["close"],
-        label="BTC Close",
+        label="Cierre de BTC",
         color="black",
         alpha=0.6,
         linewidth=1,
@@ -362,7 +752,7 @@ def plot_btc_quantreg(
         ax1.plot(
             reg_df.index,
             res["prediction"],
-            label=f"{int(q * 100)}th Percentile Reg",
+            label=f"Reg. percentil {int(q * 100)}",
             color=_QUANTILE_COLORS.get(q, "gray"),
             linestyle=_QUANTILE_STYLES.get(q, "--"),
             linewidth=2,
@@ -385,7 +775,7 @@ def plot_btc_quantreg(
             linestyle="--",
             alpha=0.7,
             linewidth=1.5,
-            label="Peak" if i == 0 else None,
+            label="Pico" if i == 0 else None,
         )
 
     for i, bottom_date in enumerate(bottom_dates):
@@ -395,21 +785,21 @@ def plot_btc_quantreg(
             linestyle="-.",
             alpha=0.5,
             linewidth=1.5,
-            label="Bottom" if i == 0 else None,
+            label="Valle" if i == 0 else None,
         )
 
     ax1.set_yscale("log")
-    ax1.set_title("BTC Price Dynamics - Power-Law Quantile Regression")
-    ax1.set_xlabel("Days Since Genesis")
-    ax1.set_ylabel("Price in USD")
+    ax1.set_title("Dinámica del precio de BTC — regresión cuantílica power-law")
+    ax1.set_xlabel("Días desde la génesis")
+    ax1.set_ylabel("Precio (USD)")
     ax1.legend()
     ax1.grid(True, which="both", ls="--", alpha=0.4)
 
-    # --- Panel inferior: días desde la génesis ---
+    # --- Gráfico power-law ---
     ax2.plot(
         reg_df["days"],
         reg_df["close"],
-        label="BTC Close",
+        label="Cierre de BTC",
         color="black",
         alpha=0.6,
         linewidth=1,
@@ -418,7 +808,7 @@ def plot_btc_quantreg(
         ax2.plot(
             reg_df["days"],
             res["prediction"],
-            label=f"{int(q * 100)}th Percentile Reg",
+            label=f"Reg. percentil {int(q * 100)}",
             color=_QUANTILE_COLORS.get(q, "gray"),
             linestyle=_QUANTILE_STYLES.get(q, "--"),
             linewidth=2,
@@ -426,14 +816,16 @@ def plot_btc_quantreg(
 
     ax2.set_xscale("log")
     ax2.set_yscale("log")
-    ax2.set_title("BTC Price Dynamics - Power-Law Quantile Regression")
-    ax2.set_xlabel("Days Since Genesis")
-    ax2.set_ylabel("Price in USD")
+    ax2.set_title("Dinámica del precio de BTC — regresión cuantílica power-law")
+    ax2.set_xlabel("Días desde la génesis")
+    ax2.set_ylabel("Precio (USD)")
     ax2.legend()
     ax2.grid(True, which="both", ls="--", alpha=0.4)
 
-    fig.tight_layout()
-    return fig
+    linear_fig.tight_layout()
+    temporal_fig.tight_layout()
+    power_law_fig.tight_layout()
+    return linear_fig, temporal_fig, power_law_fig
 
 
 def _print_cycles_summary(
@@ -441,41 +833,41 @@ def _print_cycles_summary(
     bottoms: pd.DataFrame,
 ) -> None:
     """Imprime el resumen de picos y valles macro detectados."""
-    print("=== HISTORICAL MACRO PEAKS ===")
+    print("=== PICOS MACRO HISTÓRICOS ===")
     for date, row in peaks.iterrows():
         dist = (
-            f"{int(row['Days_Since_Last_Peak'])} days"
+            f"{int(row['Days_Since_Last_Peak'])} días"
             if pd.notna(row["Days_Since_Last_Peak"])
             else "N/A"
         )
         print(
-            f"Date: {date.strftime('%Y-%m-%d')} | "
-            f"Price: ${row['close']:>9.2f} | Dist to prev: {dist}"
+            f"Fecha: {date.strftime('%Y-%m-%d')} | "
+            f"Precio: ${row['close']:>9.2f} | Distancia al previo: {dist}"
         )
 
     peak_mean = peaks["Days_Since_Last_Peak"].mean()
     peak_std = peaks["Days_Since_Last_Peak"].std()
     print(
-        f"\nPeak-to-Peak -> Mean: {peak_mean:.1f} days | Std Dev: {peak_std:.1f} days\n"
+        f"\nPico a pico -> Media: {peak_mean:.1f} días | Desv. típica: {peak_std:.1f} días\n"
     )
 
-    print("=== HISTORICAL MACRO BOTTOMS ===")
+    print("=== VALLES MACRO HISTÓRICOS ===")
     for date, row in bottoms.iterrows():
         dist = (
-            f"{int(row['Days_Since_Last_Bottom'])} days"
+            f"{int(row['Days_Since_Last_Bottom'])} días"
             if pd.notna(row["Days_Since_Last_Bottom"])
             else "N/A"
         )
         print(
-            f"Date: {date.strftime('%Y-%m-%d')} | "
-            f"Price: ${row['close']:>9.2f} | Dist to prev: {dist}"
+            f"Fecha: {date.strftime('%Y-%m-%d')} | "
+            f"Precio: ${row['close']:>9.2f} | Distancia al previo: {dist}"
         )
 
     bottom_mean = bottoms["Days_Since_Last_Bottom"].mean()
     bottom_std = bottoms["Days_Since_Last_Bottom"].std()
     print(
-        f"\nBottom-to-Bottom -> Mean: {bottom_mean:.1f} days | "
-        f"Std Dev: {bottom_std:.1f} days"
+        f"\nValle a valle -> Media: {bottom_mean:.1f} días | "
+        f"Desv. típica: {bottom_std:.1f} días"
     )
 
 
