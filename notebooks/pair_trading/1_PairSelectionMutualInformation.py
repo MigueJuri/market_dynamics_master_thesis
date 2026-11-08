@@ -204,7 +204,7 @@ for sector in sorted(available_sectors.unique()):
 # estimador.  Se fija una única constante y se reutiliza tanto en el cálculo
 # de la matriz como en las condiciones de la tabla exportada, para que la
 # tabla documente exactamente el estimador que la produjo.
-K_NEIGHBORS = 3
+K_NEIGHBORS = 5
 
 mi_matrix = cached_ksg_mi_matrix(returns_full, k_neighbors=K_NEIGHBORS)
 
