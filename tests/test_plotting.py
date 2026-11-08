@@ -146,94 +146,26 @@ def test_ordena_globalmente_por_cluster(
     ]
 
 
-def test_une_separador_por_frontera_de_cluster(
+def test_solo_muestra_matriz_y_barra_de_color(
     matriz_simple, sectores, clusters
 ) -> None:
-    """Con dos clusters hay una sola frontera: dos líneas (h y v)."""
+    """No muestra separadores, títulos ni etiquetas de clusters o sectores."""
     fig = plot_sector_reordered_matrix(
         matriz_simple, sector_labels=sectores, cluster_labels=clusters
     )
-    assert len(fig.axes[0].lines) == 2
+    ax, cbar_ax = fig.axes
+
+    assert len(fig.axes) == 2
+    assert len(ax.lines) == 0
+    assert list(ax.get_xticks()) == []
+    assert list(ax.get_yticks()) == []
+    assert ax.get_title() == ""
+    assert ax.get_xlabel() == ""
+    assert ax.get_ylabel() == ""
+    assert cbar_ax.get_position().height < ax.get_position().height
 
 
-def test_no_dibuja_separadores_sectoriales(
-    matriz_simple, sectores, clusters
-) -> None:
-    """Los límites sectoriales ya no se marcan."""
-    fig_solo_clusters = plot_sector_reordered_matrix(
-        matriz_simple, sector_labels=sectores, cluster_labels=clusters
-    )
-    fig_sin_clusters = plot_sector_reordered_matrix(
-        matriz_simple, sector_labels=sectores, cluster_labels=None
-    )
-
-    # Sin clusters no hay ninguna línea, aunque haya sectores distintos.
-    assert len(fig_sin_clusters.axes[0].lines) == 0
-    # Y con clusters sólo aparecen los de cluster.
-    assert len(fig_solo_clusters.axes[0].lines) == 2
-
-
-def test_tres_clusters_dan_dos_fronteras() -> None:
-    """k clusters implican k-1 fronteras."""
-    matriz = pd.DataFrame(
-        np.arange(36, dtype=float).reshape(6, 6),
-        index=TICKERS,
-        columns=TICKERS,
-    )
-    tres = pd.Series([1, 1, 2, 2, 3, 3], index=TICKERS, name="cluster")
-
-    fig = plot_sector_reordered_matrix(matriz, cluster_labels=tres)
-
-    assert len(fig.axes[0].lines) == 4
-
-
-def test_color_de_separador_configurable() -> None:
-    """``separator_color`` se aplica a las líneas dibujadas."""
-    matriz = pd.DataFrame(
-        np.arange(36, dtype=float).reshape(6, 6),
-        index=TICKERS,
-        columns=TICKERS,
-    )
-    dos = pd.Series([1, 1, 2, 2, 3, 3], index=TICKERS, name="cluster")
-
-    fig = plot_sector_reordered_matrix(
-        matriz, cluster_labels=dos, separator_color="red"
-    )
-
-    colores = {line.get_color() for line in fig.axes[0].lines}
-    assert colores == {"red"}
-
-
-def test_no_muestra_tickers_pero_numera_los_clusters(
-    matriz_simple, sectores, clusters
-) -> None:
-    """El eje X lleva el número de cada cluster, nunca nombres de ticker."""
-    fig = plot_sector_reordered_matrix(
-        matriz_simple, sector_labels=sectores, cluster_labels=clusters
-    )
-    etiquetas = [t.get_text() for t in fig.axes[0].get_xticklabels()]
-
-    assert etiquetas == ["1", "2"]
-    assert not any(t in etiquetas for t in TICKERS)
-
-
-def test_no_aparece_el_nombre_de_los_sectores(
-    matriz_simple, sectores, clusters
-) -> None:
-    """Los sectores ya no se rotulan: sólo se numeran los clusters."""
-    fig = plot_sector_reordered_matrix(
-        matriz_simple, sector_labels=sectores, cluster_labels=clusters
-    )
-    textos = [t.get_text() for t in fig.axes[0].get_xticklabels()]
-    todo = " ".join(textos) + " " + " ".join(
-        t.get_text() for t in fig.axes[0].get_yticklabels()
-    )
-
-    assert "Inmobiliario" not in todo
-    assert "Energía" not in todo
-    assert "C1" not in todo
-
-
+@pytest.mark.skip(reason="La función ya no muestra etiquetas de clusters.")
 def test_la_numeracion_es_la_posicion_del_bloque() -> None:
     """Los números empiezan en 1 y siguen el orden de izquierda a derecha.
 
@@ -253,6 +185,7 @@ def test_la_numeracion_es_la_posicion_del_bloque() -> None:
     assert etiquetas == ["1", "2", "3"]
 
 
+@pytest.mark.skip(reason="La función ya no muestra etiquetas de clusters.")
 def test_numeracion_centrada_bajo_cada_bloque(matriz_simple, sectores) -> None:
     """Cada número queda en el centro geométrico de su bloque."""
     clusters = pd.Series([1, 1, 2, 2, 3, 3], index=TICKERS, name="cluster")
@@ -266,6 +199,7 @@ def test_numeracion_centrada_bajo_cada_bloque(matriz_simple, sectores) -> None:
     assert list(ax.get_xticks()) == pytest.approx([0.5, 2.5, 4.5])
 
 
+@pytest.mark.skip(reason="La función ya no muestra etiquetas de clusters.")
 def test_bloques_de_tamanos_distintos_se_centran_bien() -> None:
     """Un bloque estrecho y otro ancho reciben su número en su propio centro."""
     largo = ["A"] + [f"T{i:02d}" for i in range(11)]
@@ -281,6 +215,7 @@ def test_bloques_de_tamanos_distintos_se_centran_bien() -> None:
     assert list(fig.axes[0].get_xticks()) == pytest.approx([0.0, 6.0])
 
 
+@pytest.mark.skip(reason="La función ya no muestra etiquetas de clusters.")
 def test_el_centro_coincide_con_la_geometria_del_bloque() -> None:
     """El número cae en el centro real del bloque, sin medio píxel de error.
 
@@ -305,12 +240,14 @@ def test_el_centro_coincide_con_la_geometria_del_bloque() -> None:
     assert centros[2] == pytest.approx((7 - 0.5 + 8 + 0.5) / 2)
 
 
-def test_el_eje_x_se_titula_clusters(matriz_simple, clusters) -> None:
-    """El eje X lleva el título ``Clusters``."""
+@pytest.mark.skip(reason="La función ya no muestra etiquetas de clusters.")
+def test_el_eje_x_se_titula_por_defecto(matriz_simple, clusters) -> None:
+    """El eje X lleva un título por defecto (sin fijar su texto)."""
     fig = plot_sector_reordered_matrix(matriz_simple, cluster_labels=clusters)
-    assert fig.axes[0].get_xlabel() == "Clusters"
+    assert fig.axes[0].get_xlabel() != ""
 
 
+@pytest.mark.skip(reason="La función ya no muestra etiquetas de clusters.")
 def test_el_titulo_del_eje_x_es_configurable(matriz_simple, clusters) -> None:
     """``xlabel`` permite adaptar el rótulo."""
     fig = plot_sector_reordered_matrix(
@@ -343,6 +280,7 @@ def test_sin_clusters_no_hay_numeros(matriz_simple, sectores) -> None:
     assert len(fig.axes[0].lines) == 0
 
 
+@pytest.mark.skip(reason="La función ya no muestra etiquetas de clusters.")
 def test_numeros_no_se_salen_del_lienzo() -> None:
     """Aunque haya clusters diminutos contiguos, los números caben."""
     largo = (
@@ -375,6 +313,7 @@ def test_numeros_no_se_salen_del_lienzo() -> None:
     assert max(c.x1 for c in cajas) <= fig.bbox.x1
 
 
+@pytest.mark.skip(reason="La función ya no muestra etiquetas de clusters.")
 def test_sectors_en_el_eje_y_si_se_piden(
     matriz_simple, sectores, clusters
 ) -> None:

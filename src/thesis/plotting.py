@@ -557,18 +557,12 @@ def plot_sector_reordered_matrix(
     cluster_labels_visible: bool = True,
     xlabel: str = "Clusters",
 ) -> plt.Figure | None:
-    """Muestra la matriz reordenada por clúster y sin etiquetas de ticker.
+    """Muestra únicamente la matriz reordenada y su barra de color.
 
     El orden es global por clúster, no «sector y dentro del sector»: así
     los bloques del heatmap son exactamente los clusters que evalúa el
-    análisis sectorial.  Los separadores dibujados son únicamente los
-    cambios de clúster; no se marcan los límites sectoriales, que en un
-    mapa de calor denso sólo añaden ruido.
-
-    Bajo cada bloque se imprime su número, centrado, de modo que se sabe a
-    qué cluster corresponde cada zona.  La numeración es la posición del
-    bloque de izquierda a derecha y no el identificador interno del
-    clustering, para que la lectura sea inmediata.
+    análisis sectorial.  No se dibujan separadores ni etiquetas para
+    mantener únicamente la matriz y la barra de color.
 
     La escala de color se fija con los valores **medidos** en la matriz
     (``vmin``/``vmax`` reales, ignorando la diagonal ``NaN``), no con un
@@ -586,23 +580,12 @@ def plot_sector_reordered_matrix(
         dibujan sin transformar.
     sector_labels : pd.Series, opcional
         Sectores por ticker.  Se usan como desempate al ordenar dentro de
-        cada cluster y, si ``sector_labels_visible`` es ``True``, para
-        rotular el eje Y.
+        cada cluster.
     cluster_labels : pd.Series, opcional
         Etiqueta de cluster por ticker; si falta, la función no dibuja
         ningún separador ni numeración.
     cmap : str
         Paleta; por defecto ``viridis`` para compartir entre métricas.
-    separator_color : str
-        Color de las líneas discontinuas entre clusters.
-    sector_labels_visible : bool
-        Si ``True``, añade los sectores como etiquetas del eje Y.  El eje X
-        queda reservado para la numeración de clusters.
-    cluster_labels_visible : bool
-        Si ``True``, numera los bloques de cluster en el eje X.
-    xlabel : str
-        Título del eje X.
-
     Returns
     -------
     Optional[plt.Figure]
@@ -657,48 +640,9 @@ def plot_sector_reordered_matrix(
         vmin=vmin,
         vmax=vmax,
     )
-    ax.set_title(title, fontweight="bold")
-    fig.colorbar(im, ax=ax, label=cbar_label)
-
-    # Separadores: sólo entre clusters.
-    bloques: list[tuple[int, int]] = []
-    if cluster_labels is not None:
-        etiquetas = sub_clusters.loc[order]
-        inicio = 0
-        for i in range(1, len(order) + 1):
-            if i == len(order) or etiquetas.iloc[i] != etiquetas.iloc[i - 1]:
-                if inicio > 0:
-                    ax.axhline(
-                        i - 0.5, color=separator_color, linewidth=1, linestyle="--"
-                    )
-                    ax.axvline(
-                        i - 0.5, color=separator_color, linewidth=1, linestyle="--"
-                    )
-                bloques.append((inicio, i - 1))
-                inicio = i
-
-    # Eje X: el número de cada cluster, centrado bajo su bloque.
-    if bloques and cluster_labels_visible:
-        # ``imshow`` sitúa el índice ``i`` en el píxel ``[i - 0.5, i + 0.5]``,
-        # así que el centro del bloque ``[inicio, fin]`` es ``(inicio + fin) / 2``.
-        ax.set_xticks([(ini + fin) / 2 for ini, fin in bloques])
-        ax.set_xticklabels(
-            [str(i) for i in range(1, len(bloques) + 1)],
-            fontsize=8,
-        )
-        ax.set_xlabel(xlabel)
-    else:
-        ax.set_xticks([])
-
-    # Eje Y: sectores, sólo si se piden de forma explícita.
-    if sector_labels_visible and sector_labels is not None:
-        visibles = sector_labels.reindex(order)
-        cambios = [
-            i for i in range(1, len(order)) if visibles.iloc[i] != visibles.iloc[i - 1]
-        ]
-        ax.set_yticks(cambios, [str(visibles.iloc[i]) for i in cambios], fontsize=7)
-    else:
-        ax.set_yticks([])
+    fig.colorbar(im, ax=ax, label=cbar_label, shrink=0.8)
+    ax.set_xticks([])
+    ax.set_yticks([])
 
     plt.tight_layout()
     plt.show()
