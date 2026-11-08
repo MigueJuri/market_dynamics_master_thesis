@@ -40,7 +40,7 @@ SEED: int = 42
 #: El valor por defecto son 5 años bursátiles: 484 activos y unas 1 267
 #: sesiones.  Subirlo a 7560 (~30 años) acorta la intersección a cambio de
 #: descartar 183 empresas más.
-PAIR_SELECTION_MIN_HISTORY_OBS: int = 252 * 5
+PAIR_SELECTION_MIN_HISTORY_OBS: int = 252 * 20
 
 #: Raíz del repositorio (dos niveles por encima de ``src/thesis/config.py``).
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
