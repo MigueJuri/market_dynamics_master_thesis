@@ -1,15 +1,19 @@
-# SPY: composición sectorial y libro de órdenes (LOB)
+# SPY: caracterización, composición sectorial y libro de órdenes (LOB)
 
-Este directorio reúne dos cuadernos sobre el **SPY**:
+Este directorio reúne tres cuadernos sobre el **SPY**:
 
-1. [`SPY_sectores.py`](SPY_sectores.py): **composición sectorial** del
+1. [`SPY_caracterizacion.py`](SPY_caracterizacion.py): **caracterización
+   estadística** de los retornos diarios y de sus cuadrados (hechos
+   estilizados: leptocurtosis, asimetría, autocorrelación, clustering de
+   volatilidad);
+2. [`SPY_sectores.py`](SPY_sectores.py): **composición sectorial** del
    mercado estadounidense en tres niveles (snapshot actual, reconstrucción
    histórica y entropía de Shannon);
-2. [`OrderBook.py`](OrderBook.py): **estructura de liquidez** del libro de
+3. [`OrderBook.py`](OrderBook.py): **estructura de liquidez** del libro de
    órdenes del SPY a partir de los ficheros LOBSTER (perfil de liquidez
    relativo y absoluto, snapshot del libro y precio medio promediado).
 
-Ambos cuadernos son **descriptivos**, no predictivos: resumen el estado del
+Todos los cuadernos son **descriptivos**, no predictivos: resumen el estado del
 mercado, pero no anticipan su evolución.
 
 ---
@@ -41,13 +45,15 @@ rotación sectorial.
 
 ```text
 notebooks/spy/
-├── README.md          ← este archivo
-├── SPY_sectores.py    ← orquestador por etapas (jupytext py:percent)
-└── OrderBook.py       ← orquestador por etapas (jupytext py:percent)
+├── README.md                  ← este archivo
+├── SPY_caracterizacion.py     ← caracterización de retornos (jupytext py:percent)
+├── SPY_sectores.py            ← orquestador por etapas (jupytext py:percent)
+└── OrderBook.py               ← orquestador por etapas (jupytext py:percent)
 
 src/thesis/
-├── sector_composition.py  ← datos, ponderación y entropía
-└── orderbook.py           ← carga, validación y extracción del LOB
+├── characterization.py        ← momentos, ACF, EWMA y bootstrap
+├── sector_composition.py      ← datos, ponderación y entropía
+└── orderbook.py               ← carga, validación y extracción del LOB
 ```
 
 El cuaderno está escrito en formato jupytext `py:percent` y tiene **una celda
@@ -454,6 +460,154 @@ uv run pytest -m integration -v
 - **Memoria**: la extracción de distribuciones lee el fichero de orderbook
   completo (con 50 niveles son ~1,4 GB por sesión).  El snapshot usa
   `skiprows`/`nrows` y el precio medio sólo lee las columnas 0 y 2.
+
+---
+
+## Caracterización estadística del SPY (retornos y retornos²)
+
+### Pregunta central
+
+**¿qué propiedades estadísticas debe respetar cualquier modelo que se ajuste
+después a esta serie?**
+
+La respuesta es **descriptiva**: el cuaderno establece hechos estilizados
+(crecimiento aproximadamente exponencial, leptocurtosis, asimetría negativa,
+ausencia de autocorrelación lineal, persistencia de la autocorrelación de los
+retornos al cuadrado y clustering de volatilidad), no señales ni predicciones.
+
+### Pipeline
+
+El cuaderno `SPY_caracterizacion.py` tiene **una celda por etapa** y todo el
+cómputo reutilizable vive en `src/thesis/characterization.py` (**sin**
+`matplotlib`):
+
+| Celda | Contenido | Resultado en el espacio de nombres |
+| --- | --- | --- |
+| 0 | magics `%autoreload 2` (recarga en caliente de `src/`) | `_INTERACTIVE` |
+| 1 | imports y `CONFIG` | `CONFIG`, `OUTPUT_DIR` |
+| 2 | datos (cierre ajustado cacheado + retornos) | `price`, `log_ret`, `simple_ret`, `r2` |
+| 3 | trayectoria del precio (lineal y log) | `price_smooth`, `fig` |
+| 4 | densidad de retornos (normal y t de Student) | `params`, `moments` |
+| 5 | momentos con *moving block bootstrap* | `k_hat`, `k_ci`, `ann_hat`, `ann_ci` |
+| 6 | ACF de retornos vs. retornos² (bandas por *bootstrap* i.i.d.) | `acf_r`, `ci_r`, `acf_sq`, `ci_sq` |
+| 7 | histograma de los retornos al cuadrado | `r_2`, `r_2_log` |
+| 8 | regímenes de volatilidad EWMA + precio semilog | `volatility`, `high_vol_mask` |
+| 9 | bandas incondicionales ±kσ | `excursions` |
+| 10 | tabla resumen | `summary` |
+
+### Fórmulas
+
+* **EWMA (convención RiskMetrics)**: $\sigma_t^2 = \lambda\,\sigma_{t-1}^2 +
+  (1-\lambda)\,x_{t-1}^2$ con $\lambda = 0.94$.  En la fecha $t$ se usa
+  **sólo** $x_{t-1}^2$: la estimación es **causal** (corromper la cola no
+  cambia el pasado).  `sigma_t` se annualiza por $\sqrt{252}$.
+* **Bandas de la ACF por *bootstrap* i.i.d.**: la ACF muestral se recalcula
+  sobre cada réplica del bootstrap (remuestreo con reemplazo de observaciones
+  individuales) y la banda percentil $\pm h_k$ es la envolvente del intervalo
+  percentil alrededor de cero.  Como el remuestreo **destruye la dependencia
+  temporal**, la banda es la distribución *nula* del estimador (equivalente
+  empírico de la banda de Bartlett $\pm z/\sqrt{T}$); el lag 0 no lleva banda.
+* **Freedman–Diaconis**: $h = 2\,\mathrm{IQR}\,n^{-1/3}$; robusto frente a los
+  outliers (a diferencia de Scott, que usa el desvío estándar, inflado por las
+  propias colas).
+* **Moving block bootstrap**: remuestrea bloques contiguos de longitud $b$
+  (10 sesiones) para preservar la dependencia temporal; la semilla es
+  **explícita** (no se toca el estado global de numpy).  Se usa **solo** en
+  los momentos (celda 5), no en las bandas de la ACF.
+
+### API pública (`src/thesis/characterization.py`)
+
+* ``describe_returns(x, label) -> pd.Series``
+  Momentos muestrales (media, desvío, mediana, extremos, asimetría, exceso de
+  curtosis) y test de Jarque–Bera.
+* ``freedman_diaconis_bins(x) -> int``
+  Número de bines según Freedman–Diaconis (mínimo 1).
+* ``fit_return_distribution(x) -> dict``
+  Ajuste por máxima verosimilitud de la normal (`mu`, `sigma`) y de la t de
+  Student (`df`, `loc`, `scale`).
+* ``excess_kurtosis(x) -> np.ndarray`` y ``annualized_stats(x, trading_days=252) -> np.ndarray``
+  Estadísticos usados como estimador en el bootstrap.
+* ``block_bootstrap_ci(x, func, block_size=10, reps=3000, alpha=0.05, seed=42) -> (est, ci)``
+  Estimación puntual e intervalo percentil por *moving block bootstrap*; el CI
+  tiene forma `(2, k)` (fila 0 = límite inferior, fila 1 = superior).
+* ``bootstrap_ci(x, func, reps=3000, alpha=0.05, seed=42) -> (est, ci)``
+  Estimación puntual e intervalo percentil por bootstrap **i.i.d.**
+  (remuestreo con reemplazo de observaciones individuales): no preserva la
+  dependencia temporal.
+* ``bootstrap_acf(x, max_lags=50, reps=3000, alpha=0.05, seed=42) -> (acf, half_width)``
+  ACF muestral con banda simétrica ``± half_width`` estimada por bootstrap
+  i.i.d.; el lag 0 no lleva banda.  La banda es la distribución nula del
+  estimador (no se ensancha con la dependencia de la serie).
+* ``heteroskedastic_robust_acf(returns, max_lags=50, alpha=0.05) -> (acf, ci_bound)``
+  ACF muestral con bandas robustas a heterocedasticidad (Diebold, 1986).
+* ``sample_acf(x, max_lags=50) -> np.ndarray``
+  ACF muestral simple (lag 0 incluido).
+* ``compute_ewma_volatility(log_ret, lambda_ewma=0.94, trading_days=252) -> pd.Series``
+  Volatilidad EWMA **causal** y anualizada.
+* ``high_volatility_mask(volatility, quantile=0.90, index=None) -> pd.Series``
+  Marca los valores por encima de un cuantil **global** (descriptivo, no
+  señal).
+* ``unconditional_band_excursions(log_ret, ks=(1, 2, 3, 5)) -> pd.DataFrame``
+  Fracción de excursiones fuera de ±kσ frente a la predicción gaussiana.
+* ``build_summary_table(...) -> pd.DataFrame``
+  Tabla resumen de la caracterización empírica.
+
+Importar el módulo **no** descarga datos ni dibuja figuras: el módulo no
+exporta `matplotlib` ni `yfinance`, y no se exporta en `thesis/__init__.py`;
+se usa `from thesis.characterization import ...`.
+
+### Cómo retocar una figura
+
+El **código de dibujo vive en el cuaderno**, escrito de forma directa (sin
+funciones de apoyo): así se pueden retocar colores, bines, spans, cuantiles,
+`xlim` o tamaño sin tocar `src/`.
+
+1. editar la **celda de la figura** y re-ejecutarla **sólo** esa celda (no
+   hace falta reiniciar el kernel);
+2. editar `CONFIG` (celda 1) y re-ejecutar la celda de la figura afectada;
+3. editar `src/thesis/characterization.py` y re-ejecutar la celda: el
+   `%autoreload 2` de la celda 0 recarga el módulo **en caliente**.
+
+Las figuras se guardan en `outputs/` con una ruta **anclada a la raíz del
+repositorio**, no al directorio de trabajo.
+
+### Artefactos
+
+| Artefacto | Descripción |
+|---|---|
+| `outputs/spy_price_trajectory.png` | Precio ajustado en escala lineal y logarítmica |
+| `outputs/spy_return_density.png` | Densidad de retornos con ajustes normal y t de Student |
+| `outputs/spy_acf_comparison.png` | ACF de retornos vs. retornos² (bandas por *bootstrap* i.i.d.) |
+| `outputs/spy_sq_returns_hist.png` | Histograma de $x_t^2$ y de $\log(x_t^2)$ |
+| `outputs/spy_vol_regimes.png` | Volatilidad EWMA y regímenes de alta volatilidad |
+| `outputs/spy_uncond_bands.png` | Retornos diarios con bandas incondicionales ±kσ |
+
+Tests (sintéticos, sin red):
+
+```bash
+uv run pytest tests/test_characterization.py -v
+```
+
+### Interpretación y precauciones
+
+- **El percentil 90 de volatilidad es descriptivo**: se calcula sobre toda la
+  muestra, luego **no** es una señal libre de look-ahead.
+- **La EWMA es causal**: $\sigma_t$ usa $x_{t-1}$; usarla como variable de
+  entrada de un modelo no introduce look-ahead.
+- **El bootstrap por bloques preserva la dependencia** (celda 5, momentos): el
+  i.i.d. destruiría el clustering de volatilidad y daría intervalos
+  artificialmente angostos.
+- **Las bandas de la ACF son bandas nulas** (celda 6, bootstrap i.i.d.): al
+  destruir la dependencia temporal quedan equivalentes a la banda de Bartlett
+  $\pm z/\sqrt{T}$, que **subestima** la varianza de $\hat\rho_k$ en series
+  heterocedásticas (los retornos) y persistentes (los retornos al cuadrado).
+  Los lags "significativos" de la celda 6 se leen como evidencia *contra la
+  independencia*, no como una medida de la magnitud de la persistencia.
+- **El ajuste t de Student** con pocos grados de libertad indica colas cuyos
+  momentos de orden alto **no existen**: no se deben estimar momentos de
+  orden 4 como si fueran estables.
+- La caracterización es **descriptiva**: sirve para fijar las restricciones
+  del modelo, no para anticipar el precio.
 
 ---
 

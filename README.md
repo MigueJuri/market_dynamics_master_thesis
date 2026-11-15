@@ -49,6 +49,8 @@ pip install -e ".[dev]"
 │   ├── volatility_models.py     # LSTM, HAR-RV y entrenamiento
 │   ├── volatility_evaluation.py # Métricas y backtest de volatilidad
 │   ├── btc.py                   # OHLCV de BTC, power-law y ciclos
+│   ├── characterization.py      # Momentos, ACF, EWMA y bootstrap del SPY
+│   ├── sector_composition.py    # Pesos sectoriales del S&P 500 y entropía
 │   └── plotting.py              # Visualizaciones reutilizables
 │
 ├── tests/                       # Tests del paquete
@@ -58,6 +60,7 @@ pip install -e ".[dev]"
 │   ├── btc/                     # Análisis de BTC (power-law y ciclos)
 │   ├── feature_analysis/        # Análisis de predictibilidad
 │   ├── pair_trading/            # Selección de pares, OU y trading
+│   ├── spy/                     # Caracterización, sectores y LOB del SPY
 │   ├── trend_following_strategy/# Estrategia de momentum
 │   └── volatility/              # Predicción de volatilidad con LSTM
 │
