@@ -10,6 +10,9 @@ permission:
     "git status*": allow
     "git diff*": allow
     "git log*": allow
+    "git add*": allow
+    "git commit*": allow
+    "git push*": allow
     "rg *": allow
     "grep *": allow
     "uv run pytest*": allow
@@ -50,3 +53,8 @@ Correctness (inherited repo rules):
 - Vectorize with pandas/numpy; use np.linspace, not float-step np.arange.
 - Handle LOB sentinels (0, -9999999999) explicitly; document units.
 - Never read raw data files or .ipynb JSON wholesale.
+
+Final step (backup): once the change is verified, `git add` only the files you
+changed, make one concise commit (imperative message) and `git push` to
+`origin` right after, without asking. Never `git push --force`; never commit
+secrets or artifacts ignored by `.gitignore`.

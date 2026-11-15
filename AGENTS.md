@@ -72,7 +72,12 @@ DeepSeek requiere región *Global* habilitada en Console → Privacy.
 
 ## 8. Git y seguridad
 
+- **Backup automático**: al cerrar cada unidad de trabajo, hacer `git add` de
+  los archivos intencionados, un `git commit` con mensaje conciso (estilo del
+  repo: imperativo, prefijo de área si aplica) y `git push` a `origin`
+  inmediatamente después, sin pedir confirmación.
 - Diffs visibles antes de continuar; commits agrupados por unidad lógica.
-- No commitear secretos, tokens, claves ni archivos de configuración sensibles.
-- Preguntar antes de `git push` en cambios grandes; nunca `push --force`.
+- No commitear secretos, tokens, claves ni archivos de configuración sensibles;
+  respetar `.gitignore` (`data/`, `outputs/`, `.env*`, `*.ipynb`, artefactos).
+- Nunca `push --force`; no mergear ramas ni crear PRs sin pedirlo.
 - Antes de operaciones destructivas, advertir y pedir confirmación.
