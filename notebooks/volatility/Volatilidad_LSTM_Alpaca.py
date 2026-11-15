@@ -15,19 +15,20 @@
 # %%
 # # Predicción de Volatilidad con LSTM sobre barras intradía de Alpaca
 #
-# Variante intradía del cuaderno `Volatilidad_LSTM.py`: descarga barras de
-# 15 minutos de **Alpaca** (feed IEX) en vez de Yahoo diario y entrena la
-# LSTM alimentándola con **cada barra**.
+# Variante intradía del cuaderno `Volatilidad_LSTM.py`: descarga barras
+# intradía de **Alpaca** (feed IEX) en vez de Yahoo diario y entrena la LSTM
+# alimentándola con **cada barra**.
 #
 # Differences clave respecto al cuaderno diario:
 #
-# * **Frecuencia**: 15 minutos → ``bars_per_day = 26`` y
-#   ``bars_per_year = 6552`` (factor de anualización).
-# * **Features a nivel de barra**: las ventanas diarias se reescalan ×26
-#   (`src/thesis/volatility_intraday.py`).
-# * **Lookback y horizonte**: 130 barras ≈ 5 sesiones.
-# * **Backtest**: Sharpe y CAGR anualizados a 6552 y momentum de 63 sesiones
-#   equivalentes (1638 barras).
+# * **Frecuencia configurable**: el ``timeframe`` (p. ej. ``'15Min'``) infiere
+#   automáticamente ``bars_per_day`` y ``bars_per_year``.  Para 15 minutos
+#   son 26 y 6552; para 5 minutos, 78 y 19656; para 1 minuto, 390 y 98280.
+# * **Features a nivel de barra**: las ventanas diarias se reescalan con
+#   ``bars_per_day`` (`src/thesis/volatility_intraday.py`).
+# * **Lookback y horizonte**: 5 sesiones expresadas en barras.
+# * **Backtest**: Sharpe y CAGR anualizados a ``bars_per_year`` y momentum de
+#   63 sesiones equivalentes (``63 * bars_per_day`` barras).
 #
 # La lógica reutilizable vive en `src/thesis/volatility_intraday.py`,
 # `src/thesis/volatility.py`, `src/thesis/volatility_models.py` y
@@ -91,6 +92,7 @@ from thesis.volatility_evaluation import (
 from thesis.volatility_intraday import (
     build_volatility_dataset_intraday,
     download_ohlcv_alpaca,
+    infer_frequency_params,
 )
 from thesis.volatility_models import (
     HARRVModel,
@@ -106,18 +108,19 @@ CONFIG: dict[str, Any] = {
     "ticker": "SPY",
     "start_date": "2020-01-01",
     "end_date": None,
-    "timeframe": "15Min",
+    "timeframe": "15Min",  # '1Min', '5Min', '15Min', etc.
     "feed": "iex",
     # Divisiones temporales
     "train_end": "2023-01-01",
     "val_end": "2024-07-01",
-    # Frecuencia
-    "bars_per_day": 26,
-    "bars_per_year": 6552,
-    # Secuencias y features
-    "lookback": 130,
-    "forecast_horizon": 130,
-    "smoothing_window": 390,  # 15 sesiones equivalentes
+    # Frecuencia (se infiere de ``timeframe`` en ``_merge_config``; pueden
+    # sobreescribirse explícitamente si se usa otro mercado u horario).
+    # bars_per_day: int,
+    # bars_per_year: int,
+    # Secuencias y features (se escalan automáticamente con bars_per_day).
+    # lookback: int,            # por defecto 5 sesiones
+    # forecast_horizon: int,    # por defecto 5 sesiones
+    # smoothing_window: int,    # por defecto 15 sesiones
     "linex_b": 0.8,
     "features": [
         "rv_daily",
@@ -161,12 +164,24 @@ CONFIG: dict[str, Any] = {
 def _merge_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Combina :data:`CONFIG` con las sobreescrituras del usuario.
 
+    ``bars_per_day``, ``bars_per_year``, ``lookback``, ``forecast_horizon`` y
+    ``smoothing_window`` se infieren automáticamente de ``timeframe`` salvo
+    que el usuario los proporcione explícitamente.
+
     ``inference_path`` se deriva de ``model_path`` (mismo directorio, nombre
     ``lstm_vol_alpaca_inference.pkl``) cuando no se indica explícitamente, de
     modo que el artefacto de inferencia viaje siempre junto al modelo
     entrenado.
     """
     cfg = {**CONFIG, **(config or {})}
+
+    freq = infer_frequency_params(cfg["timeframe"])
+    cfg.setdefault("bars_per_day", freq["bars_per_day"])
+    cfg.setdefault("bars_per_year", freq["bars_per_year"])
+    cfg.setdefault("lookback", 5 * cfg["bars_per_day"])
+    cfg.setdefault("forecast_horizon", 5 * cfg["bars_per_day"])
+    cfg.setdefault("smoothing_window", 15 * cfg["bars_per_day"])
+
     if "inference_path" not in (config or {}):
         cfg["inference_path"] = str(
             Path(cfg["model_path"]).with_name("lstm_vol_alpaca_inference.pkl")
@@ -188,8 +203,8 @@ def prepare_data(config: dict[str, Any] | None = None) -> dict[str, Any]:
     Unidades
     --------
     ``target_log_vol`` es el log de la volatilidad realizada *forward*
-    anualizada a 6552 (barras de 15 minutos); los arrays ``X_*_s`` / ``y_*_s``
-    están estandarizados con la media y la desviación estándar del **train**.
+    anualizada a ``bars_per_year``; los arrays ``X_*_s`` / ``y_*_s`` están
+    estandarizados con la media y la desviación estándar del **train**.
 
     Parameters
     ----------
@@ -296,7 +311,7 @@ def prepare_data(config: dict[str, Any] | None = None) -> dict[str, Any]:
 
     # --- Baseline HAR-RV ---
     # Con datos intradía los rezagos HAC deben cubrir el horizonte de
-    # predicción (5 sesiones × 26 barras = 130).
+    # predicción (5 sesiones × bars_per_day barras).
     har_X_tr = align_har_features_with_sequences(train_df[fcols], ytr_seq, LB)
     har_X_te = align_har_features_with_sequences(test_df[fcols], yte_seq, LB)
     y_tr_raw_aligned = y_tr[LB : LB + len(ytr_seq)]
@@ -562,9 +577,9 @@ def compute_metrics(
 
     Evalúa los pronósticos **crudos** contra la verdad cruda (métricas
     primarias, las que se escriben en ``metrics_alpaca.csv``), aplica el test
-    de Diebold-Mariano con ``h = forecast_horizon`` (130 barras) y escribe el
-    CSV de métricas.  Es re-ejecutable sin reentrenar: basta con re-ejecutar
-    tras cambiar ``smoothing_window``.
+    de Diebold-Mariano con ``h = forecast_horizon`` y escribe el CSV de
+    métricas.  Es re-ejecutable sin reentrenar: basta con re-ejecutar tras
+    cambiar ``smoothing_window``.
 
     Las métricas calculadas sobre los pronósticos **suavizados** se imprimen
     como vista secundaria para trading; no son el estimando declarado (la
@@ -660,8 +675,8 @@ def run_backtest_and_strategies(
     retornos) y se calcula dentro de ``run_vol_timing_backtest``, con un
     desplazamiento causal de una barra.
 
-    La anualización usa ``bars_per_year`` (6552) y la ventana de momentum
-    equivale a 63 sesiones (``63 * bars_per_day`` barras).
+    La anualización usa ``bars_per_year`` y la ventana de momentum equivale
+    a 63 sesiones (``63 * bars_per_day`` barras).
 
     Parameters
     ----------
@@ -949,7 +964,7 @@ if __name__ == "__main__":
     ax.plot(dates, y_har, color="C1", lw=1.0, ls="--", label="HAR-RV")
     ax.set_xlabel("Fecha")
     ax.set_ylabel("Volatilidad anualizada")
-    ax.set_title("Volatilidad realizada forward — test (15 min)")
+    ax.set_title(f"Volatilidad realizada forward — test ({CONFIG['timeframe']})")
     ax.legend()
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
     fig.autofmt_xdate()
@@ -998,7 +1013,7 @@ if __name__ == "__main__":
     )
     ax.set_xlabel("Fecha")
     ax.set_ylabel("Retorno acumulado")
-    ax.set_title("Backtest de vol-timing — test (15 min)")
+    ax.set_title(f"Backtest de vol-timing — test ({CONFIG['timeframe']})")
     ax.legend()
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
     fig.autofmt_xdate()

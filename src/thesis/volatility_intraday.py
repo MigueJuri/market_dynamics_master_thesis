@@ -1,8 +1,13 @@
-"""Ingeniería de características para barras intradía (p. ej. 15 minutos).
+"""Ingeniería de características para barras intradía.
 
 Espejo de :mod:`thesis.volatility` para datos de frecuencia intradía: las
 ventanas expresadas en sesiones se reescalan a **barras** mediante
 ``bars_per_day`` y la anualización usa el número de barras por año.
+
+Las constantes de frecuencia pueden inferirse automáticamente a partir del
+``timeframe`` (p. ej. ``'15Min'``) mediante
+:func:`infer_frequency_params`, o proporcionarse explícitamente para otros
+mercados o convenciones de barras.
 
 Convenciones
 ------------
@@ -11,11 +16,11 @@ Convenciones
   que las fronteras temporales (``temporal_split``) se interpreten en hora
   de mercado.
 * ``rv_daily`` es la suma de los retornos al cuadrado de las barras del día
-  (26 barras con ``bars_per_day=26``); ``rv_weekly`` y ``rv_monthly`` son
-  medias de los retornos al cuadrado sobre 130 y 572 barras.  En el módulo
-  diario las mismas magnitudes son la media de 5 y 22 observaciones diarias:
-  la diferencia es un factor constante (26) que se absorbe en el intercepto
-  de la regresión HAR-RV y en la estandarización de la LSTM.
+  (``bars_per_day`` barras); ``rv_weekly`` y ``rv_monthly`` son medias de 5 y
+  22 sesiones expresadas en barras.  En el módulo diario las mismas magnitudes
+  son la media de 5 y 22 observaciones diarias: la diferencia es un factor
+  constante (``bars_per_day``) que se absorbe en el intercepto de la
+  regresión HAR-RV y en la estandarización de la LSTM.
 * Los estimadores de rango (Parkinson, Garman-Klass) quedan en unidades por
   barra, igual que en el módulo diario quedan en unidades por sesión.
 """
@@ -47,6 +52,91 @@ DAILY_WINDOWS: dict[str, int] = {
     "skew_5": 5,
     "mean_ret_5": 5,
 }
+
+
+def _parse_timeframe_minutes(timeframe: str) -> int:
+    """Extrae los minutos por barra de un timeframe de Alpaca.
+
+    Soporta timeframes en minutos y horas (p. ej. ``'1Min'``, ``'5Min'``,
+    ``'15Min'``, ``'1Hour'``).
+
+    Parameters
+    ----------
+    timeframe : str
+        Temporalidad con el formato ``<cantidad><Unidad>``.
+
+    Returns
+    -------
+    int
+        Minutos contenidos en cada barra.
+
+    Raises
+    ------
+    ValueError
+        Si el timeframe no tiene cantidad numérica o no está en minutos/horas.
+    """
+    text = timeframe.strip()
+    amount_text = "".join(ch for ch in text if ch.isdigit())
+    unit_text = "".join(ch for ch in text if not ch.isdigit()).lower()
+    if not amount_text:
+        raise ValueError(f"Timeframe no válido: {timeframe!r}")
+    amount = int(amount_text)
+    if unit_text in ("min", "m", "minute", "minutes", "minuto", "minutos"):
+        return amount
+    if unit_text in ("hour", "h", "hours", "hora", "horas"):
+        return amount * 60
+    raise ValueError(
+        f"Timeframe no soportado para inferencia automática: {timeframe!r}. "
+        "Usa minutos u horas, o proporciona bars_per_day explícitamente."
+    )
+
+
+def infer_frequency_params(
+    timeframe: str,
+    trading_days: int = TRADING_DAYS,
+    market_minutes: float = 390.0,
+) -> dict[str, int]:
+    """Infiere ``bars_per_day`` y ``bars_per_year`` a partir del timeframe.
+
+    Asume una sesión de mercado de 6.5 horas (390 minutos), que es el
+    horario habitual de NYSE/Nasdaq.  Para 1, 5 y 15 minutos la división es
+    exacta (390, 78 y 26 barras respectivamente); para otros timeframes el
+    resultado se redondea al entero más cercano y puede sobreescribirse
+    pasando ``bars_per_day`` de forma explícita.
+
+    Parameters
+    ----------
+    timeframe : str
+        Temporalidad de las barras (p. ej. ``'1Min'``, ``'5Min'``,
+        ``'15Min'``).
+    trading_days : int
+        Días de mercado por año (252 por defecto).
+    market_minutes : float
+        Minutos de mercado por sesión (390 por defecto).
+
+    Returns
+    -------
+    dict[str, int]
+        ``{"timeframe", "minutes_per_bar", "bars_per_day", "bars_per_year"}``.
+
+    Raises
+    ------
+    ValueError
+        Si no se puede inferir un ``bars_per_day`` positivo.
+    """
+    minutes_per_bar = _parse_timeframe_minutes(timeframe)
+    bars_per_day = round(market_minutes / minutes_per_bar)
+    if bars_per_day <= 0:
+        raise ValueError(
+            f"No se pudo inferir bars_per_day para {timeframe!r} "
+            f"({minutes_per_bar} min/bar)."
+        )
+    return {
+        "timeframe": timeframe,
+        "minutes_per_bar": minutes_per_bar,
+        "bars_per_day": bars_per_day,
+        "bars_per_year": bars_per_day * trading_days,
+    }
 
 
 def _build_timeframe(timeframe: str) -> Any:
@@ -193,23 +283,23 @@ def compute_volatility_features_intraday(
     """Construye características predictoras causales sobre barras.
 
     Espejo de :func:`thesis.volatility.compute_volatility_features` con las
-    ventanas diarias reescaladas a barras:
+    ventanas diarias reescaladas a barras (``D`` = ``bars_per_day``):
 
-    ==================  ==========  ==========================================
-    Característica      Barras      Equivalente diario
-    ==================  ==========  ==========================================
-    ``rv_daily``        26          suma de ``r²`` de las barras del día
-    ``rv_weekly``       130         media de ``r²`` de 5 sesiones
-    ``rv_monthly``      572         media de ``r²`` de 22 sesiones
-    ``vol_20``          520         desviación de 20 sesiones (anualizada)
-    ``parkinson_vol``   520         Parkinson de 20 sesiones
-    ``gk_vol``          520         Garman-Klass de 20 sesiones
-    ``rsi_14``          364         RSI de 14 sesiones
-    ``rel_volume``      520         volumen relativo a 20 sesiones
-    ``volume_trend``    130         tendencia de volumen de 5 sesiones
-    ``skew_5``          130         asimetría de 5 sesiones
-    ``mean_ret_5``      130         retorno medio de 5 sesiones
-    ==================  ==========  ==========================================
+    ==================  =============  ======================================
+    Característica      Barras         Equivalente diario
+    ==================  =============  ======================================
+    ``rv_daily``        ``D``          suma de ``r²`` de las barras del día
+    ``rv_weekly``       ``5·D``        media de ``r²`` de 5 sesiones
+    ``rv_monthly``      ``22·D``       media de ``r²`` de 22 sesiones
+    ``vol_20``          ``20·D``       desviación de 20 sesiones (anualizada)
+    ``parkinson_vol``   ``20·D``       Parkinson de 20 sesiones
+    ``gk_vol``          ``20·D``       Garman-Klass de 20 sesiones
+    ``rsi_14``          ``14·D``       RSI de 14 sesiones
+    ``rel_volume``      ``20·D``       volumen relativo a 20 sesiones
+    ``volume_trend``    ``5·D``        tendencia de volumen de 5 sesiones
+    ``skew_5``          ``5·D``        asimetría de 5 sesiones
+    ``mean_ret_5``      ``5·D``        retorno medio de 5 sesiones
+    ==================  =============  ======================================
 
     ``gap`` e ``intraday_range`` no tienen ventana: comparan cada barra con
     la anterior.
@@ -306,7 +396,8 @@ def compute_volatility_features_intraday(
 def compute_log_vol_target_intraday(
     df: pd.DataFrame,
     horizon_bars: int = 130,
-    annualize: int = 6552,
+    annualize: int | None = None,
+    bars_per_year: int | None = None,
 ) -> pd.Series:
     """Log-volatilidad realizada anualizada a ``horizon_bars`` barras.
 
@@ -315,8 +406,7 @@ def compute_log_vol_target_intraday(
     .. math::
         y_t = \\log\\!\\left(\\sqrt{\\frac{A}{H}\\sum_{i=1}^{H} r_{t+i}^2}\\right)
 
-    donde ``A`` es el factor de anualización (6552 para barras de 15
-    minutos) y ``H`` el horizonte en barras.
+    donde ``A`` es el factor de anualización y ``H`` el horizonte en barras.
 
     Parameters
     ----------
@@ -324,8 +414,13 @@ def compute_log_vol_target_intraday(
         Datos OHLCV con columna ``Close``.
     horizon_bars : int
         Horizonte de predicción en barras.
-    annualize : int
-        Factor de anualización (por defecto 6552).
+    annualize : int | None
+        Factor de anualización explícito.  Si es ``None`` se usa
+        ``bars_per_year``.
+    bars_per_year : int | None
+        Barras por año.  Se usa cuando ``annualize`` es ``None``; si ambos
+        son ``None`` se asume el factor de 15 minutos (``252 * 26``) para
+        compatibilidad con llamadas directas.
 
     Returns
     -------
@@ -333,6 +428,8 @@ def compute_log_vol_target_intraday(
         Target indexado por fecha.  Las últimas ``horizon_bars``
         observaciones son ``NaN`` porque requieren datos futuros.
     """
+    if annualize is None:
+        annualize = bars_per_year if bars_per_year is not None else (TRADING_DAYS * 26)
     log_ret = log_returns(df["Close"])
     rv_sq = log_ret**2
     fwd_rv = rv_sq.rolling(horizon_bars, min_periods=horizon_bars).sum().shift(
@@ -372,6 +469,9 @@ def build_volatility_dataset_intraday(
         df, bars_per_day=bars_per_day, bars_per_year=bars_per_year
     )
     target = compute_log_vol_target_intraday(
-        df, horizon_bars=horizon_bars, annualize=bars_per_year
+        df,
+        horizon_bars=horizon_bars,
+        annualize=None,
+        bars_per_year=bars_per_year,
     )
     return pd.concat([features, target], axis=1).dropna()

@@ -14,6 +14,7 @@ from thesis.volatility_intraday import (
     compute_log_vol_target_intraday,
     compute_volatility_features_intraday,
     download_ohlcv_alpaca,
+    infer_frequency_params,
 )
 
 
@@ -153,3 +154,89 @@ def test_download_ohlcv_alpaca_normalizes_bars(monkeypatch) -> None:
     # 14:30 UTC son las 09:30 ET (invierno).
     assert df.index[0] == pd.Timestamp("2020-01-01 09:30")
     assert len(df) == 3
+
+
+@pytest.mark.parametrize(
+    "timeframe,expected_bpd,expected_bpy",
+    [
+        ("1Min", 390, 98280),
+        ("5Min", 78, 19656),
+        ("15Min", 26, 6552),
+        ("30Min", 13, 3276),
+    ],
+)
+def test_infer_frequency_params(timeframe, expected_bpd, expected_bpy) -> None:
+    """La inferencia de frecuencia escala correctamente con el timeframe."""
+    freq = infer_frequency_params(timeframe)
+    assert freq["bars_per_day"] == expected_bpd
+    assert freq["bars_per_year"] == expected_bpy
+    assert freq["minutes_per_bar"] * freq["bars_per_day"] == pytest.approx(390)
+
+
+def test_infer_frequency_params_rejects_unsupported_timeframe() -> None:
+    with pytest.raises(ValueError, match="Timeframe no soportado"):
+        infer_frequency_params("1Day")
+
+
+def _make_intraday_freq(n_days: int = 5, freq: str = "15min", seed: int = 0) -> pd.DataFrame:
+    """Serie OHLCV sintética para una frecuencia arbitraria."""
+    bars_per_day = {"1min": 390, "5min": 78, "15min": 26}[freq]
+    n_bars = bars_per_day * n_days
+    rng = np.random.default_rng(seed)
+    returns = rng.normal(0.0, 0.002, n_bars)
+    close = 100.0 * np.exp(np.cumsum(returns))
+    high = close * (1 + rng.uniform(0.0005, 0.004, n_bars))
+    low = close / (1 + rng.uniform(0.0005, 0.004, n_bars))
+    open_ = close * (1 + rng.normal(0, 0.001, n_bars))
+    volume = rng.integers(100_000, 1_000_000, n_bars)
+    index = pd.date_range("2020-01-01 09:30", periods=n_bars, freq=freq)
+    return pd.DataFrame(
+        {"Open": open_, "High": high, "Low": low, "Close": close, "Volume": volume},
+        index=index,
+    )
+
+
+@pytest.mark.parametrize("freq,bpd", [("1min", 390), ("5min", 78), ("15min", 26)])
+def test_rv_daily_sums_the_bars_of_a_day_frequency_agnostic(freq, bpd) -> None:
+    """``rv_daily`` suma exactamente las barras de una sesión para 1/5/15 min."""
+    df = _make_intraday_freq(n_days=5, freq=freq)
+    feat = compute_volatility_features_intraday(df, bars_per_day=bpd)
+    log_ret = np.log(df["Close"] / df["Close"].shift(1))
+    esperado = (log_ret**2).rolling(bpd, min_periods=bpd).sum()
+    np.testing.assert_allclose(
+        feat["rv_daily"].to_numpy()[bpd:],
+        np.log(esperado.to_numpy()[bpd:]),
+        rtol=1e-10,
+    )
+
+
+@pytest.mark.parametrize("freq,bpd", [("1min", 390), ("5min", 78), ("15min", 26)])
+def test_target_annualization_scales_with_frequency(freq, bpd) -> None:
+    """El target usa ``bars_per_year`` correctamente para cada frecuencia."""
+    df = _make_intraday_freq(n_days=10, freq=freq)
+    horizon = 5 * bpd
+    bars_per_year = 252 * bpd
+    target = compute_log_vol_target_intraday(
+        df, horizon_bars=horizon, bars_per_year=bars_per_year
+    )
+
+    log_ret = np.log(df["Close"] / df["Close"].shift(1))
+    esperado = np.sqrt(
+        (bars_per_year / horizon) * (log_ret**2).rolling(horizon).sum().shift(-horizon)
+    )
+    esperado = pd.Series(np.log(esperado.to_numpy()), index=df.index).iloc[1:]
+    np.testing.assert_allclose(
+        target.to_numpy()[:-horizon],
+        esperado.to_numpy()[:-horizon],
+        rtol=1e-10,
+    )
+
+
+@pytest.mark.parametrize("freq,bpd", [("1min", 390), ("5min", 78), ("15min", 26)])
+def test_build_dataset_frequency_agnostic(freq, bpd) -> None:
+    """El dataset completo se construye sin NaN para 1/5/15 minutos."""
+    df = _make_intraday_freq(n_days=30, freq=freq)
+    dataset = build_volatility_dataset_intraday(df, horizon_bars=5 * bpd, bars_per_day=bpd)
+    assert not dataset.isna().any().any()
+    assert "target_log_vol" in dataset.columns
+    assert "rv_daily" in dataset.columns
