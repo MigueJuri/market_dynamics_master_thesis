@@ -43,6 +43,7 @@ from thesis.pair_trading import (
     gaussian_mi_matrix,
     hierarchical_clustering,
     ksg_mi_matrix,
+    load_asset_order,
     load_log_prices,
     load_log_returns,
     load_returns_panel,
@@ -50,6 +51,7 @@ from thesis.pair_trading import (
     pair_trading_backtest,
     prepare_pair_selection_universe,
     print_dataset_report,
+    save_asset_order,
     sector_average_matrix,
     select_table_columns,
     simulate_gbm,
@@ -909,6 +911,46 @@ def test_ksg_mi_matrix_series_varianza_cero() -> None:
     returns = pd.DataFrame(data, columns=["A", "B"])
     mi = ksg_mi_matrix(returns, k_neighbors=3, seed=42)
     assert np.isnan(mi.loc["A", "B"]) or mi.loc["A", "B"] == 0.0
+
+
+# =============================================================================
+# Orden de activos persistido
+# =============================================================================
+
+
+def test_save_asset_order_guarda_el_orden(tmp_path) -> None:
+    """El JSON conserva el orden y los metadatos de auditoría."""
+    order = ["MSFT", "AAPL", "JPM"]
+    path = save_asset_order(
+        order, k_neighbors=5, n_clusters=11, cache_dir=tmp_path,
+    )
+
+    assert path.exists()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["assets"] == order
+    assert payload["k_neighbors"] == 5
+    assert payload["n_clusters"] == 11
+    assert "created_at" in payload
+
+
+def test_load_asset_order_devuelve_el_orden_guardado(tmp_path) -> None:
+    """Guardar y cargar devuelve exactamente el mismo orden."""
+    order = ["XOM", "JNJ", "WMT", "KO"]
+    save_asset_order(order, k_neighbors=3, n_clusters=7, cache_dir=tmp_path)
+
+    assert load_asset_order(cache_dir=tmp_path) == order
+
+
+def test_load_asset_order_falla_si_no_existe(tmp_path) -> None:
+    """Sin el JSON se lanza ``FileNotFoundError`` con el orden de ejecución."""
+    with pytest.raises(FileNotFoundError, match="1_PairSelectionMutualInformation"):
+        load_asset_order(cache_dir=tmp_path)
+
+
+def test_save_asset_order_rechaza_orden_vacio(tmp_path) -> None:
+    """Un orden vacío no se persiste."""
+    with pytest.raises(ValueError, match="vacío"):
+        save_asset_order([], k_neighbors=3, n_clusters=5, cache_dir=tmp_path)
 
 
 # =============================================================================

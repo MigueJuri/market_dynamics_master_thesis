@@ -29,8 +29,12 @@ cálculo de métricas sectoriales, simulaciones OU y GBM) vive en
 3. `1_PairSelectionMutualInformation.py` y/o
    `2_PairSelectionPearson.py`.  Ambos comparten la misma fase de
    preparación (universo, retornos, sectores) pero luego divergen en
-   la métrica central.  Pueden ejecutarse en cualquier orden; incluso
-   en paralelo, ya que la caché KSG es local a cada notebook.
+   la métrica central.  La caché KSG es local a cada notebook, pero
+   `2_PairSelectionPearson.py` necesita el **leaf order** que persiste
+   `1_PairSelectionMutualInformation.py` para dibujar su heatmap con el
+   mismo orden de activos: si se ejecuta Pearson sin haber ejecutado
+   antes MI, `load_asset_order()` falla con un mensaje que indica el
+   orden correcto.
 
 ## Configuración común
 
@@ -398,13 +402,33 @@ Opciones: `cluster_labels_visible=False` oculta la numeración y
 
 ## Heatmaps de dependencia y escala comparable
 
-`plot_sector_reordered_matrix()` dibuja la matriz de activos reordenada
-**globalmente por cluster**: los bloques del heatmap son exactamente los
-clusters que evalúa el análisis sectorial. Los únicos separadores son las
-líneas discontinuas entre clusters; los límites sectoriales ya no se marcan,
-porque en una matriz de ~300 activos sólo añadían ruido. Con
-`sector_labels_visible=True` se pueden rotular las bandas sectoriales en los
-ejes si hiciera falta.
+`plot_sector_reordered_matrix()` dibuja la matriz de activos reordenada.
+Por defecto el orden es **global por cluster**: los bloques del heatmap son
+exactamente los clusters que evalúa el análisis sectorial. Los únicos
+separadores son las líneas discontinuas entre clusters; los límites
+sectoriales ya no se marcan, porque en una matriz de ~300 activos sólo
+añadían ruido. Con `sector_labels_visible=True` se pueden rotular las bandas
+sectoriales en los ejes si hiciera falta.
+
+### Orden compartido entre MI y Pearson
+
+Ambos heatmaps se dibujan con el **mismo orden de tickers** para que sean
+comparables fila a fila. Ese orden es el *leaf order* del dendrograma de
+Ward sobre la distancia de información mutua (`hierarchical_clustering` →
+`leaf_order` → `labels_ordered`).
+
+- `1_PairSelectionMutualInformation.py` lo persiste con
+  `save_asset_order()` en `data/pair_trading/mi/asset_order.json` (JSON
+  determinista, escritura atómica con `tempfile` + `os.replace`). El
+  fichero guarda además `k_neighbors`, `n_clusters` y `created_at` para
+  auditar a qué ejecución y con qué `k` corresponde el orden.
+- `2_PairSelectionPearson.py` lo recupera con `load_asset_order()` e
+  intersecta el orden con las columnas de su matriz de correlación, de
+  modo que un desajuste de universo no deja filas enteras de `NaN`.
+
+El paso opcional `order=` de `plot_sector_reordered_matrix()` permite
+fijar un orden explícito (filtrado a los tickers presentes en la matriz);
+sin él, la función conserva el comportamiento por cluster/sector.
 
 ### Escala de color
 

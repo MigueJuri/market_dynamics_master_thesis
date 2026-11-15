@@ -549,20 +549,26 @@ def plot_sector_reordered_matrix(
     sector_labels: pd.Series | None = None,
     cluster_labels: pd.Series | None = None,
     cmap: str = "viridis",
-    figsize: tuple[float, float] = (10, 9),
+    figsize: tuple[float, float] = (10*0.5, 9*0.5),
     title: str = "Matriz ordenada por cluster",
     cbar_label: str = "Valor",
     separator_color: str = "white",
     sector_labels_visible: bool = False,
     cluster_labels_visible: bool = True,
     xlabel: str = "Clusters",
+    order: list[str] | None = None,
 ) -> plt.Figure | None:
     """Muestra únicamente la matriz reordenada y su barra de color.
 
-    El orden es global por clúster, no «sector y dentro del sector»: así
-    los bloques del heatmap son exactamente los clusters que evalúa el
-    análisis sectorial.  No se dibujan separadores ni etiquetas para
-    mantener únicamente la matriz y la barra de color.
+    Por defecto el orden es global por clúster, no «sector y dentro del
+    sector»: así los bloques del heatmap son exactamente los clusters que
+    evalúa el análisis sectorial.  No se dibujan separadores ni etiquetas
+    para mantener únicamente la matriz y la barra de color.
+
+    Con ``order`` se puede fijar un orden explícito de tickers (por ejemplo
+    el *leaf order* del dendrograma), que tiene prioridad sobre el orden por
+    cluster/sector.  Es lo que permite que la matriz de información mutua y
+    la de correlación se dibujen con el mismo orden de activos.
 
     La escala de color se fija con los valores **medidos** en la matriz
     (``vmin``/``vmax`` reales, ignorando la diagonal ``NaN``), no con un
@@ -584,6 +590,13 @@ def plot_sector_reordered_matrix(
     cluster_labels : pd.Series, opcional
         Etiqueta de cluster por ticker; si falta, la función no dibuja
         ningún separador ni numeración.
+    order : list[str], opcional
+        Orden explícito de los tickers (por ejemplo, el *leaf order* del
+        dendrograma de Ward).  Cuando se pasa, se respeta ese orden
+        --filtrado a los tickers presentes en la matriz-- y se ignora el
+        orden por cluster/sector.  Sirve para que dos matrices de métricas
+        distintas se dibujen con exactamente el mismo orden de activos y
+        sean comparables fila a fila.
     cmap : str
         Paleta; por defecto ``viridis`` para compartir entre métricas.
     Returns
@@ -592,37 +605,46 @@ def plot_sector_reordered_matrix(
         La figura, para poder guardarla; ``None`` si no hay activos comunes.
     """
     common = matrix.index.intersection(matrix.columns)
-    if sector_labels is not None:
-        common = common.intersection(sector_labels.index)
-    if cluster_labels is not None:
-        common = common.intersection(cluster_labels.index)
+    if order is None:
+        # El orden explícito define qué tickers se dibujan: las etiquetas de
+        # sector/cluster no deben descartar activos en ese modo.
+        if sector_labels is not None:
+            common = common.intersection(sector_labels.index)
+        if cluster_labels is not None:
+            common = common.intersection(cluster_labels.index)
 
     if len(common) == 0:
         print("No hay activos comunes para ordenar.")
         return None
 
-    if cluster_labels is not None:
+    if order is not None:
+        # Se eliminan duplicados conservando el orden de aparición.
+        orden = [t for t in dict.fromkeys(order) if t in common]
+        if len(orden) == 0:
+            print("El orden indicado no contiene tickers de la matriz.")
+            return None
+    elif cluster_labels is not None:
         sub_clusters = cluster_labels.reindex(common)
         # Orden global por cluster; a igualdad, por sector para que los
         # bloques no salgan mezclados.
         if sector_labels is not None:
             sub_sectors = sector_labels.reindex(common)
             frame = pd.DataFrame({"cluster": sub_clusters, "sector": sub_sectors})
-            order = frame.sort_values(["cluster", "sector"]).index.tolist()
+            orden = frame.sort_values(["cluster", "sector"]).index.tolist()
         else:
-            order = sub_clusters.sort_values().index.tolist()
+            orden = sub_clusters.sort_values().index.tolist()
     elif sector_labels is not None:
         sub_sectors = sector_labels.reindex(common)
-        order = sorted(sub_sectors.unique(), key=str)
-        order = [
+        sectores_ordenados = sorted(sub_sectors.unique(), key=str)
+        orden = [
             t
-            for sector in order
+            for sector in sectores_ordenados
             for t in sub_sectors[sub_sectors == sector].index.tolist()
         ]
     else:
-        order = common.tolist()
+        orden = common.tolist()
 
-    ordered_matrix = matrix.reindex(index=order, columns=order)
+    ordered_matrix = matrix.reindex(index=orden, columns=orden)
 
     # Escala medida: se ignoran los NaN de la diagonal.
     valores = ordered_matrix.to_numpy(dtype=float)
@@ -640,11 +662,11 @@ def plot_sector_reordered_matrix(
         vmin=vmin,
         vmax=vmax,
     )
-    fig.colorbar(im, ax=ax, label=cbar_label, shrink=0.8)
+    fig.colorbar(im, ax=ax, label=cbar_label, shrink=0.9, pad=0.01)
     ax.set_xticks([])
     ax.set_yticks([])
 
-    plt.tight_layout()
+    fig.subplots_adjust(left=0.01, right=0.99, bottom=0.01, top=0.99)
     plt.show()
     return fig
 

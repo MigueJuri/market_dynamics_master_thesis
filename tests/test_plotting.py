@@ -165,6 +165,66 @@ def test_solo_muestra_matriz_y_barra_de_color(
     assert cbar_ax.get_position().height < ax.get_position().height
 
 
+def test_usa_el_orden_explicito(matriz_etiquetada) -> None:
+    """Con ``order`` se respeta ese orden, ignorando cluster y sector."""
+    fig = plot_sector_reordered_matrix(
+        matriz_etiquetada, order=["F", "E", "D", "C", "B", "A"]
+    )
+
+    assert _orden_de_la_figura(fig) == ["F", "E", "D", "C", "B", "A"]
+
+
+def test_el_orden_explicito_ignora_las_etiquetas(
+    matriz_etiquetada, sectores, clusters
+) -> None:
+    """``order`` tiene prioridad sobre el orden por cluster/sector."""
+    fig = plot_sector_reordered_matrix(
+        matriz_etiquetada,
+        sector_labels=sectores,
+        cluster_labels=clusters,
+        order=["C", "A", "E", "B", "D", "F"],
+    )
+
+    assert _orden_de_la_figura(fig) == ["C", "A", "E", "B", "D", "F"]
+
+
+def test_el_orden_explicito_filtra_los_tickers_ausentes(
+    matriz_etiquetada,
+) -> None:
+    """Los tickers del orden que no están en la matriz se descartan."""
+    fig = plot_sector_reordered_matrix(
+        matriz_etiquetada, order=["C", "ZZZ", "A", "B", "D", "E", "F"]
+    )
+
+    assert _orden_de_la_figura(fig) == ["C", "A", "B", "D", "E", "F"]
+
+
+def test_el_orden_explicito_sin_activos_devuelve_none(
+    matriz_simple,
+) -> None:
+    """Si ningún ticker del orden está en la matriz, no se dibuja nada."""
+    assert plot_sector_reordered_matrix(matriz_simple, order=["X", "Y"]) is None
+
+
+def test_sin_orden_conserva_el_comportamiento_por_cluster(
+    matriz_etiquetada, sectores, clusters
+) -> None:
+    """Sin ``order`` la función ordena por cluster, como antes."""
+    fig = plot_sector_reordered_matrix(
+        matriz_etiquetada, sector_labels=sectores, cluster_labels=clusters
+    )
+    orden = _orden_de_la_figura(fig)
+
+    # Orden por cluster (y, a igualdad, por sector).
+    assert clusters.loc[orden].tolist() == [1, 1, 1, 2, 2, 2]
+    esperado = (
+        pd.DataFrame({"cluster": clusters, "sector": sectores})
+        .sort_values(["cluster", "sector"])
+        .index.tolist()
+    )
+    assert orden == esperado
+
+
 @pytest.mark.skip(reason="La función ya no muestra etiquetas de clusters.")
 def test_la_numeracion_es_la_posicion_del_bloque() -> None:
     """Los números empiezan en 1 y siguen el orden de izquierda a derecha.

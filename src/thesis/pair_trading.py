@@ -2661,6 +2661,120 @@ def cached_ksg_mi_matrix(
     return matrix
 
 
+#: Subcarpeta (relativa a :data:`thesis.config.DATA_DIR`) donde se persiste
+#: el orden de activos (leaf order) del dendrograma de información mutua.
+MI_ASSET_ORDER_DIR = Path("pair_trading") / "mi"
+
+#: Nombre del fichero JSON con el orden de activos persistido.
+MI_ASSET_ORDER_FILENAME = "asset_order.json"
+
+
+def _asset_order_path(cache_dir: Path | None = None) -> Path:
+    """Ruta determinista del JSON con el orden de activos."""
+    base = Path(cache_dir) if cache_dir is not None else DATA_DIR / MI_ASSET_ORDER_DIR
+    return base / MI_ASSET_ORDER_FILENAME
+
+
+def save_asset_order(
+    order: Sequence[str],
+    *,
+    k_neighbors: int,
+    n_clusters: int,
+    cache_dir: Path | None = None,
+) -> Path:
+    """Persiste el orden de activos del dendrograma de información mutua.
+
+    El *leaf order* del dendrograma de Ward es el orden de referencia para
+    dibujar las matrices de MI y de Pearson: persistirlo permite que ambos
+    cuadernos, que se ejecutan en sesiones distintas, muestren el heatmap
+    con **exactamente el mismo orden de tickers** y sean comparables fila a
+    fila.
+
+    La escritura es atómica (``tempfile`` + ``os.replace``), igual que la
+    caché KSG, para no dejar un JSON a medias si el proceso se interrumpe.
+
+    Parameters
+    ----------
+    order : Sequence[str]
+        Tickers en el orden desired (leaf order del dendrograma).
+    k_neighbors : int
+        Número de vecinos ``k`` del estimador KSG con el que se calculó la
+        matriz.  Se registra para auditar el orden: depende de ``k``.
+    n_clusters : int
+        Número de clusters extraídos en el clustering de Ward.
+    cache_dir : Path, opcional
+        Carpeta donde se escribe el JSON.  Por defecto,
+        ``DATA_DIR / 'pair_trading' / 'mi'``.
+
+    Returns
+    -------
+    Path
+        Ruta del fichero JSON escrito.
+    """
+    assets = [str(t) for t in order]
+    if not assets:
+        raise ValueError("El orden de activos está vacío.")
+
+    path = _asset_order_path(cache_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "assets": assets,
+        "k_neighbors": int(k_neighbors),
+        "n_clusters": int(n_clusters),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with tempfile.NamedTemporaryFile(
+        delete=False,
+        dir=path.parent,
+        suffix=".json.tmp",
+        mode="w",
+        encoding="utf-8",
+    ) as tmp:
+        json.dump(payload, tmp, indent=2, sort_keys=True)
+        tmp.flush()
+        os.replace(tmp.name, str(path))
+
+    print(f"[caché] Orden de activos guardado en {path}")
+    return path
+
+
+def load_asset_order(*, cache_dir: Path | None = None) -> list[str]:
+    """Carga el orden de activos persistido por el cuaderno de MI.
+
+    Parameters
+    ----------
+    cache_dir : Path, opcional
+        Carpeta donde se busca el JSON.  Por defecto,
+        ``DATA_DIR / 'pair_trading' / 'mi'``.
+
+    Returns
+    -------
+    list[str]
+        Tickers en el orden persistido.
+
+    Raises
+    ------
+    FileNotFoundError
+        Si el JSON no existe: el cuaderno de información mutua debe
+        ejecutarse **antes** que el de Pearson.
+    """
+    path = _asset_order_path(cache_dir)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"No existe el orden de activos persistido ({path}). "
+            "Ejecuta primero `1_PairSelectionMutualInformation.py`: el "
+            "cuaderno de Pearson usa el leaf order de MI para dibujar su "
+            "heatmap con el mismo orden de tickers."
+        )
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assets = [str(t) for t in payload.get("assets", [])]
+    if not assets:
+        raise ValueError(f"El orden de activos persistido en {path} está vacío.")
+    return assets
+
+
 def top_pairs(
     matrix: pd.DataFrame,
     n: int = 20,

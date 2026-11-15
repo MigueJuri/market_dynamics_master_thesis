@@ -78,6 +78,7 @@ from thesis.pair_trading import (
     evaluate_cluster_sector_alignment,
     export_pair_selection_table,
     hierarchical_clustering,
+    load_asset_order,
     load_log_prices,
     prepare_pair_selection_universe,
     sector_average_matrix,
@@ -585,13 +586,24 @@ plot_cluster_sector_composition(
 plot_cluster_sector_summary(report.per_cluster)
 
 # %%
-# ## Matriz de correlación ordenada por cluster (sin etiquetas de ticker)
+# ## Matriz de correlación en el orden leaf order de MI
 #
-# La matriz se reordena **globalmente por cluster**, no por sector: los
-# bloques del heatmap son así exactamente los clusters que evalúa el
-# análisis sectorial.  Los separadores dibujados son sólo los cambios de
-# cluster (línea discontinua), y no se marcan los límites sectoriales, que
-# en una matriz tan densa sólo añaden ruido.
+# La matriz se reordena con el **leaf order** del dendrograma de
+# información mutua, el mismo que usa el heatmap de
+# ``1_PairSelectionMutualInformation.py``.  Así ambos heatmaps son
+# comparables fila a fila: un bloque del heatmap de MI corresponde al
+# mismo bloque en el de Pearson.
+#
+# El orden se recupera del JSON que escribe el cuaderno de MI
+# (``data/pair_trading/mi/asset_order.json``), de modo que **este cuaderno
+# debe ejecutarse después** de ``1_PairSelectionMutualInformation.py``.  Si
+# el fichero no existe, ``load_asset_order`` falla con un mensaje que
+# indica el orden de ejecución correcto.
+#
+# El orden se intersecta con las columnas de la matriz: si el universo
+# difiere (por ejemplo, por una descarga incompleta), los tickers que no
+# están en el orden de MI se descartan en lugar de quedar filas enteras de
+# ``NaN``.
 #
 # ## Escala de color comparable con la de información mutua
 #
@@ -603,16 +615,26 @@ plot_cluster_sector_summary(report.per_cluster)
 # Eso permite comparar **visualmente** ambas matrices con el mismo criterio
 # de intensidad, pero un mismo color no significa el mismo valor numérico:
 # Pearson e información mutua tienen unidades distintas, y cada barra de
-# color sigue labelling las suyas.  Lo comparable es el patrón de bloques,
+# color sigue labeling las suyas.  Lo comparable es el patrón de bloques,
 # no la magnitud.
 CMAP_COMPARABLE = "viridis"
 
+mi_order = load_asset_order()
+order = [t for t in mi_order if t in corr_matrix.columns]
+print(f"\nOrden leaf order de MI recuperado: {len(order)} tickers")
+missing = [t for t in corr_matrix.columns if t not in set(order)]
+if missing:
+    print(f"Tickers fuera del orden de MI (descartados): {missing}")
+
+# La reordenación va a una copia: ``corr_matrix`` se usa después para la
+# matriz sector × sector, que debe seguir viendo el universo completo.
+corr_matrix_ordered = corr_matrix.reindex(index=order, columns=order)
+
 plot_sector_reordered_matrix(
-    corr_matrix,
-    sector_labels=available_sectors,
-    cluster_labels=clusters,
+    corr_matrix_ordered,
+    order=order,
     cmap=CMAP_COMPARABLE,
-    title="Correlación Pearson ordenada por cluster",
+    title="Correlación Pearson ordenada por leaf order",
     cbar_label="Correlación de Pearson",
     cluster_labels_visible = False,
     separator_color = None,

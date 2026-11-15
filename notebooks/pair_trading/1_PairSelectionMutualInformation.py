@@ -100,6 +100,7 @@ from thesis.pair_trading import (
     load_log_prices,
     mi_distance,
     prepare_pair_selection_universe,
+    save_asset_order,
     sector_average_matrix,
     top_pairs,
     translate_gics_sectors,
@@ -355,15 +356,15 @@ print(
 # ]
 # ```
 COLUMNAS_TABLA = [
-    "rank",
+    # "rank",
     "ticker_a",     
     "ticker_b",
     "sector_a",
     "sector_b",
     "mi",
-    "n_sesiones_par",
-    "estadistico_adf",
-    "p_valor_adf",
+    # "n_sesiones_par",
+    # "estadistico_adf",
+    # "p_valor_adf",
     "estacionario",
 ]
 
@@ -511,9 +512,9 @@ COLUMNAS_TABLA_COINTEGRADOS = [
     "sector_a",
     "sector_b",
     "mi",
-    "n_sesiones_par",
-    "estadistico_adf",
-    "p_valor_adf",
+    # "n_sesiones_par",
+    # "estadistico_adf",
+    # "p_valor_adf",
     "estacionario",
 ]
 
@@ -592,6 +593,19 @@ cluster_labels, leaf_order = hierarchical_clustering(
 labels_ordered = mi_matrix.columns[leaf_order]
 mi_ordered = mi_matrix.loc[labels_ordered, labels_ordered]
 
+# El leaf order del dendrograma se persiste para que el cuaderno de
+# Pearson pueda dibujar su heatmap con **exactamente el mismo orden** de
+# tickers y ambos heatmaps sean comparables fila a fila.  El fichero es
+# determinista (``data/pair_trading/mi/asset_order.json``) y guarda además
+# el ``k`` del estimador KSG con el que se calculó la matriz, para poder
+# auditar que el orden corresponde a esta ejecución.
+asset_order_path = save_asset_order(
+    list(labels_ordered),
+    k_neighbors=K_NEIGHBORS,
+    n_clusters=n_clusters,
+)
+print(f"Orden de activos persistido en: {asset_order_path}")
+
 clusters = pd.Series(cluster_labels, index=mi_matrix.columns, name="cluster")
 print(f"\nClustering jerárquico de Ward (k = {n_clusters}):")
 for cid in sorted(clusters.unique()):
@@ -641,12 +655,16 @@ plot_cluster_sector_composition(
 plot_cluster_sector_summary(report.per_cluster)
 
 # %%
-# ## Matriz MI ordenada por cluster (sin etiquetas de ticker)
+# ## Matriz MI ordenada por leaf order del dendrograma
 #
-# La matriz se reordena **globalmente por cluster**, igual que en
-# ``2_PairSelectionPearson.py``: los bloques del heatmap son los clusters
-# que evalúa el análisis sectorial, y los únicos separadores dibujados son
-# los cambios de cluster (línea discontinua).
+# La matriz se reordena con el **leaf order** del dendrograma de Ward
+# (``labels_ordered``), no por cluster+sector.  Es el mismo orden que usa
+# el heatmap de Pearson, de modo que ambas matrices son comparables fila a
+# fila: un bloque del heatmap de MI corresponde al mismo bloque en el de
+# Pearson.
+#
+# El leaf order se persiste en ``data/pair_trading/mi/asset_order.json``
+# para que el cuaderno de Pearson lo recupere al ejecutarse después.
 #
 # ## Escala de color comparable con la de Pearson
 #
@@ -662,10 +680,9 @@ CMAP_COMPARABLE = "viridis"
 
 plot_sector_reordered_matrix(
     mi_matrix,
-    sector_labels=available_sectors,
-    cluster_labels=clusters,
+    order=list(labels_ordered),
     cmap=CMAP_COMPARABLE,
-    title="MI KSG ordenada por cluster",
+    title="MI KSG ordenada por leaf order",
     cbar_label="MI (nats)",
     cluster_labels_visible=False,
     separator_color=None,
