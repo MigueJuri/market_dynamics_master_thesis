@@ -18,6 +18,7 @@ dependencies = [
     "arch>=8.0.0",
     "requests>=2.31.0",
     "lxml>=5.0.0",
+    "alpaca-py>=0.42.0",
 ]
 
 [project.optional-dependencies]

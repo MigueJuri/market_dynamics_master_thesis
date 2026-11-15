@@ -145,12 +145,28 @@ def diebold_mariano_test(
     return {"DM_stat": float(dm_stat), "DM_pvalue": float(dm_pval)}
 
 
-def sharpe_ratio(r: np.ndarray) -> float:
-    """Sharpe anualizado sobre retornos simples (tasa libre de riesgo nula)."""
+def sharpe_ratio(r: np.ndarray, periods_per_year: float = 252.0) -> float:
+    """Sharpe anualizado sobre retornos simples (tasa libre de riesgo nula).
+
+    Parameters
+    ----------
+    r : np.ndarray
+        Retornos simples de la estrategia.
+    periods_per_year : float
+        Número de periodos por año usados para anualizar (252 para datos
+        diarios; 6552 para barras de 15 minutos).
+
+    Returns
+    -------
+    float
+        Sharpe anualizado.
+    """
     r = np.asarray(r, dtype=float)
     if r.size == 0:
         return float("nan")
-    return float(np.sqrt(252.0) * np.mean(r) / (np.std(r) + 1e-10))
+    return float(
+        np.sqrt(periods_per_year) * np.mean(r) / (np.std(r) + 1e-10)
+    )
 
 
 def max_drawdown(r: np.ndarray) -> float:
@@ -166,10 +182,23 @@ def max_drawdown(r: np.ndarray) -> float:
     return float(np.min((equity - peak) / (peak + 1e-10)))
 
 
-def calmar_ratio(r: np.ndarray) -> float:
+def calmar_ratio(r: np.ndarray, periods_per_year: float = 252.0) -> float:
     """Ratio de Calmar sobre retornos simples: ``CAGR / |MDD|``.
 
-    El CAGR anualizado se calcula como ``prod(1 + r) ** (252 / n) - 1``.
+    El CAGR anualizado se calcula como ``prod(1 + r) ** (periods_per_year / n) - 1``.
+
+    Parameters
+    ----------
+    r : np.ndarray
+        Retornos simples de la estrategia.
+    periods_per_year : float
+        Número de periodos por año usados para anualizar (252 para datos
+        diarios; 6552 para barras de 15 minutos).
+
+    Returns
+    -------
+    float
+        Ratio de Calmar.
     """
     r = np.asarray(r, dtype=float)
     n = r.size
@@ -179,7 +208,7 @@ def calmar_ratio(r: np.ndarray) -> float:
     total = float(np.prod(1.0 + r))
     if total <= 0.0:
         return float("nan")
-    cagr = total ** (252.0 / n) - 1.0
+    cagr = total ** (periods_per_year / n) - 1.0
     if mdd <= 0.0:
         if cagr > 0.0:
             return float("inf")
@@ -187,13 +216,16 @@ def calmar_ratio(r: np.ndarray) -> float:
     return float(cagr / mdd)
 
 
-def summarize_returns(r: np.ndarray) -> dict[str, float]:
-    """Resumen de una serie de retornos simples diarios.
+def summarize_returns(r: np.ndarray, periods_per_year: float = 252.0) -> dict[str, float]:
+    """Resumen de una serie de retornos simples.
 
     Parameters
     ----------
     r : np.ndarray
         Retornos **simples** (no logarítmicos) de la estrategia.
+    periods_per_year : float
+        Número de periodos por año usados para anualizar (252 para datos
+        diarios; 6552 para barras de 15 minutos).
 
     Returns
     -------
@@ -205,9 +237,9 @@ def summarize_returns(r: np.ndarray) -> dict[str, float]:
     total_return = float(np.prod(1.0 + r)) - 1.0
     return {
         "total_return": total_return,
-        "sharpe": sharpe_ratio(r),
+        "sharpe": sharpe_ratio(r, periods_per_year),
         "maxdd": max_drawdown(r),
-        "calmar": calmar_ratio(r),
+        "calmar": calmar_ratio(r, periods_per_year),
     }
 
 
@@ -216,14 +248,17 @@ def run_vol_timing_backtest(
     pred_vol: np.ndarray,
     sigma_bar: float,
     cost_bps: float = 5.0,
+    periods_per_year: float = 252.0,
+    bars_per_day: int = 1,
 ) -> dict[str, Any]:
     """Estrategia de vol-timing sobre una señal de momentum.
 
-    La señal base es el signo del retorno medio de los últimos 63 días
-    (ventana adaptativa ``min(252, n // 4)``, con un mínimo de 5
-    observaciones).  El ``shift(1)`` hace que la posición de ``t`` use
-    únicamente retornos hasta ``t-1`` (sin look-ahead).  La posición se escala
-    por la volatilidad predicha inversa:
+    La señal base es el signo del retorno medio de los últimos 63 sesiones
+    (63 barras por sesión en datos intradía: ventana adaptativa
+    ``min(63 * bars_per_day, n // 4)``, con un mínimo de 5 observaciones).
+    El ``shift(1)`` hace que la posición de ``t`` use únicamente retornos
+    hasta ``t-1`` (sin look-ahead).  La posición se escala por la
+    volatilidad predicha inversa:
 
         ``pos_vol(t) = clip(signo(t) / (σ̂(t) / σ̄), -1, 1)``
 
@@ -239,6 +274,12 @@ def run_vol_timing_backtest(
         Volatilidad de referencia (mediana del train, en espacio sigma).
     cost_bps : float
         Costo de transacción unilateral en puntos base.
+    periods_per_year : float
+        Número de periodos por año para anualizar Sharpe y CAGR (252 para
+        datos diarios; 6552 para barras de 15 minutos).
+    bars_per_day : int
+        Barras por sesión.  Escala la ventana de momentum a 63 sesiones
+        equivalentes.
 
     Returns
     -------
@@ -252,7 +293,7 @@ def run_vol_timing_backtest(
     # Señal de momentum: media móvil de los retornos con desplazamiento de una
     # barra, de modo que la posición de ``t`` use sólo información de ``t-1``
     # o anterior.  Los ``NaN`` del warm-up se tratan explícitamente (flat).
-    mom_win = min(252, max(1, n // 4))
+    mom_win = min(63 * bars_per_day, max(1, n // 4))
     mom = (
         pd.Series(ret_arr).rolling(mom_win, min_periods=min(5, mom_win)).mean().shift(1)
     )
@@ -276,9 +317,9 @@ def run_vol_timing_backtest(
     ret_base = pos_base * r_simple - tc_base
     ret_bh = pos_bh * r_simple - tc_bh
 
-    vol_stats = summarize_returns(ret_vol)
-    base_stats = summarize_returns(ret_base)
-    bh_stats = summarize_returns(ret_bh)
+    vol_stats = summarize_returns(ret_vol, periods_per_year)
+    base_stats = summarize_returns(ret_base, periods_per_year)
+    bh_stats = summarize_returns(ret_bh, periods_per_year)
 
     return {
         "ret_vol": ret_vol,

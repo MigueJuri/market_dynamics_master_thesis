@@ -55,6 +55,16 @@ def test_har_rv_model_not_fitted() -> None:
         )
 
 
+def test_har_rv_model_accepts_maxlags() -> None:
+    """``maxlags`` permite ampliar los rezagos HAC (intradía: 130 barras)."""
+    X, y = _make_har_data(140)
+    model = HARRVModel()
+    model.fit(X.iloc[:120], y[:120], maxlags=130)
+    preds = model.predict(X.iloc[120:])
+    assert len(preds) == 20
+    assert np.isfinite(preds).all()
+
+
 def test_lstm_forward_shape() -> None:
     set_volatility_seed(0)
     model = VolatilityLSTM(n_features=4, hidden=8, dropout=0.2)

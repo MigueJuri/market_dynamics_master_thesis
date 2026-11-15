@@ -61,6 +61,13 @@ def test_sharpe_ratio_uses_simple_returns() -> None:
     assert sharpe_ratio(r) == pytest.approx(expected)
 
 
+def test_sharpe_ratio_periods_per_year_scales() -> None:
+    """``periods_per_year`` annualiza el Sharpe (6552 para barras de 15 min)."""
+    r = np.array([0.01, -0.005, 0.02, 0.0])
+    expected = np.sqrt(6552.0) * r.mean() / (r.std() + 1e-10)
+    assert sharpe_ratio(r, periods_per_year=6552.0) == pytest.approx(expected)
+
+
 def test_max_drawdown_constant_returns() -> None:
     r = np.ones(100) * 0.001
     assert max_drawdown(r) == pytest.approx(0.0, abs=1e-10)
@@ -87,6 +94,15 @@ def test_calmar_ratio_uses_cagr_over_mdd() -> None:
     assert calmar_ratio(r) == pytest.approx(expected)
 
 
+def test_calmar_ratio_periods_per_year() -> None:
+    """El CAGR usa ``periods_per_year`` para anualizar."""
+    r = np.array([0.10, -0.20, 0.05])
+    n = len(r)
+    cagr = float(np.prod(1.0 + r)) ** (6552.0 / n) - 1.0
+    expected = cagr / abs(max_drawdown(r))
+    assert calmar_ratio(r, periods_per_year=6552.0) == pytest.approx(expected)
+
+
 def test_summarize_returns() -> None:
     """El resumen opera sobre retornos simples."""
     r = np.ones(252) * 0.001
@@ -103,6 +119,14 @@ def test_summarize_returns_total_return_is_compound() -> None:
     r = np.array([0.10, -0.20])
     summary = summarize_returns(r)
     assert summary["total_return"] == pytest.approx(1.1 * 0.8 - 1.0)
+
+
+def test_summarize_returns_periods_per_year() -> None:
+    """El resumen propaga ``periods_per_year`` al Sharpe y al Calmar."""
+    r = np.array([0.01, -0.005, 0.02, 0.0])
+    summary = summarize_returns(r, periods_per_year=6552.0)
+    assert summary["sharpe"] == pytest.approx(sharpe_ratio(r, 6552.0))
+    assert summary["calmar"] == pytest.approx(calmar_ratio(r, 6552.0))
 
 
 def test_run_vol_timing_backtest() -> None:
@@ -187,6 +211,46 @@ def test_run_vol_timing_backtest_costs_are_subtracted_from_simple_returns() -> N
     # Sin retornos, el único efecto es el costo por cambio de posición.
     assert bt["ret_vol"].max() <= 0.0
     assert np.isfinite(bt["total_vol"])
+
+
+def test_run_vol_timing_backtest_periods_per_year_scales_sharpe() -> None:
+    """El Sharpe del backtest se anualiza con ``periods_per_year``."""
+    rng = np.random.default_rng(0)
+    ret = rng.normal(0.0005, 0.01, 500)
+    pred_vol = np.abs(rng.normal(0.2, 0.05, 500))
+
+    bt_daily = run_vol_timing_backtest(ret, pred_vol, 0.2, cost_bps=0.0)
+    bt_intra = run_vol_timing_backtest(
+        ret, pred_vol, 0.2, cost_bps=0.0, periods_per_year=6552.0
+    )
+
+    ratio = np.sqrt(6552.0 / 252.0)
+    assert bt_intra["sharpe_vol"] == pytest.approx(bt_daily["sharpe_vol"] * ratio)
+
+
+def test_run_vol_timing_backtest_momentum_window_scales_with_bars_per_day() -> None:
+    """La ventana de momentum equivale a 63 sesiones (63 * bars_per_day barras).
+
+    Se usa un impulso aislado que sólo mantiene la señal mientras está
+    dentro de la ventana: con 63 barras el impulso sale de la media en
+    ``t = 163`` y con 1638 barras (63 sesiones de 15 minutos) en ``t = 1738``.
+    """
+    n = 8000
+    ret = np.full(n, -0.001)
+    ret[100] = 10.0
+    pred_vol = np.full(n, 0.2)
+
+    bt_daily = run_vol_timing_backtest(ret, pred_vol, 0.2, cost_bps=0.0)
+    bt_intra = run_vol_timing_backtest(
+        ret, pred_vol, 0.2, cost_bps=0.0, bars_per_day=26
+    )
+
+    # Posición larga (retorno base negativo) mientras el impulso está en la
+    # ventana; corta (retorno base positivo) cuando sale.
+    assert bt_daily["ret_base"][163] < 0.0
+    assert bt_daily["ret_base"][164] > 0.0
+    assert bt_intra["ret_base"][1738] < 0.0
+    assert bt_intra["ret_base"][1739] > 0.0
 
 
 def test_calculate_adaptability_no_shocks() -> None:

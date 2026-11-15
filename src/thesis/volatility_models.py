@@ -40,11 +40,33 @@ class HARRVModel:
     def __init__(self) -> None:
         self.ols_res_: sm.regression.linear_model.RegressionResultsWrapper | None = None
 
-    def fit(self, X_train: pd.DataFrame, y_train: np.ndarray) -> HARRVModel:
-        """Ajusta el modelo HAR-RV por MCO con errores HAC (Newey-West)."""
+    def fit(
+        self,
+        X_train: pd.DataFrame,
+        y_train: np.ndarray,
+        maxlags: int = 10,
+    ) -> HARRVModel:
+        """Ajusta el modelo HAR-RV por MCO con errores HAC (Newey-West).
+
+        Parameters
+        ----------
+        X_train : pd.DataFrame
+            Features HAR-RV del conjunto de entrenamiento.
+        y_train : np.ndarray
+            Target en espacio de log-volatilidad crudo.
+        maxlags : int
+            Número de rezagos de la covarianza HAC.  Para datos intradía
+            conviene pasarlo a la longitud del horizonte de predicción
+            (p. ej. 130 barras para 5 sesiones de 15 minutos).
+
+        Returns
+        -------
+        HARRVModel
+            El propio modelo ajustado.
+        """
         X_ols = sm.add_constant(X_train[self.HAR_COLS].values)
         self.ols_res_ = sm.OLS(y_train, X_ols).fit(
-            cov_type="HAC", cov_kwds={"maxlags": 10}
+            cov_type="HAC", cov_kwds={"maxlags": maxlags}
         )
         return self
 

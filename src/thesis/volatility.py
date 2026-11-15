@@ -18,6 +18,21 @@ from thesis.timeseries import log_returns
 
 OHLCV_COLUMNS: tuple[str, ...] = ("Open", "High", "Low", "Close", "Volume")
 
+#: Características de :func:`compute_volatility_features` que se comprimen
+#: logarítmicamente por ser estrictamente positivas.  El módulo intradía
+#: (:mod:`thesis.volatility_intraday`) reutiliza la misma lista.
+LOG_COLS: tuple[str, ...] = (
+    "rv_daily",
+    "rv_weekly",
+    "rv_monthly",
+    "vol_ratio",
+    "parkinson_vol",
+    "gk_vol",
+    "rel_volume",
+    "volume_trend",
+    "intraday_range",
+)
+
 
 def validate_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     """Valida y limpia un DataFrame OHLCV descargado.
@@ -178,18 +193,7 @@ def compute_volatility_features(df: pd.DataFrame) -> pd.DataFrame:
     feat["mean_ret_5"] = log_ret.rolling(5, min_periods=5).mean()
 
     # Compresión logarítmica de variables estrictamente positivas.
-    log_cols = [
-        "rv_daily",
-        "rv_weekly",
-        "rv_monthly",
-        "vol_ratio",
-        "parkinson_vol",
-        "gk_vol",
-        "rel_volume",
-        "volume_trend",
-        "intraday_range",
-    ]
-    for col in log_cols:
+    for col in LOG_COLS:
         if col in feat.columns:
             feat[col] = np.log(feat[col].clip(lower=1e-12))
 

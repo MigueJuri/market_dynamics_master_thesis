@@ -16,10 +16,12 @@ modelo HAR-RV canónico?**
 notebooks/volatility/
 ├── README.md                       ← este archivo
 ├── Volatilidad_LSTM.py             ← cuaderno Jupytext del experimento
+├── Volatilidad_LSTM_Alpaca.py      ← variante intradía (barras de 15 min)
 └── Volatilidad_LSTM_Descripcion.py ← figuras descriptivas del problema
 
 src/thesis/
 ├── volatility.py          ← features, target, splits y secuencias
+├── volatility_intraday.py ← descarga Alpaca y features intradía (barras)
 ├── volatility_models.py   ← HAR-RV, LSTM, pérdida LINEX y entrenamiento
 └── volatility_evaluation.py ← métricas y backtest (sin figuras)
 ```
@@ -194,6 +196,62 @@ Las figuras las guarda la sección de gráficos del cuaderno:
 | ``lstm_vol_adaptability.png`` | Decaimiento del Event-MAE post-shock. |
 | ``lstm_vol_backtest.png`` | Retorno acumulado del backtest de vol-timing. |
 | ``lstm_vol_ranks.png`` | Correlación de rangos LSTM vs HAR-RV. |
+
+---
+
+## Variante intradía (Alpaca)
+
+``Volatilidad_LSTM_Alpaca.py`` replica el pipeline diario con **barras de
+15 minutos** descargadas de **Alpaca** (feed IEX) en vez de Yahoo diario.
+La LSTM se alimenta de **cada barra**: las ventanas diarias se reescalan
+×26 y el target es la volatilidad realizada forward de los próximos 130
+barras (5 sesiones).
+
+| Ajuste | Diario | Intradía |
+| ------ | ------ | -------- |
+| Fuente | Yahoo (`yfinance`), 1995-… | Alpaca (IEX), 2020-… |
+| Frecuencia | 1 sesión | 26 barras de 15 min |
+| Lookback / horizonte | 5 sesiones | 130 barras |
+| Anualización | 252 | 6552 |
+| Momentum del backtest | 63 sesiones | 1638 barras (63 × 26) |
+
+```bash
+# Requiere credenciales en el entorno (el .env está ignorado por Git)
+uv run --env-file .env python notebooks/volatility/Volatilidad_LSTM_Alpaca.py
+```
+
+Variables de entorno: ``ALPACA_API_KEY`` y ``ALPACA_SECRET_KEY``.
+El feed IEX gratuito cubre ~5-6 años de historia, así que los splits son
+2020-2023 (train), 2023-2024 (validación) y 2024-… (test).
+
+Los artefactos llevan prefijo propio para no pisar los del cuaderno diario:
+
+| Archivo | Contenido |
+| ------- | --------- |
+| ``lstm_vol_alpaca_config.json`` | Hiperparámetros del experimento. |
+| ``lstm_vol_alpaca_model.pt`` | Pesos del mejor modelo LSTM. |
+| ``lstm_vol_alpaca_scaler.pkl`` | Escalador de features. |
+| ``lstm_vol_alpaca_target_scaler.pkl`` | Escalador del target. |
+| ``lstm_vol_alpaca_inference.pkl`` | Predicciones crudas (log, sin suavizar). |
+| ``metrics_alpaca.csv`` | Métricas de LSTM y HAR-RV. |
+| ``lstm_vol_alpaca_*.png`` | Figuras (pérdida, predicho vs real, series, backtest, rangos). |
+
+Detalles de la implementación:
+
+* El timestamp de Alpaca marca el **inicio** de la barra; el índice se
+  convierte a hora local del mercado (``America/New_York``) sin zona
+  horaria, para que las fronteras de los splits se interpreten en hora de
+  mercado.
+* ``rv_daily`` es la suma de ``r²`` de las 26 barras del día y ``rv_weekly``
+  / ``rv_monthly`` son medias sobre 130 y 572 barras: el factor constante
+  respecto a la versión diaria se absorbe en el intercepto del HAR-RV y en
+  la estandarización de la LSTM.
+* El HAR-RV se ajusta con ``maxlags = 130`` (el horizonte de predicción) en
+  lugar de 10, porque a frecuencia intradía los residuos están más
+  autocorrelacionados.
+* La función ``run_vol_timing_backtest`` acepta ``periods_per_year`` y
+  ``bars_per_day``: la anualización usa 6552 y la ventana de momentum
+  equivale a 63 sesiones.
 
 ---
 
