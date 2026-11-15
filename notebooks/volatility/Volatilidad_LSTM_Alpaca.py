@@ -13,22 +13,23 @@
 # ---
 
 # %%
-# # Predicción de Volatilidad con LSTM sobre barras intradía de Alpaca
+# # Predicción de Volatilidad con LSTM (Alpaca SIP, estimadores diarios)
 #
-# Variante intradía del cuaderno `Volatilidad_LSTM.py`: descarga barras
-# intradía de **Alpaca** (feed IEX) en vez de Yahoo diario y entrena la LSTM
-# alimentándola con **cada barra**.
+# Variante del cuaderno `Volatilidad_LSTM.py` que descarga barras intradía de
+# **Alpaca** (feed SIP) y las reduce a **estimadores diarios** antes de
+# entrenar la LSTM.  La estructura final es idéntica a la versión diaria:
+# secuencias de ``lookback=5`` días, 13 features y target de volatilidad
+# realizada forward a 5 días.
 #
-# Differences clave respecto al cuaderno diario:
+# Diferencias clave respecto al cuaderno diario:
 #
-# * **Frecuencia configurable**: el ``timeframe`` (p. ej. ``'15Min'``) infiere
-#   automáticamente ``bars_per_day`` y ``bars_per_year``.  Para 15 minutos
-#   son 26 y 6552; para 5 minutos, 78 y 19656; para 1 minuto, 390 y 98280.
-# * **Features a nivel de barra**: las ventanas diarias se reescalan con
-#   ``bars_per_day`` (`src/thesis/volatility_intraday.py`).
-# * **Lookback y horizonte**: 5 sesiones expresadas en barras.
-# * **Backtest**: Sharpe y CAGR anualizados a ``bars_per_year`` y momentum de
-#   63 sesiones equivalentes (``63 * bars_per_day`` barras).
+# * **Frecuencia configurable**: ``timeframe`` (``'15Min'`` por defecto) solo
+#   cambia la agregación a diario; no hay ``bars_per_day`` en el notebook.
+# * **RV intradía**: ``rv_intraday`` suma los retornos al cuadrado de las
+#   barras de la sesión, excluyendo el salto overnight de la primera barra.
+# * **Caché**: los precios descargados, el dataset diario, los escaladores y
+#   las predicciones se persisten bajo ``data/volatility_alpaca/<fingerprint>``.
+#   Dos ejecuciones con la misma configuración no re-descargan ni re-entrenan.
 #
 # La lógica reutilizable vive en `src/thesis/volatility_intraday.py`,
 # `src/thesis/volatility.py`, `src/thesis/volatility_models.py` y
@@ -42,14 +43,16 @@
 #
 # **Credenciales**: define `ALPACA_API_KEY` y `ALPACA_SECRET_KEY` en el
 # entorno (p. ej. `uv run --env-file .env ...`); el archivo `.env` está
-# ignorado por Git.
+# ignorado por Git.  El feed SIP requiere suscripción; sin acceso la
+# descarga falla.
 #
-# Los artefactos llevan el prefijo `lstm_vol_alpaca_` (y `metrics_alpaca.csv`)
-# para no pisar los del cuaderno diario.
+# Los artefactos llevan el prefijo `lstm_vol_alpaca_` (y
+# `metrics_alpaca.csv`) para no pisar los del cuaderno diario.
 
 # %%
 from __future__ import annotations
 
+import hashlib
 import json
 import pickle
 import sys
@@ -75,24 +78,26 @@ _SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from thesis.config import SEED
+from thesis.config import DATA_DIR, SEED
 from thesis.volatility import (
     align_har_features_with_sequences,
+    count_extreme_moves,
     make_sequences,
     purge_boundary_labels,
     scale_splits,
     temporal_split,
 )
 from thesis.volatility_evaluation import (
+    calculate_adaptability,
     diebold_mariano_test,
     evaluate_forecasts,
     run_vol_timing_backtest,
     summarize_returns,
 )
 from thesis.volatility_intraday import (
-    build_volatility_dataset_intraday,
+    aggregate_intraday_to_daily,
+    build_volatility_dataset_from_intraday,
     download_ohlcv_alpaca,
-    infer_frequency_params,
 )
 from thesis.volatility_models import (
     HARRVModel,
@@ -106,21 +111,18 @@ from thesis.volatility_models import (
 CONFIG: dict[str, Any] = {
     # Datos
     "ticker": "SPY",
-    "start_date": "2020-01-01",
+    "start_date": "2015-01-01",
     "end_date": None,
-    "timeframe": "15Min",  # '1Min', '5Min', '15Min', etc.
-    "feed": "iex",
+    "timeframe": "15Min",
+    "feed": "sip",
+    "adjustment": "all",
     # Divisiones temporales
-    "train_end": "2023-01-01",
-    "val_end": "2024-07-01",
-    # Frecuencia (se infiere de ``timeframe`` en ``_merge_config``; pueden
-    # sobreescribirse explícitamente si se usa otro mercado u horario).
-    # bars_per_day: int,
-    # bars_per_year: int,
-    # Secuencias y features (se escalan automáticamente con bars_per_day).
-    # lookback: int,            # por defecto 5 sesiones
-    # forecast_horizon: int,    # por defecto 5 sesiones
-    # smoothing_window: int,    # por defecto 15 sesiones
+    "train_end": "2020-12-31",
+    "val_end": "2022-12-31",
+    # Secuencias y features
+    "lookback": 5,
+    "forecast_horizon": 5,
+    "smoothing_window": 15,
     "linex_b": 0.8,
     "features": [
         "rv_daily",
@@ -141,70 +143,133 @@ CONFIG: dict[str, Any] = {
     "hidden": 12,
     "dropout": 0.2,
     # Entrenamiento
-    "batch_size": 64,
+    "batch_size": 16,
     "lr": 5e-5,
     "weight_decay": 1e-3,
-    "min_epochs": 20,
-    "max_epochs": 200,
+    "min_epochs": 50,
+    "max_epochs": 1000,
     "patience": 15,
     "grad_clip": 1.0,
     # Backtest
     "cost_bps": 0.0,
-    # Salidas
+    # Salidas (se reubican a ``cache_dir`` salvo que se pasen rutas absolutas)
     "model_path": "lstm_vol_alpaca_model.pt",
     "scaler_path": "lstm_vol_alpaca_scaler.pkl",
     "target_scaler_path": "lstm_vol_alpaca_target_scaler.pkl",
-    "inference_path": "lstm_vol_alpaca_inference.pkl",
     "metrics_path": "metrics_alpaca.csv",
     "config_path": "lstm_vol_alpaca_config.json",
+    "seed": SEED,
 }
+
+#: Claves que definen el experimento y entran en el fingerprint del caché.
+_FINGERPRINT_KEYS: tuple[str, ...] = (
+    "ticker",
+    "start_date",
+    "end_date",
+    "timeframe",
+    "feed",
+    "adjustment",
+    "train_end",
+    "val_end",
+    "lookback",
+    "forecast_horizon",
+    "smoothing_window",
+    "linex_b",
+    "features",
+    "hidden",
+    "dropout",
+    "batch_size",
+    "lr",
+    "weight_decay",
+    "min_epochs",
+    "max_epochs",
+    "patience",
+    "grad_clip",
+    "cost_bps",
+    "seed",
+)
+
+#: Rutas de salida que se reubican al directorio de caché por defecto.
+_OUTPUT_PATH_KEYS: tuple[str, ...] = (
+    "model_path",
+    "scaler_path",
+    "target_scaler_path",
+    "metrics_path",
+    "config_path",
+)
 
 
 # %%
+def config_fingerprint(cfg: dict[str, Any]) -> str:
+    """Hash SHA-256 estable sobre las claves que definen el experimento.
+
+    Las rutas de salida quedan fuera del fingerprint para no invalidar el
+    caché cuando el usuario solo cambia dónde escribir los artefactos.
+    """
+    payload = {k: cfg.get(k) for k in _FINGERPRINT_KEYS}
+    payload["features"] = list(payload.get("features") or [])
+    text = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
 def _merge_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Combina :data:`CONFIG` con las sobreescrituras del usuario.
 
-    ``bars_per_day``, ``bars_per_year``, ``lookback``, ``forecast_horizon`` y
-    ``smoothing_window`` se infieren automáticamente de ``timeframe`` salvo
-    que el usuario los proporcione explícitamente.
+    Calcula el fingerprint de la configuración y deriva ``cache_dir``.  Las
+    rutas de salida relativas se reubican dentro de ``cache_dir``; las rutas
+    absolutas se respetan como pasos explícitos del usuario.
 
-    ``inference_path`` se deriva de ``model_path`` (mismo directorio, nombre
-    ``lstm_vol_alpaca_inference.pkl``) cuando no se indica explícitamente, de
-    modo que el artefacto de inferencia viaje siempre junto al modelo
-    entrenado.
+    ``inference_path`` se deriva de ``model_path`` cuando no se indica
+    explícitamente, de modo que el artefacto de inferencia viaje junto al
+    modelo entrenado.
     """
     cfg = {**CONFIG, **(config or {})}
+    cfg.setdefault("seed", SEED)
 
-    freq = infer_frequency_params(cfg["timeframe"])
-    cfg.setdefault("bars_per_day", freq["bars_per_day"])
-    cfg.setdefault("bars_per_year", freq["bars_per_year"])
-    cfg.setdefault("lookback", 5 * cfg["bars_per_day"])
-    cfg.setdefault("forecast_horizon", 5 * cfg["bars_per_day"])
-    cfg.setdefault("smoothing_window", 15 * cfg["bars_per_day"])
+    fingerprint = config_fingerprint(cfg)
+    cache_dir = DATA_DIR / "volatility_alpaca" / fingerprint
+    cfg["cache_dir"] = str(cache_dir)
+
+    for key in _OUTPUT_PATH_KEYS:
+        value = cfg.get(key)
+        if value is None:
+            value = f"lstm_vol_alpaca_{key.replace('_path', '')}.pkl" if key != "metrics_path" else "metrics_alpaca.csv"
+            if key == "config_path":
+                value = "lstm_vol_alpaca_config.json"
+            cfg[key] = str(cache_dir / value)
+        else:
+            p = Path(value)
+            if not p.is_absolute():
+                cfg[key] = str(cache_dir / p)
 
     if "inference_path" not in (config or {}):
         cfg["inference_path"] = str(
             Path(cfg["model_path"]).with_name("lstm_vol_alpaca_inference.pkl")
         )
+    else:
+        p = Path(cfg["inference_path"])
+        if not p.is_absolute():
+            cfg["inference_path"] = str(cache_dir / p)
+
     return cfg
 
 
 # %%
 def prepare_data(config: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Etapa 1: descarga y preparación de los datos intradía del experimento.
+    """Etapa 1: descarga y preparación de los datos del experimento.
 
-    Descarga las barras de Alpaca, construye el dataset de volatilidad a
-    nivel de barra, hace la división temporal train/val/test, purga las filas
-    de train y validación cuyos labels cruzan la frontera del split, escala
-    los splits (el escalador se ajusta **solo** con el train), arma las
-    secuencias para la LSTM y ajusta el baseline HAR-RV.  No entrena la LSTM
-    ni produce predicciones.
+    Descarga las barras de Alpaca (con caché de precios), construye el
+    dataset de volatilidad a partir de estimadores diarios, hace la división
+    temporal train/val/test, purga las filas cuyos labels cruzan la frontera
+    del split, escala los splits (el escalador se ajusta **solo** con el
+    train), arma las secuencias para la LSTM y ajusta el baseline HAR-RV.  No
+    entrena la LSTM ni produce predicciones.
 
     Unidades
     --------
     ``target_log_vol`` es el log de la volatilidad realizada *forward*
-    anualizada a ``bars_per_year``; los arrays ``X_*_s`` / ``y_*_s`` están
-    estandarizados con la media y la desviación estándar del **train**.
+    anualizada; los arrays ``X_*_s`` / ``y_*_s`` están estandarizados con la
+    media y la desviación estándar del **train**.
 
     Parameters
     ----------
@@ -215,12 +280,16 @@ def prepare_data(config: dict[str, Any] | None = None) -> dict[str, Any]:
     Returns
     -------
     dict[str, Any]
-        Datos crudos, dataset, particiones, arrays (en natural y escalados),
-        escaladores, secuencias, ``DataLoader`` de train, tensores de val/test,
-        matrices HAR alineadas y el vector de targets de train alineado con
-        las secuencias.
+        Datos crudos diarios, dataset, particiones, arrays (en natural y
+        escalados), escaladores, secuencias, ``DataLoader`` de train,
+        tensores de val/test, matrices HAR alineadas y el vector de targets
+        de train alineado con las secuencias.
     """
     cfg = _merge_config(config)
+    cache_dir = Path(cfg["cache_dir"])
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    dataset_path = cache_dir / "dataset.csv"
+    raw_daily_path = cache_dir / "raw_daily.csv"
 
     with open(cfg["config_path"], "w") as f:
         json.dump(
@@ -234,38 +303,60 @@ def prepare_data(config: dict[str, Any] | None = None) -> dict[str, Any]:
         )
     print("[CONFIG] Guardada en:", cfg["config_path"])
 
-    # --- Descarga de datos ---
-    print(
-        f"\n[DATOS] Descargando {cfg['ticker']} ({cfg['timeframe']}, "
-        f"feed={cfg['feed']}) desde {cfg['start_date']}..."
-    )
-    raw = download_ohlcv_alpaca(
-        cfg["ticker"],
-        start=cfg["start_date"],
-        end=cfg["end_date"],
-        timeframe=cfg["timeframe"],
-        feed=cfg["feed"],
-    )
-    print(f"  Forma: {raw.shape} | {raw.index[0]} → {raw.index[-1]}")
-    print("  Nota: el timestamp de Alpaca marca el inicio de la barra.")
+    # --- Descarga o caché del dataset diario ---
+    if dataset_path.exists() and raw_daily_path.exists():
+        print(f"\n[CACHE] Cargando dataset desde {cache_dir}")
+        data = pd.read_csv(dataset_path, index_col=0, parse_dates=True)
+        raw = pd.read_csv(raw_daily_path, index_col=0, parse_dates=True)
+    else:
+        print(
+            f"\n[DATOS] Descargando {cfg['ticker']} ({cfg['timeframe']}, "
+            f"feed={cfg['feed']}) desde {cfg['start_date']}..."
+        )
+        raw_intraday = download_ohlcv_alpaca(
+            cfg["ticker"],
+            start=cfg["start_date"],
+            end=cfg.get("end_date"),
+            timeframe=cfg["timeframe"],
+            feed=cfg["feed"],
+            adjustment=cfg.get("adjustment", "all"),
+            cache_dir=cache_dir,
+        )
+        n_extreme = count_extreme_moves(raw_intraday)
+        if n_extreme:
+            print(
+                f"  INFO: {n_extreme} movimientos intradía > 15% detectados (retenidos)."
+            )
+        print(
+            f"  Forma intradía: {raw_intraday.shape} | "
+            f"{raw_intraday.index[0]} → {raw_intraday.index[-1]}"
+        )
+        print("  Nota: el timestamp de Alpaca marca el inicio de la barra.")
 
-    # --- Construcción del dataset ---
-    data = build_volatility_dataset_intraday(
-        raw,
-        horizon_bars=cfg["forecast_horizon"],
-        bars_per_day=cfg["bars_per_day"],
-        bars_per_year=cfg["bars_per_year"],
-    )
-    print(f"\n[DATASET] {len(data)} observaciones limpias tras dropna.")
-    print(f"  Período: {data.index[0]} → {data.index[-1]}")
+        raw = aggregate_intraday_to_daily(raw_intraday)
+        print(
+            f"  Forma diaria: {raw.shape} | "
+            f"{raw.index[0].date()} → {raw.index[-1].date()}"
+        )
+
+        data = build_volatility_dataset_from_intraday(
+            raw_intraday, horizon=cfg["forecast_horizon"]
+        )
+        print(f"\n[DATASET] {len(data)} observaciones limpias tras dropna.")
+        print(f"  Período: {data.index[0].date()} → {data.index[-1].date()}")
+
+        raw.to_csv(raw_daily_path)
+        data.to_csv(dataset_path)
+        print(f"  Raw diario y dataset guardados en {cache_dir}")
+
+    n_extreme = count_extreme_moves(raw)
+    if n_extreme:
+        print(f"  INFO: {n_extreme} movimientos diarios > 15% detectados (retenidos).")
 
     # --- División temporal ---
     train_df, val_df, test_df = temporal_split(data, cfg["train_end"], cfg["val_end"])
 
     # --- Purga de frontera (fuga de labels) ---
-    # El target forward de las últimas ``horizon`` filas de train usa retornos
-    # de validación, y el de las últimas de validación usa retornos de test.
-    # Se eliminan esas filas antes de construir X/y y de escalar.
     train_df = purge_boundary_labels(train_df, cfg["forecast_horizon"])
     val_df = purge_boundary_labels(val_df, cfg["forecast_horizon"])
     fcols = cfg["features"]
@@ -279,9 +370,9 @@ def prepare_data(config: dict[str, Any] | None = None) -> dict[str, Any]:
     y_te = test_df["target_log_vol"].values.astype(np.float32)
 
     print(f"[DIVISIONES] Train: {len(X_tr)} | Val: {len(X_vl)} | Test: {len(X_te)}")
-    print(f"  Train: {train_df.index[0]} → {train_df.index[-1]}")
-    print(f"  Val:   {val_df.index[0]} → {val_df.index[-1]}")
-    print(f"  Test:  {test_df.index[0]} → {test_df.index[-1]}")
+    print(f"  Train: {train_df.index[0].date()} → {train_df.index[-1].date()}")
+    print(f"  Val:   {val_df.index[0].date()} → {val_df.index[-1].date()}")
+    print(f"  Test:  {test_df.index[0].date()} → {test_df.index[-1].date()}")
 
     # --- Escalado ---
     scaled = scale_splits(X_tr, X_vl, X_te, y_tr, y_vl, y_te)
@@ -310,14 +401,12 @@ def prepare_data(config: dict[str, Any] | None = None) -> dict[str, Any]:
     X_te_t = torch.from_numpy(Xte_seq)
 
     # --- Baseline HAR-RV ---
-    # Con datos intradía los rezagos HAC deben cubrir el horizonte de
-    # predicción (5 sesiones × bars_per_day barras).
     har_X_tr = align_har_features_with_sequences(train_df[fcols], ytr_seq, LB)
     har_X_te = align_har_features_with_sequences(test_df[fcols], yte_seq, LB)
     y_tr_raw_aligned = y_tr[LB : LB + len(ytr_seq)]
 
     har = HARRVModel()
-    har.fit(har_X_tr, y_tr_raw_aligned, maxlags=cfg["forecast_horizon"])
+    har.fit(har_X_tr, y_tr_raw_aligned)
     print(har.summary())
 
     return {
@@ -364,9 +453,10 @@ def train_and_infer(
 ) -> dict[str, Any]:
     """Etapa 2: entrenamiento de la LSTM e inferencia sobre el test.
 
-    Entrena la LSTM con early stopping, carga el mejor checkpoint, predice
-    sobre el test y persiste las predicciones **en espacio log y sin
-    suavizar** en ``lstm_vol_alpaca_inference.pkl``.
+    Si ya existe ``inference_path`` para el fingerprint actual, carga el
+    ``history`` y salta el entrenamiento.  En caso contrario entrena la LSTM
+    con early stopping, carga el mejor checkpoint, predice sobre el test y
+    persiste las predicciones **en espacio log y sin suavizar**.
 
     El suavizado EWMA no se aplica aquí: vive en :func:`smooth_predictions`
     para poder cambiar ``smoothing_window`` sin volver a entrenar.  La
@@ -377,8 +467,8 @@ def train_and_infer(
     --------
     ``y_*_log``: log de la volatilidad anualizada (predicciones crudas).
     ``sigma_bar``: volatilidad anualizada (sigma), mediana del **train**.
-    ``ret_te_aligned``: retornos logarítmicos por barra del test alineados
-    con el forecast operable (``dates[j+1]``), de longitud ``n_eval - 1``.
+    ``ret_te_aligned``: retornos logarítmicos diarios del test alineados con
+    el forecast operable (``dates[j+1]``), de longitud ``n_eval - 1``.
 
     Parameters
     ----------
@@ -390,11 +480,19 @@ def train_and_infer(
     Returns
     -------
     dict[str, Any]
-        ``model``, ``history`` y ``har``.
+        ``model``, ``history`` y ``har`` (``None`` si se usó caché de
+        inferencia).
     """
     cfg = _merge_config(config)
     if prepared is None:
         raise ValueError("train_and_infer requiere el diccionario 'prepared'.")
+
+    inference_path = Path(cfg["inference_path"])
+    if inference_path.exists():
+        print(f"\n[CACHE] Inferencia encontrada en {inference_path}; saltando entrenamiento.")
+        with open(inference_path, "rb") as f:
+            art = pickle.load(f)
+        return {"model": None, "history": art["history"], "har": None}
 
     set_volatility_seed(SEED)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -457,7 +555,7 @@ def train_and_infer(
         .fillna(0.0)
         .values
     )
-    # Alineación forecast ↔ retorno operable: el forecast ``j`` se origina al
+    # Alineación forecast ↔ retorno operado: el forecast ``j`` se origina al
     # cierre de ``dates[j-1]`` y predice los retornos de ``dates[j+1 ... j+H]``;
     # por tanto el retorno operable es el de ``dates[j+1]`` (el último forecast
     # no es operable porque su ventana cae fuera del test).
@@ -497,15 +595,16 @@ def train_and_infer(
 def smooth_predictions(config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Etapa 3: suavizado EWMA de las predicciones (re-ejecutable).
 
-    Lee ``lstm_vol_alpaca_inference.pkl`` (predicciones crudas en espacio log)
-    y aplica un suavizado exponencial **causal** ``ewm(span=smoothing_window,
-    adjust=False)`` sobre el período de test.  No requiere volver a
-    entrenar: cambiar ``smoothing_window`` y re-ejecutar esta celda actualiza
-    métricas y figuras sin tocar el modelo ni los datos.
+    Lee ``lstm_vol_alpaca_inference.pkl`` (predicciones crudas en espacio
+    log) y aplica un suavizado exponencial **causal**
+    ``ewm(span=smoothing_window, adjust=False)`` sobre el período de test.
+    No requiere volver a entrenar: cambiar ``smoothing_window`` y
+    re-ejecutar esta celda actualiza métricas y figuras sin tocar el modelo
+    ni los datos.
 
-    La **verdad no se suaviza**: ``y_true`` es el target crudo, de modo que la
-    evaluación mide al modelo contra el objetivo declarado.  El EWMA se aplica
-    sólo a los pronósticos (``y_lstm``/``y_har``) y sirve como vista
+    La **verdad no se suaviza**: ``y_true`` es el target crudo, de modo que
+    la evaluación mide al modelo contra el objetivo declarado.  El EWMA se
+    aplica sólo a los pronósticos (``y_lstm``/``y_har``) y sirve como vista
     secundaria para trading; las versiones sin suavizar se exponen como
     ``y_*_raw``.
 
@@ -549,16 +648,15 @@ def smooth_predictions(config: dict[str, Any] | None = None) -> dict[str, Any]:
         return pd.Series(x).ewm(span=span, adjust=False).mean().to_numpy()
 
     # La verdad se conserva cruda: el suavizado sólo afecta a los pronósticos.
-    y_true_log = _ewm(art["y_true_log"])
-    y_lstm_log = _ewm(art["y_lstm_log"])
-    y_har_log = _ewm(art["y_har_log"])
+    y_true_raw = np.exp(art["y_true_log"])
+    y_lstm = np.exp(_ewm(art["y_lstm_log"]))
+    y_har = np.exp(_ewm(art["y_har_log"]))
 
-    # Conversión a espacio sigma (volatilidad anualizada).
     return {
-        "y_true": np.exp(y_true_log),
-        "y_lstm": np.exp(y_lstm_log),
-        "y_har": np.exp(y_har_log),
-        "y_true_raw": np.exp(y_true_log),
+        "y_true": y_true_raw,
+        "y_lstm": y_lstm,
+        "y_har": y_har,
+        "y_true_raw": y_true_raw,
         "y_lstm_raw": np.exp(art["y_lstm_log"]),
         "y_har_raw": np.exp(art["y_har_log"]),
         "sigma_bar": art["sigma_bar"],
@@ -577,9 +675,9 @@ def compute_metrics(
 
     Evalúa los pronósticos **crudos** contra la verdad cruda (métricas
     primarias, las que se escriben en ``metrics_alpaca.csv``), aplica el test
-    de Diebold-Mariano con ``h = forecast_horizon`` y escribe el CSV de
-    métricas.  Es re-ejecutable sin reentrenar: basta con re-ejecutar tras
-    cambiar ``smoothing_window``.
+    de Diebold-Mariano, escribe ``metrics_alpaca.csv`` e imprime el checklist
+    de validación.  Es re-ejecutable sin reentrenar: basta con re-ejecutar
+    tras cambiar ``smoothing_window``.
 
     Las métricas calculadas sobre los pronósticos **suavizados** se imprimen
     como vista secundaria para trading; no son el estimando declarado (la
@@ -668,15 +766,12 @@ def run_backtest_and_strategies(
 
     Unidades
     --------
-    ``ret_te_aligned``: retornos logarítmicos por barra, alineados con el
+    ``ret_te_aligned``: retornos logarítmicos diarios, alineados con el
     forecast operable (``bt_dates``).  ``y_lstm``: volatilidad anualizada
     predicha.  ``sigma_bar``: volatilidad anualizada de referencia (mediana
     del train).  La señal base es de momentum (signo de la media móvil de los
     retornos) y se calcula dentro de ``run_vol_timing_backtest``, con un
     desplazamiento causal de una barra.
-
-    La anualización usa ``bars_per_year`` y la ventana de momentum equivale
-    a 63 sesiones (``63 * bars_per_day`` barras).
 
     Parameters
     ----------
@@ -706,16 +801,9 @@ def run_backtest_and_strategies(
     # descarta para que ``ret_te_aligned``, ``y_lstm[:-1]`` y ``bt_dates``
     # tengan la misma longitud.
     bt = run_vol_timing_backtest(
-        ret_te_aligned,
-        y_lstm[:-1],
-        sigma_bar,
-        cfg["cost_bps"],
-        periods_per_year=cfg["bars_per_year"],
-        bars_per_day=cfg["bars_per_day"],
+        ret_te_aligned, y_lstm[:-1], sigma_bar, cfg["cost_bps"]
     )
-    asset_stats = summarize_returns(
-        np.expm1(ret_te_aligned), periods_per_year=cfg["bars_per_year"]
-    )
+    asset_stats = summarize_returns(np.expm1(ret_te_aligned))
 
     summary = pd.DataFrame(
         [
@@ -766,7 +854,9 @@ def run_experiment(config: dict[str, Any] | None = None) -> dict[str, Any]:
 
     Equivale a ejecutar, en orden, :func:`prepare_data`,
     :func:`train_and_infer`, :func:`smooth_predictions`,
-    :func:`compute_metrics` y :func:`run_backtest_and_strategies`.
+    :func:`compute_metrics` y :func:`run_backtest_and_strategies`.  Se usa
+    desde código (tests, scripts); en el cuaderno cada etapa tiene su propia
+    celda para poder re-ejecutar el post-proceso sin reentrenar.
 
     Parameters
     ----------
@@ -817,7 +907,7 @@ def run_experiment(config: dict[str, Any] | None = None) -> dict[str, Any]:
 # %%
 # ### Etapas 1-2: datos y entrenamiento
 #
-# Descarga las barras, entrena la LSTM una sola vez y escribe
+# Descarga los datos, entrena la LSTM una sola vez y escribe
 # ``lstm_vol_alpaca_inference.pkl`` con las predicciones crudas (log, sin
 # suavizar).
 
@@ -888,8 +978,10 @@ if __name__ == "__main__":
         "loss": "lstm_vol_alpaca_loss.png",
         "predictions": "lstm_vol_alpaca_predictions.png",
         "timeseries": "lstm_vol_alpaca_timeseries.png",
+        "adaptability": "lstm_vol_alpaca_adaptability.png",
         "backtest": "lstm_vol_alpaca_backtest.png",
         "ranks": "lstm_vol_alpaca_ranks.png",
+        "april2025": "lstm_vol_alpaca_april2025.png",
     }
 
 # %%
@@ -964,7 +1056,7 @@ if __name__ == "__main__":
     ax.plot(dates, y_har, color="C1", lw=1.0, ls="--", label="HAR-RV")
     ax.set_xlabel("Fecha")
     ax.set_ylabel("Volatilidad anualizada")
-    ax.set_title(f"Volatilidad realizada forward — test ({CONFIG['timeframe']})")
+    ax.set_title("Volatilidad realizada forward — test")
     ax.legend()
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
     fig.autofmt_xdate()
@@ -973,7 +1065,49 @@ if __name__ == "__main__":
     plt.show()
 
 # %%
-# ### 4. Backtest de vol-timing
+# ### 4. Adaptabilidad post-shock
+
+if __name__ == "__main__":
+    horizon = 11
+    mae_lstm, hl_lstm = calculate_adaptability(
+        y_true, y_lstm, horizon=horizon, threshold=2.5
+    )
+    mae_har, hl_har = calculate_adaptability(
+        y_true, y_har, horizon=horizon, threshold=2.5
+    )
+    k = np.arange(1, horizon + 1)
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(
+        k,
+        mae_lstm,
+        color="C0",
+        marker="o",
+        ms=4,
+        lw=1.2,
+        label=f"LSTM (t½ = {hl_lstm:.1f} d)" if not np.isnan(hl_lstm) else "LSTM",
+    )
+    ax.plot(
+        k,
+        mae_har,
+        color="C1",
+        marker="s",
+        ms=4,
+        lw=1.2,
+        ls="--",
+        label=f"HAR-RV (t½ = {hl_har:.1f} d)" if not np.isnan(hl_har) else "HAR-RV",
+    )
+    ax.set_xlabel("Días hábiles post-shock (k)")
+    ax.set_ylabel("Error medio absoluto (MAE)")
+    ax.set_title("Adaptabilidad post-shock")
+    ax.set_xticks(k[::2])
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(PLOT_PATHS["adaptability"], dpi=150, bbox_inches="tight")
+    plt.show()
+
+# %%
+# ### 5. Backtest de vol-timing
 
 if __name__ == "__main__":
     # Se lee del resultado de la etapa 5 para que un cambio de ``cost_bps``
@@ -1013,7 +1147,7 @@ if __name__ == "__main__":
     )
     ax.set_xlabel("Fecha")
     ax.set_ylabel("Retorno acumulado")
-    ax.set_title(f"Backtest de vol-timing — test ({CONFIG['timeframe']})")
+    ax.set_title("Backtest de vol-timing — test")
     ax.legend()
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
     fig.autofmt_xdate()
@@ -1022,7 +1156,7 @@ if __name__ == "__main__":
     plt.show()
 
 # %%
-# ### 5. Correlación de rangos
+# ### 6. Correlación de rangos
 
 if __name__ == "__main__":
     rank_true = stats.rankdata(y_true)
@@ -1050,6 +1184,76 @@ if __name__ == "__main__":
     ax.legend()
     fig.tight_layout()
     fig.savefig(PLOT_PATHS["ranks"], dpi=150, bbox_inches="tight")
+    plt.show()
+
+# %%
+# ### 7. Abril 2025: tarifas
+#
+# Volatilidad realizada forward frente a la predicción de la LSTM durante
+# abril de 2025, con los anuncios de las tarifas recíprocas marcados:
+# "Liberation Day" (2 de abril) y la pausa de 90 días acordada con China
+# (9 de abril).
+#
+# El filtrado es exclusivamente temporal: no se descartan observaciones por
+# magnitud de volatilidad, porque eso introduciría un sesgo de selección.
+
+if __name__ == "__main__":
+    mask = (dates >= "2025-01-01") & (dates <= "2025-08-01")
+
+    eventos = [
+        (pd.Timestamp("2025-04-02"), "2 abr: Liberation Day", "2 abr"),
+        (pd.Timestamp("2025-04-09"), "9 abr: pausa de 90 días", "9 abr"),
+    ]
+
+    fig, ax = plt.subplots(figsize=(11, 4))
+    ax.plot(
+        dates[mask],
+        y_true[mask],
+        color="black",
+        lw=1.2,
+        label="Realizada (forward)",
+    )
+    ax.plot(
+        dates[mask],
+        y_lstm[mask],
+        color="C0",
+        lw=1.0,
+        label="Predicción LSTM",
+    )
+    ax.plot(
+        dates[mask],
+        y_har[mask],
+        color="C1",
+        lw=1.0,
+        ls="--",
+        label="HAR-RV",
+    )
+    for fecha, etiqueta, texto in eventos:
+        ax.axvline(fecha, color="C3", ls="--", lw=1.0, alpha=0.9, label=etiqueta)
+        ax.annotate(
+            texto,
+            xy=(fecha, 1.0),
+            xycoords=("data", "axes fraction"),
+            xytext=(4, -4),
+            textcoords="offset points",
+            va="top",
+            ha="left",
+            fontsize=8,
+            color="C3",
+        )
+
+    # Holgura arriba para que anotaciones y leyenda no tapen las series.
+    y_lo, y_hi = ax.get_ylim()
+    ax.set_ylim(y_lo, y_hi + 0.25 * (y_hi - y_lo))
+
+    ax.set_xlabel("Fecha")
+    ax.set_ylabel("Volatilidad anualizada")
+    ax.set_title("Volatilidad realizada vs predicción LSTM — abril de 2025")
+    ax.legend(loc="upper right", fontsize=8)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    fig.savefig(PLOT_PATHS["april2025"], dpi=150, bbox_inches="tight")
     plt.show()
 
 # %%

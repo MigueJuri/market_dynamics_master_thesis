@@ -1,33 +1,32 @@
-"""Ingeniería de características para barras intradía.
+"""Ingeniería de características para barras intradía de Alpaca.
 
-Espejo de :mod:`thesis.volatility` para datos de frecuencia intradía: las
-ventanas expresadas en sesiones se reescalan a **barras** mediante
-``bars_per_day`` y la anualización usa el número de barras por año.
-
-Las constantes de frecuencia pueden inferirse automáticamente a partir del
-``timeframe`` (p. ej. ``'15Min'``) mediante
-:func:`infer_frequency_params`, o proporcionarse explícitamente para otros
-mercados o convenciones de barras.
+Este módulo descarga barras OHLCV de Alpaca y las reduce a **estimadores
+diarios**: cada sesión se resume con OHLCV diario y una varianza realizada
+intradía que excluye el salto overnight de la primera barra.  A partir de
+ese frame diario se reutilizan las features y el target de
+:mod:`thesis.volatility`, de modo que el notebook Alpaca comparte la misma
+estructura diaria ``(lookback=5 días, n_features=13)`` que el notebook de
+Yahoo Finance.
 
 Convenciones
 ------------
 * El timestamp de Alpaca es el **inicio** de la barra.  Las barras se indexan
   por la hora local del mercado (``America/New_York``) sin zona horaria, para
-  que las fronteras temporales (``temporal_split``) se interpreten en hora
-  de mercado.
-* ``rv_daily`` es la suma de los retornos al cuadrado de las barras del día
-  (``bars_per_day`` barras); ``rv_weekly`` y ``rv_monthly`` son medias de 5 y
-  22 sesiones expresadas en barras.  En el módulo diario las mismas magnitudes
-  son la media de 5 y 22 observaciones diarias: la diferencia es un factor
-  constante (``bars_per_day``) que se absorbe en el intercepto de la
-  regresión HAR-RV y en la estandarización de la LSTM.
-* Los estimadores de rango (Parkinson, Garman-Klass) quedan en unidades por
-  barra, igual que en el módulo diario quedan en unidades por sesión.
+  que las fronteras temporales se interpreten en hora de mercado.
+* ``rv_intraday`` es la suma de los retornos al cuadrado **dentro de la
+  sesión**; el salto de la primera barra del día respecto al cierre del día
+  anterior no se incluye.
+* ``rv_daily``, ``rv_weekly`` y ``rv_monthly`` se calculan a partir de
+  ``rv_intraday`` (no de los retornos cierre-a-cierre), de modo que los
+  componentes HAR-RV miden puramente volatilidad intradía.  ``gap`` y
+  ``skew_5`` siguen usando retornos diarios cierre-a-cierre, lo que documenta
+  explícitamente la convención mixta.
 """
 
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -35,23 +34,15 @@ import pandas as pd
 
 from thesis.config import TRADING_DAYS
 from thesis.timeseries import log_returns
-from thesis.volatility import LOG_COLS, validate_ohlcv
+from thesis.volatility import (
+    LOG_COLS,
+    OHLCV_COLUMNS,
+    compute_volatility_features,
+    validate_ohlcv,
+)
 
 #: Zona horaria del mercado de acciones de EE. UU.
 MARKET_TZ: str = "America/New_York"
-
-#: Ventanas del módulo diario, expresadas en sesiones.
-DAILY_WINDOWS: dict[str, int] = {
-    "rv_daily": 1,
-    "rv_weekly": 5,
-    "rv_monthly": 22,
-    "vol_20": 20,
-    "rsi_14": 14,
-    "rel_volume": 20,
-    "volume_trend": 5,
-    "skew_5": 5,
-    "mean_ret_5": 5,
-}
 
 
 def _parse_timeframe_minutes(timeframe: str) -> int:
@@ -179,6 +170,21 @@ def _utc_timestamp(value: str) -> pd.Timestamp:
     return ts.tz_localize("UTC") if ts.tz is None else ts.tz_convert("UTC")
 
 
+def _cache_path_alpaca(
+    ticker: str,
+    start: str,
+    end: str | None,
+    timeframe: str,
+    feed: str,
+    adjustment: str,
+    cache_dir: Path,
+) -> Path:
+    """Ruta de caché CSV siguiendo el patrón de ``market_data.load_single_price``."""
+    end_tag = end if end is not None else "now"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / f"{ticker}_{timeframe}_{feed}_{adjustment}_{start}_{end_tag}.csv"
+
+
 def download_ohlcv_alpaca(
     ticker: str,
     start: str,
@@ -186,8 +192,10 @@ def download_ohlcv_alpaca(
     timeframe: str = "15Min",
     feed: str = "iex",
     adjustment: str = "all",
+    cache_dir: Path | None = None,
+    refresh: bool = False,
 ) -> pd.DataFrame:
-    """Descarga barras OHLCV de Alpaca y las valida.
+    """Descarga barras OHLCV de Alpaca y las valida, con caché CSV opcional.
 
     Las credenciales se leen de las variables de entorno ``ALPACA_API_KEY`` y
     ``ALPACA_SECRET_KEY`` (el archivo ``.env`` está ignorado por Git; con
@@ -208,10 +216,16 @@ def download_ohlcv_alpaca(
     timeframe : str
         Temporalidad de las barras (p. ej. ``'15Min'``).
     feed : str
-        Fuente de datos (``'iex'`` para el feed gratuito).
+        Fuente de datos (``'iex'`` para el feed gratuito, ``'sip'`` para el
+        feed de pago).
     adjustment : str
         Ajuste por acciones corporativas (``'raw'``, ``'split'``,
         ``'dividend'`` o ``'all'``).
+    cache_dir : Path | None
+        Directorio donde leer/escribir un CSV de caché.  Si es ``None`` no
+        hay persistencia.
+    refresh : bool
+        Si ``True`` fuerza la descarga aunque exista caché.
 
     Returns
     -------
@@ -225,6 +239,14 @@ def download_ohlcv_alpaca(
     ValueError
         Si Alpaca no devuelve barras para el periodo solicitado.
     """
+    if cache_dir is not None:
+        cache = _cache_path_alpaca(
+            ticker, start, end, timeframe, feed, adjustment, Path(cache_dir)
+        )
+        if cache.exists() and not refresh:
+            raw = pd.read_csv(cache, index_col=0, parse_dates=True)
+            return validate_ohlcv(raw)
+
     from alpaca.data.enums import Adjustment, DataFeed
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
@@ -272,120 +294,82 @@ def download_ohlcv_alpaca(
         pd.to_datetime(raw.index, utc=True).tz_convert(MARKET_TZ).tz_localize(None)
     )
 
-    return validate_ohlcv(raw)
+    raw = validate_ohlcv(raw)
+
+    if cache_dir is not None:
+        raw.to_csv(cache)
+
+    return raw
 
 
-def compute_volatility_features_intraday(
-    df: pd.DataFrame,
-    bars_per_day: int = 26,
-    bars_per_year: int | None = None,
-) -> pd.DataFrame:
-    """Construye características predictoras causales sobre barras.
+def aggregate_intraday_to_daily(df: pd.DataFrame) -> pd.DataFrame:
+    """Reduce barras intradía a un frame diario con ``rv_intraday``.
 
-    Espejo de :func:`thesis.volatility.compute_volatility_features` con las
-    ventanas diarias reescaladas a barras (``D`` = ``bars_per_day``):
-
-    ==================  =============  ======================================
-    Característica      Barras         Equivalente diario
-    ==================  =============  ======================================
-    ``rv_daily``        ``D``          suma de ``r²`` de las barras del día
-    ``rv_weekly``       ``5·D``        media de ``r²`` de 5 sesiones
-    ``rv_monthly``      ``22·D``       media de ``r²`` de 22 sesiones
-    ``vol_20``          ``20·D``       desviación de 20 sesiones (anualizada)
-    ``parkinson_vol``   ``20·D``       Parkinson de 20 sesiones
-    ``gk_vol``          ``20·D``       Garman-Klass de 20 sesiones
-    ``rsi_14``          ``14·D``       RSI de 14 sesiones
-    ``rel_volume``      ``20·D``       volumen relativo a 20 sesiones
-    ``volume_trend``    ``5·D``        tendencia de volumen de 5 sesiones
-    ``skew_5``          ``5·D``        asimetría de 5 sesiones
-    ``mean_ret_5``      ``5·D``        retorno medio de 5 sesiones
-    ==================  =============  ======================================
-
-    ``gap`` e ``intraday_range`` no tienen ventana: comparan cada barra con
-    la anterior.
+    La agregación OHLCV es la convencional: ``Open`` = primera barra,
+    ``High`` = máximo, ``Low`` = mínimo, ``Close`` = última barra y
+    ``Volume`` = suma.  ``rv_intraday`` es la suma de los retornos al
+    cuadrado **dentro de la sesión**, excluyendo el salto overnight de la
+    primera barra del día.
 
     Parameters
     ----------
     df : pd.DataFrame
-        Datos OHLCV validados.
-    bars_per_day : int
-        Número de barras por sesión (26 para barras de 15 minutos).
-    bars_per_year : int | None
-        Barras por año para anualizar.  Por defecto ``bars_per_day * 252``.
+        Datos intradía validados con columnas OHLCV.
 
     Returns
     -------
     pd.DataFrame
-        Características indexadas por fecha.  Las primeras filas contienen
-        ``NaN`` por las ventanas de warm-up.
+        Frame diario con columnas ``Open, High, Low, Close, Volume,
+        rv_intraday``.
     """
-    if bars_per_day <= 0:
-        raise ValueError("bars_per_day debe ser un entero positivo.")
-    if bars_per_year is None:
-        bars_per_year = bars_per_day * TRADING_DAYS
+    df = validate_ohlcv(df)
 
-    w = {name: days * bars_per_day for name, days in DAILY_WINDOWS.items()}
+    close = df["Close"]
+    log_ret = log_returns(close)
+    day = pd.Series(df.index.normalize(), index=df.index)
+    overnight = day != day.shift(1)
+    intraday_ret = log_ret.mask(overnight)
+    rv_intraday = (intraday_ret**2).groupby(day).sum()
 
-    feat = pd.DataFrame(index=df.index)
-
-    log_ret = log_returns(df["Close"])
-    feat["log_return"] = log_ret
-
-    # Componentes HAR-RV: la varianza realizada diaria es la suma de los
-    # retornos al cuadrado de las barras del día; las medias de 5 y 22
-    # sesiones se calculan sobre los retornos al cuadrado de las barras.
-    rv_sq = log_ret**2
-    feat["rv_daily"] = rv_sq.rolling(w["rv_daily"], min_periods=w["rv_daily"]).sum()
-    feat["rv_weekly"] = rv_sq.rolling(w["rv_weekly"], min_periods=w["rv_weekly"]).mean()
-    feat["rv_monthly"] = rv_sq.rolling(w["rv_monthly"], min_periods=w["rv_monthly"]).mean()
-
-    feat["vol_20"] = (
-        log_ret.rolling(w["vol_20"], min_periods=w["vol_20"]).std()
-        * np.sqrt(bars_per_year)
+    daily = df.groupby(pd.Grouper(freq="D")).agg(
+        Open=("Open", "first"),
+        High=("High", "max"),
+        Low=("Low", "min"),
+        Close=("Close", "last"),
+        Volume=("Volume", "sum"),
     )
-    feat["vol_ratio"] = feat["rv_daily"] / (feat["rv_weekly"] + 1e-10)
+    daily["rv_intraday"] = rv_intraday
+    return daily.dropna()
 
-    # Estimador Parkinson con corrección C2.
-    hl_log_sq = np.log(df["High"] / df["Low"]) ** 2
-    feat["parkinson_vol"] = np.sqrt(
-        hl_log_sq.rolling(w["vol_20"], min_periods=w["vol_20"]).mean()
-        / (4.0 * np.log(2))
-    )
 
-    # Estimador Garman-Klass.
-    hl2 = 0.5 * np.log(df["High"] / df["Low"]) ** 2
-    co2 = (2.0 * np.log(2) - 1.0) * np.log(df["Close"] / df["Open"]) ** 2
-    feat["gk_vol"] = np.sqrt(
-        (hl2 - co2).clip(lower=0).rolling(w["vol_20"], min_periods=w["vol_20"]).mean()
-    )
+def compute_volatility_features_from_intraday_daily(daily: pd.DataFrame) -> pd.DataFrame:
+    """Features de volatilidad diaria usando la RV intradía.
 
-    # RSI de 14 sesiones normalizado a [0, 1].
-    delta = df["Close"].diff()
-    gain = delta.clip(lower=0).rolling(w["rsi_14"], min_periods=w["rsi_14"]).mean()
-    loss = (-delta.clip(upper=0)).rolling(w["rsi_14"], min_periods=w["rsi_14"]).mean()
-    rs = gain / (loss + 1e-10)
-    feat["rsi_14"] = (100.0 - 100.0 / (1.0 + rs)) / 100.0
+    Reutiliza :func:`thesis.volatility.compute_volatility_features` sobre el
+    OHLCV diario y sobrescribe ``rv_daily``, ``rv_weekly``, ``rv_monthly`` y
+    ``vol_ratio`` con estimadores construidos a partir de ``rv_intraday``.
+    La compresión logarítmica es la misma que en el módulo diario.
 
-    # Volumen relativo y tendencia.
-    vol_ma = df["Volume"].rolling(w["rel_volume"], min_periods=w["rel_volume"]).mean()
-    feat["rel_volume"] = df["Volume"] / (vol_ma + 1e-10)
-    feat["volume_trend"] = (
-        df["Volume"].rolling(w["volume_trend"], min_periods=w["volume_trend"]).mean()
-        / (vol_ma + 1e-10)
-    )
+    Parameters
+    ----------
+    daily : pd.DataFrame
+        Frame diario producido por :func:`aggregate_intraday_to_daily`.
 
-    # Rango de la barra normalizado por el cierre previo (causal).
-    feat["intraday_range"] = (df["High"] - df["Low"]) / df["Close"].shift(1)
+    Returns
+    -------
+    pd.DataFrame
+        Características causales con las mismas columnas que el módulo
+        diario.
+    """
+    ohlcv = daily[list(OHLCV_COLUMNS)]
+    feat = compute_volatility_features(ohlcv)
 
-    # Gap respecto a la barra anterior.
-    feat["gap"] = (df["Open"] - df["Close"].shift(1)) / df["Close"].shift(1)
+    rv = daily["rv_intraday"]
+    feat["rv_daily"] = rv
+    feat["rv_weekly"] = rv.rolling(5, min_periods=5).mean()
+    feat["rv_monthly"] = rv.rolling(22, min_periods=22).mean()
+    feat["vol_ratio"] = rv / (feat["rv_weekly"] + 1e-10)
 
-    # Estadísticos de retornos recientes.
-    feat["skew_5"] = log_ret.rolling(w["skew_5"], min_periods=w["skew_5"]).skew()
-    feat["mean_ret_5"] = log_ret.rolling(w["mean_ret_5"], min_periods=w["mean_ret_5"]).mean()
-
-    # Compresión logarítmica de variables estrictamente positivas (las mismas
-    # columnas que en el módulo diario).
     for col in LOG_COLS:
         if col in feat.columns:
             feat[col] = np.log(feat[col].clip(lower=1e-12))
@@ -393,85 +377,59 @@ def compute_volatility_features_intraday(
     return feat
 
 
-def compute_log_vol_target_intraday(
-    df: pd.DataFrame,
-    horizon_bars: int = 130,
-    annualize: int | None = None,
-    bars_per_year: int | None = None,
+def compute_log_vol_target_from_intraday_daily(
+    daily: pd.DataFrame,
+    horizon: int,
+    annualize: int = TRADING_DAYS,
 ) -> pd.Series:
-    """Log-volatilidad realizada anualizada a ``horizon_bars`` barras.
+    """Log-volatilidad realizada anualizada a ``horizon`` días hacia adelante.
 
-    Para cada barra ``t``:
+    Usa ``rv_intraday`` como medida de varianza realizada diaria, sin
+    incluir el salto overnight:
 
     .. math::
-        y_t = \\log\\!\\left(\\sqrt{\\frac{A}{H}\\sum_{i=1}^{H} r_{t+i}^2}\\right)
-
-    donde ``A`` es el factor de anualización y ``H`` el horizonte en barras.
+        y_t = \\log\\!\\left(\\sqrt{\\frac{A}{H}\\sum_{i=1}^{H} RV_{t+i}^{intradía}}\\right)
 
     Parameters
     ----------
-    df : pd.DataFrame
-        Datos OHLCV con columna ``Close``.
-    horizon_bars : int
-        Horizonte de predicción en barras.
-    annualize : int | None
-        Factor de anualización explícito.  Si es ``None`` se usa
-        ``bars_per_year``.
-    bars_per_year : int | None
-        Barras por año.  Se usa cuando ``annualize`` es ``None``; si ambos
-        son ``None`` se asume el factor de 15 minutos (``252 * 26``) para
-        compatibilidad con llamadas directas.
+    daily : pd.DataFrame
+        Frame diario con columna ``rv_intraday``.
+    horizon : int
+        Horizonte de predicción en sesiones.
+    annualize : int
+        Factor de anualización (por defecto 252).
 
     Returns
     -------
     pd.Series
-        Target indexado por fecha.  Las últimas ``horizon_bars``
-        observaciones son ``NaN`` porque requieren datos futuros.
+        Target indexado por fecha.  Las últimas ``horizon`` observaciones
+        son ``NaN`` porque requieren datos futuros.
     """
-    if annualize is None:
-        annualize = bars_per_year if bars_per_year is not None else (TRADING_DAYS * 26)
-    log_ret = log_returns(df["Close"])
-    rv_sq = log_ret**2
-    fwd_rv = rv_sq.rolling(horizon_bars, min_periods=horizon_bars).sum().shift(
-        -horizon_bars
-    )
-    target = np.sqrt((annualize / horizon_bars) * fwd_rv)
+    rv = daily["rv_intraday"]
+    fwd_rv = rv.rolling(horizon, min_periods=horizon).sum().shift(-horizon)
+    target = np.sqrt((annualize / horizon) * fwd_rv)
     return np.log(target.clip(lower=1e-12)).rename("target_log_vol")
 
 
-def build_volatility_dataset_intraday(
+def build_volatility_dataset_from_intraday(
     df: pd.DataFrame,
-    horizon_bars: int,
-    bars_per_day: int = 26,
-    bars_per_year: int | None = None,
+    horizon: int,
 ) -> pd.DataFrame:
-    """Combina features y target intradía en un único DataFrame limpio.
+    """Combina features y target diarios en un único DataFrame limpio.
 
     Parameters
     ----------
     df : pd.DataFrame
-        Datos OHLCV validados.
-    horizon_bars : int
-        Horizonte del target en barras.
-    bars_per_day : int
-        Número de barras por sesión.
-    bars_per_year : int | None
-        Barras por año para anualizar.  Por defecto ``bars_per_day * 252``.
+        Datos intradía validados.
+    horizon : int
+        Horizonte del target en sesiones.
 
     Returns
     -------
     pd.DataFrame
         Dataset completo sin ``NaN``.
     """
-    if bars_per_year is None:
-        bars_per_year = bars_per_day * TRADING_DAYS
-    features = compute_volatility_features_intraday(
-        df, bars_per_day=bars_per_day, bars_per_year=bars_per_year
-    )
-    target = compute_log_vol_target_intraday(
-        df,
-        horizon_bars=horizon_bars,
-        annualize=None,
-        bars_per_year=bars_per_year,
-    )
+    daily = aggregate_intraday_to_daily(df)
+    features = compute_volatility_features_from_intraday_daily(daily)
+    target = compute_log_vol_target_from_intraday_daily(daily, horizon)
     return pd.concat([features, target], axis=1).dropna()
