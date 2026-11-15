@@ -152,6 +152,70 @@ datos).  Reglas:
   una por celda, para poder personalizarlas sin tocar `src/` ni reiniciar el
   kernel.  Sólo la lógica reutilizable va a `src/<paquete>/<dominio>.py`.
 
+### Personalización sin reiniciar el kernel
+
+**Regla de oro:** cambiar el aspecto de una figura (título, etiquetas,
+colores, tamaño, ejes, anotaciones) o un parámetro del experimento **nunca**
+debe obligar a reiniciar el kernel, re-entrenar el modelo ni volver a leer los
+datos.  Todo lo que se personaliza con frecuencia debe ser un **argumento**,
+no una constante escrita dentro del cuerpo de la función.
+
+Reglas:
+
+1. **Cada figura es una función parametrizada.** En `src/<paquete>/<plots>.py`
+   (o en el módulo de su dominio), una función por figura, con argumentos
+   explícitos para todo lo que se toquen a menudo:
+
+   ```python
+   def plot_equity_curve(equity, *, title="Equity curve", ylabel="PnL",
+                         colors=None, figsize=(10, 5), ax=None, **kwargs):
+       ...
+       return fig, ax
+   ```
+
+   Reglas de firma: argumentos de estilo con valor por defecto `None` (y
+   resueltos dentro con un valor por defecto *documentado*), `ax=None` para
+   poder componer en subplots, y `**kwargs` para extender sin romper la API.
+   Devuelve siempre `(fig, ax)`; no llames a `plt.show()` dentro de `src/`.
+2. **Los parámetros de estilo viven en el cuaderno, no en `src/`.** La celda de
+   figura declara sus propios ajustes (p. ej. `STYLE = {...}`,
+   `COLOR_UP = "..."`, `figsize=(10, 5)`) y los pasa a la función.  Así el
+   usuario ajusta el aspecto editando *una celda* y re-ejecutando *esa celda*.
+3. **Estilo global de matplotlib en una celda de estilo**, al principio del
+   cuaderno: `plt.style.use("seaborn-v0_8-whitegrid")` y/o
+   `plt.rcParams.update({...})`.  Nunca fijes `rcParams` a nivel de módulo en
+   `src/` (afecta a todo el proceso y no se puede deshacer).
+4. **La celda de figura sólo dibuja.** No lee disco, no entrena, no
+   recalcula series: consume variables ya presentes en el espacio de nombres
+   (`df`, `equity`, `fit`, `btc_df`, ...).  Si una figura necesita un cálculo
+   nuevo, ese cálculo va en una etapa previa y su resultado se cachea en una
+   variable; así se reusa al cambiar el estilo.
+5. **Una figura por celda.** Cada figura en su propia celda, para poder
+   re-ejecutar sólo esa.  Si una figura se guarda en disco
+   (`fig.savefig("outputs/...", dpi=200, bbox_inches="tight")`), el `savefig`
+   va al final de la misma celda, con nombre estable
+   `<estrategia>_<dataset>_<metrica>.pdf`, y termina con `plt.close(fig)`
+   para no acumular figuras.
+6. **Recargar `src/` sin reiniciar el kernel.** Si el usuario cambia una
+   función de `src/`, se recarga el *módulo* (no la función importada) y se
+   re-ejecutan sólo las celdas dependientes:
+
+   ```python
+   import importlib
+   import thesis.plots as plots
+   importlib.reload(plots)
+   ```
+
+   Por eso el cuaderno debe **importar módulos** (`import thesis.plots as
+   plots`) y llamar a `plots.plot_equity_curve(...)`, no usar
+   `from thesis.plots import plot_equity_curve`; una función importada con
+   `from` sigue apuntando al objeto viejo tras el `reload`.  Pon el `import` +
+   `reload` en una celda propia, para que el usuario pueda re-ejecutarla.
+7. **El cuaderno debe ser re-ejecutable por partes.** Comprueba que cambiar
+   el estilo de la última figura y re-ejecutar sólo su celda no dispara
+   entrenamiento ni descarga de datos; y que tras un `reload` de un módulo,
+   sólo hay que re-ejecutar las celdas que lo usan.
+
 ## Fase 4 — Documentación
 
 Si el experimento es autocontenido, crea `notebooks/<dominio>/README.md`
@@ -219,6 +283,15 @@ como el resto del historial del repo.
   elimina la posibilidad de iterar celda a celda.
 - Un módulo gigante con todo mezclado.
 - Fragmentar en archivos de una sola función.
+- Figuras con estilo hardcodeado en el cuerpo (título, colores, `figsize`)
+  en lugar de argumentos: obliga a editar `src/` y recargar el módulo para
+  cambiar el aspecto.
+- Cambiar una figura re-ejecutando el pipeline completo (reentrenar o
+  releer datos) en vez de re-ejecutar sólo la celda de la figura.
+- `plt.show()`, `plt.rcParams.update(...)` o `plt.style.use(...)` a nivel de
+  módulo en `src/`.
+- Importar funciones con `from <paquete>.<módulo> import <función>` en el
+  cuaderno: impide que `importlib.reload` surta efecto.
 - Declarar dependencias que el código no usa.
 - Tests que dependen de red en la suite por defecto.
 - Commitear cambios preexistentes del usuario junto a los tuyos.
