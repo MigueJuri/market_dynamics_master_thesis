@@ -847,6 +847,59 @@ if __name__ == "__main__":
     else:
         plt.close("all")
 
+    # Media EWMA causal: en la fecha t se usa únicamente x_(t-1).
+    ewma_mean = (
+        log_ret.shift(1)
+        .ewm(alpha=1.0 - CONFIG["lambda_ewma"], adjust=False)
+        .mean()
+        * CONFIG["trading_days"]
+    )
+
+    fig_mu_vol, (ax_mean, ax_vol) = plt.subplots(
+        2,
+        1,
+        figsize=CONFIG["figsize_vol"],
+        sharex=True,
+    )
+
+    ax_mean.plot(
+        ewma_mean.index,
+        ewma_mean.values,
+        linewidth=0.8,
+        color=CONFIG["color_mu"],
+    )
+    ax_mean.axhline(0.0, color="black", linewidth=0.8, alpha=0.5)
+    ax_mean.set_ylabel(r"$\bar{x}$ EWMA anualizada")
+    ax_mean.set_title(
+        rf"{CONFIG['ticker']}: media y volatilidad EWMA "
+        rf"($\lambda$={CONFIG['lambda_ewma']})"
+    )
+
+    ax_vol.plot(
+        volatility.index,
+        volatility.values,
+        linewidth=0.8,
+        color=CONFIG["color_vol"],
+    )
+    ax_vol.set_ylabel(r"$\sigma$ anualizada")
+    ax_vol.set_xlabel("Fecha")
+    ax_vol.xaxis.set_major_locator(mdates.YearLocator(base=2))
+    ax_vol.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+
+    fig_mu_vol.tight_layout()
+
+    if CONFIG["save_figures"]:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig_mu_vol.savefig(
+            OUTPUT_DIR / "spy_ewma_mean_volatility.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+    if CONFIG["show_figure"] and _INTERACTIVE:
+        plt.show()
+    else:
+        plt.close(fig_mu_vol)
+
 # %% [markdown]
 # ## Celda 9 — bandas incondicionales: por qué $\sigma$ constante no alcanza
 #
