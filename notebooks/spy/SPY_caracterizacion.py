@@ -122,6 +122,7 @@ from thesis.characterization import (
     describe_returns,
     excess_kurtosis,
     fit_return_distribution,
+    fit_squared_return_distributions,
     freedman_diaconis_bins,
     high_volatility_mask,
     unconditional_band_excursions,
@@ -576,7 +577,7 @@ if __name__ == "__main__":
         alpha=0.7,
         label=f"IC {1 - alpha:.0%} (bootstrap i.i.d.)",
     )
-    ax_r.set_title(r"Retornos $x_t$")
+    # ax_r.set_title(r"Retornos $x_t$")
     ax_r.set_xlabel("Lag $k$ (días)")
     ax_r.set_ylabel(r"$\rho_k$")
     ax_r.legend(loc="upper right")
@@ -605,7 +606,7 @@ if __name__ == "__main__":
         alpha=0.7,
         label=f"IC {1 - alpha:.0%} (bootstrap i.i.d.)",
     )
-    ax_r2.set_title(r"Retornos al cuadrado $x_t^2$")
+    # ax_r2.set_title(r"Retornos al cuadrado $x_t^2$")
     ax_r2.set_xlabel("Lag $k$ (días)")
     ax_r2.legend(loc="upper right")
     ax_r2.set_ylabel(r"$\rho_k$")
@@ -634,10 +635,11 @@ if __name__ == "__main__":
 # %% [markdown]
 # ## Celda 7 — histograma de los retornos al cuadrado
 #
-# El histograma de $x_t^2$ muestra la asimetría de la distribución de la
-# magnitud del retorno (panel superior) y, en escala logarítmica, una cola
-# izquierda mucho más larga que la derecha (panel inferior): los retornos
-# grandes son sistemáticamente **negativos**.
+# El histograma de $x_t^2$ muestra la asimetría positiva de la distribución de
+# la magnitud del retorno (panel superior). En el panel inferior se observa
+# cómo el logaritmo de los retornos al cuadrado tiene una forma más próxima a
+# una normal. Se superponen los ajustes log-normal para $x_t^2$ y normal para
+# $\log(x_t^2)$; los retornos exactamente nulos se excluyen del segundo ajuste.
 #
 # El número de bines de cada panel es el que sugiere la **regla de
 # Freedman–Diaconis** (robusta frente a los outliers que el propio panel está
@@ -647,6 +649,9 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     r_2 = log_ret.values**2
     r_2_log = np.log(r_2[r_2 > 0])
+    squared_params = fit_squared_return_distributions(log_ret.values)
+    r_2_grid = np.linspace(0.0, np.percentile(r_2, 99.5), 500)
+    r_2_log_grid = np.linspace(r_2_log.min(), r_2_log.max(), 500)
 
     fig, (ax_lin, ax_log) = plt.subplots(2, 1, figsize=CONFIG["figsize_hist_sq"])
 
@@ -656,6 +661,18 @@ if __name__ == "__main__":
         density=True,
         color=CONFIG["color_hist"],
         label="Histograma",
+    )
+    ax_lin.plot(
+        r_2_grid,
+        stats.lognorm.pdf(
+            r_2_grid,
+            squared_params["lognorm_shape"],
+            loc=squared_params["lognorm_loc"],
+            scale=squared_params["lognorm_scale"],
+        ),
+        color=CONFIG["color_normal"],
+        linewidth=1.8,
+        label="Log-normal",
     )
     ax_lin.set_xlabel(r"$x_t^2$")
     ax_lin.set_ylabel("Densidad")
@@ -679,6 +696,17 @@ if __name__ == "__main__":
         color=CONFIG["color_hist"],
         label="Histograma",
     )
+    ax_log.plot(
+        r_2_log_grid,
+        stats.norm.pdf(
+            r_2_log_grid,
+            squared_params["log_mu"],
+            squared_params["log_sigma"],
+        ),
+        color=CONFIG["color_normal"],
+        linewidth=1.8,
+        label="Normal",
+    )
     ax_log.set_xlabel(r"$\log(x_t^2)$")
     ax_log.set_ylabel("Densidad")
     ax_log.set_title("Logaritmo de retornos al cuadrado (escala lineal)")
@@ -692,6 +720,8 @@ if __name__ == "__main__":
         fontsize=12,
         fontweight="bold",
     )
+    ax_lin.legend(loc="best")
+    ax_log.legend(loc="best")
 
     fig.tight_layout()
 
@@ -704,6 +734,15 @@ if __name__ == "__main__":
         plt.show()
     else:
         plt.close("all")
+
+    print(
+        f"Log-normal r²: shape={squared_params['lognorm_shape']:.5f}, "
+        f"scale={squared_params['lognorm_scale']:.5f}"
+    )
+    print(
+        f"Normal log(r²): mu={squared_params['log_mu']:.5f}, "
+        f"sigma={squared_params['log_sigma']:.5f}"
+    )
 
 # %% [markdown]
 # ## Celda 8 — clustering de volatilidad y regímenes
@@ -824,20 +863,20 @@ if __name__ == "__main__":
     mu = float(log_ret.mean())
     sigma = float(log_ret.std())
 
-    fig, ax = plt.subplots(figsize=CONFIG["figsize_bands"])
+    fig, ax = plt.subplots(figsize=(8,3.5))
     ax.plot(
         log_ret.index,
         log_ret.values,
         color="black",
-        lw=0.5,
+        lw=0.15,
         alpha=0.9,
-        label="Retorno logarítmico",
+        label=r"$x_t$",
     )
     ax.fill_between(
         log_ret.index,
         mu - sigma,
         mu + sigma,
-        color=CONFIG["color_sigma1"],
+        # color=CONFIG["color_sigma1"],
         alpha=0.35,
         label=r"$\pm 1\sigma$",
     )
@@ -845,18 +884,20 @@ if __name__ == "__main__":
         log_ret.index,
         mu - 2 * sigma,
         mu + 2 * sigma,
-        color=CONFIG["color_sigma2"],
+        # color=CONFIG["color_sigma2"],
         alpha=0.18,
         label=r"$\pm 2\sigma$",
     )
     ax.axhline(
-        mu, color=CONFIG["color_mu"], ls="--", lw=1.0, label=rf"$\mu$ = {mu:.5f}"
+        mu, 
+        # color=CONFIG["color_mu"], 
+        ls="--", lw=1.0, label=rf"$\mu$ = {mu:.5f}"
     )
     ax.set_xlabel("Fecha")
-    ax.set_ylabel("Retorno logarítmico")
-    ax.set_title(
-        f"{CONFIG['ticker']}: retornos diarios y bandas de volatilidad incondicional"
-    )
+    ax.set_ylabel(r"$x_t$")
+    # ax.set_title(
+    #     f"{CONFIG['ticker']}: retornos diarios y bandas de volatilidad incondicional"
+    # )
     ax.legend(loc="lower right", ncol=4)
     fig.tight_layout()
 

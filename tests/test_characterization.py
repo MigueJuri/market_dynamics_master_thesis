@@ -33,6 +33,7 @@ from thesis.characterization import (
     describe_returns,
     excess_kurtosis,
     fit_return_distribution,
+    fit_squared_return_distributions,
     freedman_diaconis_bins,
     heteroskedastic_robust_acf,
     high_volatility_mask,
@@ -138,6 +139,28 @@ def test_fit_return_distribution_recovers_gaussian_parameters() -> None:
     assert params["sigma"] == pytest.approx(x.std(ddof=1), rel=1e-3)
     # La t de Student ajustada a una gaussiana tiene muchos grados de libertad.
     assert params["df"] > 20.0
+
+
+def test_fit_squared_return_distributions_recovers_parameters() -> None:
+    """Los ajustes recuperan una log-normal y una normal en escala log."""
+    rng = np.random.default_rng(10)
+    log_squared = 0.25 + 0.7 * rng.standard_normal(20_000)
+    returns = np.exp(log_squared / 2.0)
+    params = fit_squared_return_distributions(returns)
+
+    assert params["lognorm_shape"] == pytest.approx(0.7, abs=0.02)
+    assert params["lognorm_loc"] == 0.0
+    assert params["lognorm_scale"] == pytest.approx(np.exp(0.25), rel=0.02)
+    assert params["log_mu"] == pytest.approx(0.25, abs=0.02)
+    assert params["log_sigma"] == pytest.approx(0.7, abs=0.02)
+    assert params["n_positive"] == 20_000
+
+
+def test_fit_squared_return_distributions_ignores_zero_returns() -> None:
+    """Los retornos cero se excluyen porque ``log(0)`` no está definido."""
+    params = fit_squared_return_distributions(np.array([0.0, 1.0, -2.0]))
+
+    assert params["n_positive"] == 2
 
 
 # ---------------------------------------------------------------------------

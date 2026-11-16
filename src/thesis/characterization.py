@@ -76,6 +76,34 @@ def fit_return_distribution(x: Any) -> dict[str, float]:
     }
 
 
+def fit_squared_return_distributions(x: Any) -> dict[str, float]:
+    """Ajusta una log-normal a ``x²`` y una normal a ``log(x²)``.
+
+    Los retornos nulos no tienen logaritmo y se excluyen de ambos ajustes.
+    La log-normal se parametriza con ``loc=0`` para que su soporte sea
+    estrictamente positivo.
+    """
+    values = _finite_values(x, "returns")
+    squared = values**2
+    positive_squared = squared[squared > 0.0]
+    if positive_squared.size == 0:
+        raise ValueError("debe haber al menos un retorno no nulo")
+
+    log_squared = np.log(positive_squared)
+    lognorm_shape, lognorm_loc, lognorm_scale = stats.lognorm.fit(
+        positive_squared, floc=0.0
+    )
+    normal_mu, normal_sigma = stats.norm.fit(log_squared)
+    return {
+        "lognorm_shape": float(lognorm_shape),
+        "lognorm_loc": float(lognorm_loc),
+        "lognorm_scale": float(lognorm_scale),
+        "log_mu": float(normal_mu),
+        "log_sigma": float(normal_sigma),
+        "n_positive": float(positive_squared.size),
+    }
+
+
 def excess_kurtosis(x: Any) -> np.ndarray:
     """Exceso de curtosis de Fisher (cero para una gaussiana)."""
     values = _finite_values(x, "returns")
