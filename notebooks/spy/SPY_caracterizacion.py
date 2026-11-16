@@ -577,7 +577,7 @@ if __name__ == "__main__":
         alpha=0.7,
         label=f"IC {1 - alpha:.0%} (bootstrap i.i.d.)",
     )
-    # ax_r.set_title(r"Retornos $x_t$")
+    ax_r.set_title(r"Retornos $x_t$")
     ax_r.set_xlabel("Lag $k$ (días)")
     ax_r.set_ylabel(r"$\rho_k$")
     ax_r.legend(loc="upper right")
@@ -606,7 +606,7 @@ if __name__ == "__main__":
         alpha=0.7,
         label=f"IC {1 - alpha:.0%} (bootstrap i.i.d.)",
     )
-    # ax_r2.set_title(r"Retornos al cuadrado $x_t^2$")
+    ax_r2.set_title(r"Retornos al cuadrado $x_t^2$")
     ax_r2.set_xlabel("Lag $k$ (días)")
     ax_r2.legend(loc="upper right")
     ax_r2.set_ylabel(r"$\rho_k$")
@@ -863,20 +863,20 @@ if __name__ == "__main__":
     mu = float(log_ret.mean())
     sigma = float(log_ret.std())
 
-    fig, ax = plt.subplots(figsize=(8,3.5))
+    fig, ax = plt.subplots(figsize=CONFIG["figsize_bands"])
     ax.plot(
         log_ret.index,
         log_ret.values,
         color="black",
-        lw=0.15,
+        lw=0.5,
         alpha=0.9,
-        label=r"$x_t$",
+        label="Retorno logarítmico",
     )
     ax.fill_between(
         log_ret.index,
         mu - sigma,
         mu + sigma,
-        # color=CONFIG["color_sigma1"],
+        color=CONFIG["color_sigma1"],
         alpha=0.35,
         label=r"$\pm 1\sigma$",
     )
@@ -884,20 +884,18 @@ if __name__ == "__main__":
         log_ret.index,
         mu - 2 * sigma,
         mu + 2 * sigma,
-        # color=CONFIG["color_sigma2"],
+        color=CONFIG["color_sigma2"],
         alpha=0.18,
         label=r"$\pm 2\sigma$",
     )
     ax.axhline(
-        mu, 
-        # color=CONFIG["color_mu"], 
-        ls="--", lw=1.0, label=rf"$\mu$ = {mu:.5f}"
+        mu, color=CONFIG["color_mu"], ls="--", lw=1.0, label=rf"$\mu$ = {mu:.5f}"
     )
     ax.set_xlabel("Fecha")
-    ax.set_ylabel(r"$x_t$")
-    # ax.set_title(
-    #     f"{CONFIG['ticker']}: retornos diarios y bandas de volatilidad incondicional"
-    # )
+    ax.set_ylabel("Retorno logarítmico")
+    ax.set_title(
+        f"{CONFIG['ticker']}: retornos diarios y bandas de volatilidad incondicional"
+    )
     ax.legend(loc="lower right", ncol=4)
     fig.tight_layout()
 
