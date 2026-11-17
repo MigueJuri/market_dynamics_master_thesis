@@ -42,7 +42,7 @@
 # - **celda 2**: datos (`load_single_price` + retornos);
 # - **celdas 3-10**: una celda por figura, con el **código de dibujo escrito
 #   aquí mismo**;
-# - **celda 10**: tabla resumen.
+# - **celda 11**: tabla resumen.
 #
 # El **cómputo** vive en `src/thesis/characterization.py` (importable,
 # sin `matplotlib`); el **dibujo** vive aquí, para poder retocar colores,
@@ -970,15 +970,18 @@ if __name__ == "__main__":
 # ## Celda 10 — promedio móvil de retornos
 #
 # El promedio móvil de cinco años suaviza las fluctuaciones diarias de los
-# retornos logarítmicos y permite observar la evolución de su media local. La
-# línea horizontal muestra la media histórica de toda la muestra como
-# referencia descriptiva.
+# retornos logarítmicos y permite observar la evolución de su media local. Tanto
+# la media móvil como la línea horizontal se expresan como retornos
+# logarítmicos anualizados, usando el número de ruedas configurado.
 
 # %%
 if __name__ == "__main__":
     return_ma_window = CONFIG["return_ma_years"] * CONFIG["trading_days"]
-    log_ret_ma = log_ret.rolling(return_ma_window).mean()
-    historical_mean = float(log_ret.mean())
+    annualization_factor = CONFIG["trading_days"]
+    log_ret_ma = (
+        log_ret.rolling(return_ma_window).mean() * annualization_factor
+    )
+    historical_mean = float(log_ret.mean() * annualization_factor)
 
     fig, ax = plt.subplots(figsize=CONFIG["figsize_bands"])
     ax.plot(
@@ -988,7 +991,7 @@ if __name__ == "__main__":
         linewidth=1.2,
         label=(
             f"Media móvil de {CONFIG['return_ma_years']} años "
-            "de retornos logarítmicos"
+            "de retornos logarítmicos anualizados"
         ),
     )
     ax.axhline(
@@ -996,13 +999,13 @@ if __name__ == "__main__":
         color=CONFIG["color_mu"],
         linestyle="--",
         linewidth=1.0,
-        label=f"Promedio histórico = {historical_mean:.5f}",
+        label=f"Promedio histórico = {historical_mean:.2%}",
     )
     ax.set_xlabel("Fecha")
-    ax.set_ylabel("Retorno logarítmico")
+    ax.set_ylabel("Retorno logarítmico anualizado")
     ax.set_title(
         f"{CONFIG['ticker']}: promedio móvil de "
-        f"{CONFIG['return_ma_years']} años de retornos logarítmicos"
+        f"{CONFIG['return_ma_years']} años de retornos logarítmicos anualizados"
     )
     ax.legend(loc="best")
     fig.tight_layout()
@@ -1010,7 +1013,7 @@ if __name__ == "__main__":
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig.savefig(
-            OUTPUT_DIR / "spy_log_return_5y_moving_average.png",
+            OUTPUT_DIR / "spy_log_return_5y_annualized_moving_average.png",
             dpi=300,
             bbox_inches="tight",
         )
