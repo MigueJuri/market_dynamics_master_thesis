@@ -40,7 +40,7 @@
 # - **celda 0**: magics (`%autoreload 2`) para recargar `src/` en caliente;
 # - **celda 1**: `CONFIG`, con **todos** los parámetros de las figuras;
 # - **celda 2**: datos (`load_single_price` + retornos);
-# - **celdas 3-9**: una celda por figura, con el **código de dibujo escrito
+# - **celdas 3-10**: una celda por figura, con el **código de dibujo escrito
 #   aquí mismo**;
 # - **celda 10**: tabla resumen.
 #
@@ -161,6 +161,7 @@ CONFIG: dict[str, Any] = {
     "figsize_bands": (11.0, 4.0),
     # --- Figuras: bines, spans y escalas ---
     "smooth_window": 10,
+    "return_ma_years": 5,
     "bins": 250,
     "xlim_sigma": 5.0,
     "xlim_log": 0.10,
@@ -177,6 +178,7 @@ CONFIG: dict[str, Any] = {
     "color_sigma1": "gold",
     "color_sigma2": "tomato",
     "color_mu": "navy",
+    "color_return_ma": "C3",
     # --- Salida ---
     "save_figures": True,
     "show_figure": True,
@@ -965,7 +967,60 @@ if __name__ == "__main__":
     print(excursions.to_string(index=False))
 
 # %% [markdown]
-# ## Celda 10 — tabla resumen
+# ## Celda 10 — promedio móvil de retornos
+#
+# El promedio móvil de cinco años suaviza las fluctuaciones diarias de los
+# retornos logarítmicos y permite observar la evolución de su media local. La
+# línea horizontal muestra la media histórica de toda la muestra como
+# referencia descriptiva.
+
+# %%
+if __name__ == "__main__":
+    return_ma_window = CONFIG["return_ma_years"] * CONFIG["trading_days"]
+    log_ret_ma = log_ret.rolling(return_ma_window).mean()
+    historical_mean = float(log_ret.mean())
+
+    fig, ax = plt.subplots(figsize=CONFIG["figsize_bands"])
+    ax.plot(
+        log_ret_ma.index,
+        log_ret_ma.values,
+        color=CONFIG["color_return_ma"],
+        linewidth=1.2,
+        label=(
+            f"Media móvil de {CONFIG['return_ma_years']} años "
+            "de retornos logarítmicos"
+        ),
+    )
+    ax.axhline(
+        historical_mean,
+        color=CONFIG["color_mu"],
+        linestyle="--",
+        linewidth=1.0,
+        label=f"Promedio histórico = {historical_mean:.5f}",
+    )
+    ax.set_xlabel("Fecha")
+    ax.set_ylabel("Retorno logarítmico")
+    ax.set_title(
+        f"{CONFIG['ticker']}: promedio móvil de "
+        f"{CONFIG['return_ma_years']} años de retornos logarítmicos"
+    )
+    ax.legend(loc="best")
+    fig.tight_layout()
+
+    if CONFIG["save_figures"]:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig.savefig(
+            OUTPUT_DIR / "spy_log_return_5y_moving_average.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+    if CONFIG["show_figure"] and _INTERACTIVE:
+        plt.show()
+    else:
+        plt.close(fig)
+
+# %% [markdown]
+# ## Celda 11 — tabla resumen
 #
 # La tabla se calcula a partir de los datos (no hay números escritos a mano en
 # el texto): cambiar `CONFIG["ticker"]` o la ventana temporal regenera el
