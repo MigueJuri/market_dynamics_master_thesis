@@ -969,9 +969,9 @@ if __name__ == "__main__":
 # %% [markdown]
 # ## Celda 10 — promedio móvil de retornos
 #
-# El promedio móvil de cinco años suaviza las fluctuaciones diarias de los
-# retornos logarítmicos y permite observar la evolución de su media local. Tanto
-# la media móvil como la línea horizontal se expresan como retornos
+# El promedio móvil centrado de cinco años suaviza las fluctuaciones diarias de
+# los retornos logarítmicos y permite observar la evolución de su media local.
+# Tanto la media móvil como la línea horizontal se expresan como retornos
 # logarítmicos anualizados, usando el número de ruedas configurado.
 
 # %%
@@ -979,7 +979,7 @@ if __name__ == "__main__":
     return_ma_window = CONFIG["return_ma_years"] * CONFIG["trading_days"]
     annualization_factor = CONFIG["trading_days"]
     log_ret_ma = (
-        log_ret.rolling(return_ma_window).mean() * annualization_factor
+        log_ret.rolling(return_ma_window, center=True).mean() * annualization_factor
     )
     historical_mean = float(log_ret.mean() * annualization_factor)
 
