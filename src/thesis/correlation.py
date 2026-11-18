@@ -324,6 +324,168 @@ def compute_cross_sectional_correlation(
 
 
 # =============================================================================
+# Bootstrap de la correlación momentum–retorno futuro (ventana simétrica)
+# =============================================================================
+
+def _as_returns_vector(log_ret: pd.Series) -> np.ndarray:
+    """Valida y convierte la serie de log-retornos a un vector 1-D finito."""
+    values = np.asarray(log_ret, dtype=float)
+    if values.ndim != 1:
+        raise ValueError("log_ret debe ser un vector 1-D")
+    if values.size == 0:
+        raise ValueError("log_ret no puede estar vacío")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("log_ret no debe contener NaN ni valores infinitos")
+    return values
+
+
+def _validate_half_windows(half_windows: Sequence[int]) -> np.ndarray:
+    """Valida la grilla de semiventanas ``h`` (enteros ≥ 1)."""
+    raw = list(half_windows)
+    if len(raw) == 0:
+        raise ValueError("half_windows no puede estar vacío")
+    windows = []
+    for w in raw:
+        if isinstance(w, (bool, np.bool_)) or not np.isscalar(w):
+            raise ValueError(
+                f"half_windows sólo admite enteros; se recibió {w!r}"
+            )
+        try:
+            w_i = int(w)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"half_windows sólo admite enteros; se recibió {w!r}"
+            ) from None
+        if w_i != w or w_i < 1:
+            raise ValueError(
+                f"half_windows sólo admite enteros ≥ 1; se recibió {w!r}"
+            )
+        windows.append(w_i)
+    return np.asarray(windows, dtype=int)
+
+
+def _cumsum_with_zero(values: np.ndarray) -> np.ndarray:
+    """Suma acumulada con un cero inicial (``len = len(values) + 1``)."""
+    cumsum = np.empty(values.size + 1, dtype=float)
+    cumsum[0] = 0.0
+    np.cumsum(values, out=cumsum[1:])
+    return cumsum
+
+
+def _symmetric_window_correlation(cumsum: np.ndarray, h: int) -> float:
+    """Correlación de Pearson entre momentum pasado y retorno futuro.
+
+    Para la media ventana ``h`` (la ventana simétrica es ``τ = 2h``):
+
+    * ``momentum[t] = Σ_{i=t-h..t-1} r[i]`` — equivale a
+      ``r.rolling(h).sum().shift(1)``;
+    * ``fwd[t] = Σ_{i=t+1..t+h} r[i]`` — equivale a
+      ``r.rolling(h).sum().shift(-h)``.
+
+    Ambas ventanas son disjuntas y excluyen el día ``t`` ⇒ no hay
+    look-ahead.  Las posiciones válidas son ``t ∈ [h, n-h-1]``; si quedan
+    menos de tres observaciones o alguna de las dos series tiene varianza
+    nula, la correlación es ``NaN``.
+
+    ``cumsum`` es la suma acumulada de los retornos con un cero inicial
+    (``len(cumsum) = n + 1``), lo que evita recalcular el *rolling* en cada
+    réplica del bootstrap.
+    """
+    n = cumsum.size - 1
+    n_valid = n - 2 * h
+    if n_valid < 3:
+        return float("nan")
+    momentum = cumsum[h : n - h] - cumsum[0 : n - 2 * h]
+    fwd = cumsum[2 * h + 1 : n + 1] - cumsum[h + 1 : n - h + 1]
+    m_c = momentum - momentum.mean()
+    f_c = fwd - fwd.mean()
+    s_mm = float(np.dot(m_c, m_c))
+    s_ff = float(np.dot(f_c, f_c))
+    if s_mm <= 0.0 or s_ff <= 0.0:
+        return float("nan")
+    s_mf = float(np.dot(m_c, f_c))
+    return s_mf / np.sqrt(s_mm * s_ff)
+
+
+def bootstrap_momentum_forward_correlation(
+    log_ret: pd.Series,
+    half_windows: Sequence[int],
+    n_bootstrap: int = 1000,
+    alpha: float = 0.05,
+    seed: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Correlación momentum–retorno futuro en ventana simétrica con banda nula.
+
+    Para cada media ventana ``h`` (la ventana simétrica es ``τ = 2h``) se
+    calcula la correlación de Pearson entre el momentum pasado
+    (``t-h..t-1``) y el retorno futuro (``t+1..t+h``): las dos ventanas son
+    disjuntas, así que no hay look-ahead.
+
+    La banda del ``1 - alpha`` se obtiene con un bootstrap **i.i.d.** sobre los
+    log-retornos: cada réplica remuestrea observaciones individuales con
+    reemplazo y recalcula la curva de correlación sobre la serie remuestreada.
+    Como el remuestreo i.i.d. destruye la dependencia temporal, la banda es la
+    distribución **nula** del estimador (centrada en ≈ 0) y no un intervalo de
+    incertidumbre bajo dependencia real: en series heterocedásticas o
+    persistentes subestima el ancho verdadero.
+
+    Parámetros
+    ----------
+    log_ret : pd.Series
+        Vector 1-D de log-retornos sin NaN.
+    half_windows : secuencia de int
+        Semiventanas ``h`` (enteros ≥ 1); ``τ = 2h``.
+    n_bootstrap : int
+        Número de réplicas del bootstrap (≥ 1).
+    alpha : float
+        Nivel de significancia bilateral de la banda (por defecto 0.05 →
+        banda del 95 %).
+    seed : int, opcional
+        Semilla del generador aleatorio; por defecto usa
+        :data:`thesis.config.SEED`.
+
+    Devuelve
+    --------
+    (point, ci_low, ci_high)
+        Arrays de forma ``(len(half_windows),)`` con la correlación puntual y
+        los percentiles ``alpha/2`` y ``1 - alpha/2`` de la distribución
+        bootstrap.
+    """
+    values = _as_returns_vector(log_ret)
+    windows = _validate_half_windows(half_windows)
+    if n_bootstrap < 1:
+        raise ValueError("n_bootstrap debe ser >= 1")
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("alpha debe estar entre 0 y 1")
+
+    n = values.size
+    rng = np.random.default_rng(SEED if seed is None else seed)
+
+    point = np.full(windows.size, np.nan)
+    cumsum = _cumsum_with_zero(values)
+    for j, h in enumerate(windows):
+        point[j] = _symmetric_window_correlation(cumsum, int(h))
+
+    boot = np.full((n_bootstrap, windows.size), np.nan)
+    for b in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        cumsum_b = _cumsum_with_zero(values[idx])
+        for j, h in enumerate(windows):
+            boot[b, j] = _symmetric_window_correlation(cumsum_b, int(h))
+
+    ci_low = np.full(windows.size, np.nan)
+    ci_high = np.full(windows.size, np.nan)
+    for j in range(windows.size):
+        column = boot[:, j]
+        column = column[np.isfinite(column)]
+        if column.size == 0:
+            continue
+        ci_low[j] = np.percentile(column, 100.0 * alpha / 2.0)
+        ci_high[j] = np.percentile(column, 100.0 * (1.0 - alpha / 2.0))
+    return point, ci_low, ci_high
+
+
+# =============================================================================
 # Bootstrap del coeficiente máximo
 # =============================================================================
 

@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from thesis.config import DATA_DIR, END, START, TICKER, TRADING_DAYS
+from thesis.config import DATA_DIR, END, SEED, START, TICKER, TRADING_DAYS
 from thesis.market_data import load_multiple_prices, load_single_price
 from thesis.plotting import (
     plot_correlation_matrix,
@@ -42,6 +42,7 @@ from thesis.plotting import (
     plot_scatter_grid,
 )
 from thesis.correlation import (
+    bootstrap_momentum_forward_correlation,
     compute_correlation_matrix,
     compute_cross_sectional_correlation,
 )
@@ -119,6 +120,46 @@ plot_correlation_matrix(
     title="Momentum–Forward Pearson Correlation",
     cbar_label="Correlación de Pearson",
 )
+
+# %%
+# ## Correlación momentum–retorno futuro en $\tau$ simétrico con banda nula
+#
+# Para cada media ventana ``h`` (la ventana simétrica es ``τ = 2h``) se
+# correlaciona el momentum pasado (``t-h..t-1``) con el retorno futuro
+# (``t+1..t+h``).  Las dos ventanas son disjuntas y excluyen el día ``t``,
+# así que no hay look-ahead.
+#
+# La banda del 95 % se obtiene con un bootstrap **i.i.d.** sobre los
+# log-retornos: cada réplica remuestrea observaciones individuales con
+# reemplazo, lo que **destruye la dependencia temporal** de la serie.  Por eso
+# la banda es la distribución **nula** del estimador (centrada en ≈ 0) y no un
+# intervalo de incertidumbre del estimador bajo dependencia real: en series
+# heterocedásticas la banda subestima el ancho verdadero.  Es la misma
+# motivación que las bandas i.i.d. de la ACF en
+# ``notebooks/spy/SPY_caracterizacion.py``.
+
+half_windows = np.arange(5, TRADING_DAYS + 1, 5)
+tau_years = 2 * half_windows / TRADING_DAYS
+
+point, ci_low, ci_high = bootstrap_momentum_forward_correlation(
+    log_ret, half_windows, n_bootstrap=1000, seed=SEED,
+)
+
+fig, ax = plt.subplots(figsize=(7.0, 3.5))
+ax.plot(tau_years, point, color="tab:blue", label="Observado")
+ax.fill_between(
+    tau_years, ci_low, ci_high, color="tab:blue", alpha=0.3,
+    label="IC 95 % (bootstrap i.i.d.)",
+)
+ax.axhline(0, color="gray", lw=0.8, ls="--")
+ax.set_xlabel(r"$\tau$ (años)")
+ax.set_ylabel("Correlación de Pearson")
+ax.set_title(
+    "Momentum–retorno futuro: correlación en $\\tau$ con banda nula i.i.d."
+)
+ax.legend()
+plt.tight_layout()
+plt.show()
 
  # %%
 # ## Análisis cross-sectional de momentum por sector
