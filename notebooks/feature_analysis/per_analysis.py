@@ -287,11 +287,16 @@ plt.show()
 
 main_variant = "log(PER, shift 1d)"
 robustez = corr_table[corr_table["variante"] == main_variant][
-    ["tau_f", "n", "pearson", "pearson_sub", "pearson_m",
+    ["tau_f", "n", "pearson", "n_sub", "pearson_sub", "n_m", "pearson_m",
      "spearman", "spearman_sub", "spearman_m"]
 ].set_index("tau_f")
 print(f"Robustez — {main_variant}")
 print(robustez.round(3).to_string())
+print(
+    "\nNota: el submuestreo con paso τ_f deja pocas observaciones en "
+    "horizontes largos (n_sub), por lo que sus correlaciones son ruidosas "
+    "y no deben leerse como estimaciones precisas."
+)
 
 # %%
 # ## Grilla de scatter: PER × retorno futuro
