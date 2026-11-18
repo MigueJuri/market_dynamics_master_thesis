@@ -23,7 +23,8 @@ notebooks/feature_analysis/
 ├── momentum_analysis.py               ← análisis de momentum
 ├── volatility_analysis.py             ← análisis de volatilidad
 ├── momentum_volatility_analysis.py    ← momentum rescalado por volatilidad
-└── moving_average_distance_analysis.py ← análisis de distancia a la MA
+├── moving_average_distance_analysis.py ← análisis de distancia a la MA
+└── per_analysis.py                    ← análisis del PER (S&P 500)
 ```
 
 Las utilidades comunes viven en `src/thesis/` (paquete Python del
@@ -290,6 +291,32 @@ de modo que toda la fórmula está anclada a `t`.
 * Eje $\tau_f$: ventana del retorno futuro.
 * Análisis: `momentum_volatility_analysis.py`.
 
+### PER (price/earnings ratio del S&P 500)
+
+El PER **no** es una característica *windowed*: no hay eje $\tau_p$ de
+lookback.  Es un **nivel puntual** en $t$, disponible mensualmente
+(`data/sp500_pe_mensual.csv`, 1871–2026) y propagado al calendario de
+sesiones con *forward fill*:
+
+```text
+PER_t = último valor mensual conocido en t
+```
+
+* Target: $F_t(\tau_f) = \log P_{t+\tau_f} - \log P_{t+1}$ con
+  $\tau_f > 21$ sesiones (2, 3, 6, 12, 24 y 36 meses).
+* Variantes de la característica: nivel (`pe_daily`), nivel con un día de
+  retraso (`pe_daily_shifted = pe_daily.shift(1)`), logaritmo del nivel
+  (`log_pe_daily`), logaritmo con retraso (`log_pe_daily_shifted`),
+  *earnings yield* `1 / PER` y retraso real de un mes
+  (`pe.shift(1).reindex(..., method="ffill")`), que es la variante
+  conservadora si el CSV está fechado "as-of" (valor de fin de mes
+  publicado el día 1 del mes siguiente).
+* Se reportan Pearson y Spearman, con dos comprobaciones de robustez:
+  submuestreo con paso $\tau_f$ (bloques de retorno futuro no
+  solapados) y muestreo mensual (una observación por mes, que elimina
+  los empates de rango del *forward fill*).
+* Análisis: `per_analysis.py`.
+
 ---
 
 ## Matriz de correlación
@@ -448,6 +475,7 @@ python -m py_compile \
     notebooks/feature_analysis/volatility_analysis.py \
     notebooks/feature_analysis/momentum_volatility_analysis.py \
     notebooks/feature_analysis/moving_average_distance_analysis.py \
+    notebooks/feature_analysis/per_analysis.py \
     notebooks/trend_following_strategy/Trend_Following_Strategy_v2.py
 
 # Smoke test aislado (no descarga datos)
