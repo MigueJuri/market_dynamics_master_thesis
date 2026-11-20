@@ -46,10 +46,22 @@ _UNKNOWN: str = "unknown"
 #: Estados válidos de un record.
 VALID_STATUSES: tuple[str, ...] = ("published", "candidate", "deprecated", "rejected")
 
+#: Patrón de "token largo": 20+ caracteres alfanuméricos (posible secreto).
+_LONG_TOKEN_PATTERN = re.compile(r"\b[A-Za-z0-9-_]{20,}\b")
+
 #: Patrones que activan la redacción de seguridad.
 _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"\b[A-Za-z0-9-_]{20,}\b"),  # tokens largos
+    _LONG_TOKEN_PATTERN,
     re.compile(r"password|passwd|secret|token|api_key|apikey", re.IGNORECASE),
+)
+
+#: Campos con texto libre, donde un segredo puede aparecer de verdad.  El
+#: patrón de token largo **no** se aplica al resto de campos: los
+#: identificadores del repositorio (nombre del experimento, modelo, ruta del
+#: notebook) son largos por legibilidad y no son secretos; redactarlos
+#: rechazaba filas completas del ledger.
+_FREE_TEXT_FIELDS: frozenset[str] = frozenset(
+    ["metric_value", "notes", "data_source", "target_definition", "protocol"]
 )
 
 #: Extensiones de artefactos que nunca se publican.
@@ -227,6 +239,10 @@ def redact(record: ResultRecord) -> tuple[ResultRecord, list[str]]:
                 issues.append(f"{key} contiene ruta sensible: {prefix}")
                 data[key] = "[REDACTED]"
         for pattern in _SECRET_PATTERNS:
+            if pattern is _LONG_TOKEN_PATTERN and key not in _FREE_TEXT_FIELDS:
+                # Identificadores del repositorio: pueden ser largos sin ser
+                # secretos (p. ej. ``moving_average_distance_analysis.py``).
+                continue
             if pattern.search(value):
                 issues.append(f"{key} puede contener secreto ({pattern.pattern})")
                 data[key] = "[REDACTED]"

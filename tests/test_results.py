@@ -111,6 +111,41 @@ def test_redact_detects_env_file():
     assert any(".env" in issue for issue in issues)
 
 
+def test_redact_keeps_long_repo_identifiers():
+    """Los identificadores largos del repo no se redaccionan ni se rechazan."""
+    rec = ResultRecord(
+        result_id="abc",
+        chapter="Momentum-Volatilidad",
+        experiment="moving_average_distance",
+        metric_name="pearson_corr",
+        metric_value=0.11,
+        model="Moving Average Distance",
+        code_path="notebooks/feature_analysis/moving_average_distance_analysis.py",
+        status="published",
+    )
+    redacted, issues = redact(rec)
+    assert not issues
+    assert redacted.status == "published"
+    assert redacted.experiment == "moving_average_distance"
+    assert redacted.code_path.endswith("moving_average_distance_analysis.py")
+
+
+def test_redact_detects_long_token_in_free_text():
+    """Un token largo en un campo de texto libre sí se redacciona."""
+    rec = ResultRecord(
+        result_id="abc",
+        chapter="Test",
+        experiment="unit",
+        metric_name="nota",
+        metric_value="AKIAIOSFODNN7EXAMPLEKEY123456",
+        status="published",
+    )
+    redacted, issues = redact(rec)
+    assert redacted.status == "rejected"
+    assert redacted.metric_value == "[REDACTED]"
+    assert issues
+
+
 def test_metric_registry_publish(tmp_path):
     registry = MetricRegistry()
     rec = ResultRecord(
