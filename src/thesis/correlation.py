@@ -413,7 +413,7 @@ def bootstrap_momentum_forward_correlation(
     n_bootstrap: int = 1000,
     alpha: float = 0.05,
     seed: int | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Correlación momentum–retorno futuro en ventana simétrica con banda nula.
 
     Para cada media ventana ``h`` (la ventana simétrica es ``τ = 2h``) se
@@ -446,10 +446,10 @@ def bootstrap_momentum_forward_correlation(
 
     Devuelve
     --------
-    (point, ci_low, ci_high)
-        Arrays de forma ``(len(half_windows),)`` con la correlación puntual y
-        los percentiles ``alpha/2`` y ``1 - alpha/2`` de la distribución
-        bootstrap.
+    (point, median, ci_low, ci_high)
+        Arrays de forma ``(len(half_windows),)`` con la correlación puntual,
+        la mediana y los percentiles ``alpha/2`` y ``1 - alpha/2`` de la
+        distribución bootstrap.
     """
     values = _as_returns_vector(log_ret)
     windows = _validate_half_windows(half_windows)
@@ -473,6 +473,7 @@ def bootstrap_momentum_forward_correlation(
         for j, h in enumerate(windows):
             boot[b, j] = _symmetric_window_correlation(cumsum_b, int(h))
 
+    median = np.full(windows.size, np.nan)
     ci_low = np.full(windows.size, np.nan)
     ci_high = np.full(windows.size, np.nan)
     for j in range(windows.size):
@@ -480,9 +481,10 @@ def bootstrap_momentum_forward_correlation(
         column = column[np.isfinite(column)]
         if column.size == 0:
             continue
+        median[j] = np.median(column)
         ci_low[j] = np.percentile(column, 100.0 * alpha / 2.0)
         ci_high[j] = np.percentile(column, 100.0 * (1.0 - alpha / 2.0))
-    return point, ci_low, ci_high
+    return point, median, ci_low, ci_high
 
 
 # =============================================================================
@@ -591,8 +593,8 @@ def _print_max_correlation_diagnostic(
     pct = 100 * (1 - alpha)
     print(
         "\n[compute_correlation_matrix] Máximo |ρ| en la matriz:\n"
-        f"  τ_p (lookback)  : {tau_p} sesiones\n"
-        f"  τ_f (lookahead) : {tau_f} sesiones\n"
+        f"  τ_p (lookback)  : {tau_p/252:.2f} años\n"
+        f"  τ_f (lookahead) : {tau_f/252:.2f} años\n"
         f"  ρ matriz         : {rho_matrix:+.4f}\n"
         f"  ρ (con overlap)    : {rho_with:+.4f}   "
         f"IC {pct:.0f}%: [{ci_with[0]:+.4f}, {ci_with[1]:+.4f}]   "

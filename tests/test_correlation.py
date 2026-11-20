@@ -36,24 +36,27 @@ def _white_noise(n: int, seed: int = SEED) -> pd.Series:
 
 
 def test_shapes_and_reproducibility() -> None:
-    """Las tres salidas tienen la forma de la grilla y son reproducibles."""
+    """Las cuatro salidas tienen la forma de la grilla y son reproducibles."""
     log_ret = _white_noise(1_500, seed=1)
     half_windows = [5, 10, 20, 40]
 
-    point, ci_low, ci_high = bootstrap_momentum_forward_correlation(
+    point, median, ci_low, ci_high = bootstrap_momentum_forward_correlation(
         log_ret, half_windows, n_bootstrap=200, alpha=0.05, seed=SEED,
     )
 
     assert point.shape == (len(half_windows),)
+    assert median.shape == (len(half_windows),)
     assert ci_low.shape == (len(half_windows),)
     assert ci_high.shape == (len(half_windows),)
     assert np.all(ci_low <= ci_high)
     assert np.all(np.isfinite(point))
+    assert np.all(np.isfinite(median))
 
-    point_2, ci_low_2, ci_high_2 = bootstrap_momentum_forward_correlation(
+    point_2, median_2, ci_low_2, ci_high_2 = bootstrap_momentum_forward_correlation(
         log_ret, half_windows, n_bootstrap=200, alpha=0.05, seed=SEED,
     )
     np.testing.assert_allclose(point, point_2)
+    np.testing.assert_allclose(median, median_2)
     np.testing.assert_allclose(ci_low, ci_low_2)
     np.testing.assert_allclose(ci_high, ci_high_2)
 
@@ -70,7 +73,7 @@ def test_matches_pandas_rolling_definition() -> None:
     valid = ~(np.isnan(momentum) | np.isnan(forward))
     expected = np.corrcoef(momentum[valid], forward[valid])[0, 1]
 
-    point, _, _ = bootstrap_momentum_forward_correlation(
+    point, _, _, _ = bootstrap_momentum_forward_correlation(
         log_ret, [h], n_bootstrap=1, seed=SEED,
     )
     assert point[0] == pytest.approx(expected, abs=1e-10)
@@ -86,12 +89,14 @@ def test_white_noise_null_centered() -> None:
     log_ret = _white_noise(2_000, seed=3)
     half_windows = [5, 10, 20, 40]
 
-    point, ci_low, ci_high = bootstrap_momentum_forward_correlation(
+    point, median, ci_low, ci_high = bootstrap_momentum_forward_correlation(
         log_ret, half_windows, n_bootstrap=300, alpha=0.05, seed=SEED,
     )
 
     inside = (point >= ci_low) & (point <= ci_high)
     assert inside.mean() >= 0.5
+    # La mediana bootstrap cae dentro de la banda nula por construcción.
+    assert np.all((median >= ci_low) & (median <= ci_high))
 
     # La banda i.i.d. es la distribución nula del estimador: centrada en 0 y
     # con un ancho que escala como ~1.96 * sqrt(h / n) (las ventanas
@@ -113,10 +118,10 @@ def test_null_band_is_independent_of_temporal_dependence() -> None:
     for t in range(1, n):
         persistent[t] = 0.9 * persistent[t - 1] + rng.standard_normal()
 
-    _, ci_low_white, ci_high_white = bootstrap_momentum_forward_correlation(
+    _, _, ci_low_white, ci_high_white = bootstrap_momentum_forward_correlation(
         _white_noise(n, seed=5), [10], n_bootstrap=300, seed=SEED,
     )
-    point_p, ci_low_p, ci_high_p = bootstrap_momentum_forward_correlation(
+    point_p, _, ci_low_p, ci_high_p = bootstrap_momentum_forward_correlation(
         pd.Series(persistent), [10], n_bootstrap=300, seed=SEED,
     )
 
