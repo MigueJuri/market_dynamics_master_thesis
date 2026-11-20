@@ -176,9 +176,9 @@ def plot_scatter_grid(
             ax.axhline(0, color="black", lw=0.8, alpha=0.6)
             ax.axvline(0, color="black", lw=0.8, alpha=0.6)
             if i == last_row:
-                ax.set_xlabel(f"{feature_label} {feature_format(fw)}")
+                ax.set_xlabel(f"{feature_label}{feature_format(fw)}")
             if j == 0:
-                ax.set_ylabel(f"{target_label} {target_format(tw)}")
+                ax.set_ylabel(f"{target_label}{target_format(tw)}")
 
     if color_by_date and first_scatter is not None:
         cbar = fig.colorbar(first_scatter, ax=axes, fraction=0.025, pad=0.02)
@@ -257,17 +257,17 @@ def plot_feature_boxplots(
         data["quantile"] = pd.cut(
             data[feature_name], bins=edges, include_lowest=True, labels=bin_labels
         )
-        x_label_suffix = f"{feature_name.capitalize()}"
+        x_label_suffix = f"{feature_name}"
 
-    fw_str = f"({feature_window}d) " if feature_window is not None else ""
-    tw_str = f"({target_window}d) " if target_window is not None else ""
-    y_label = f"{target_name} {tw_str}".strip()
-    x_label_full = f"{x_label_suffix} {fw_str}".strip()
+    fw_str = f"({feature_window/252:.2f} años) " if feature_window is not None else ""
+    tw_str = f"({target_window/252:.2f} años) " if target_window is not None else ""
+    y_label = f"{target_name}{tw_str}".strip()
+    x_label_full = f"{x_label_suffix}{fw_str}".strip()
 
     if show_cumulative:
         created_fig = ax is None
         if created_fig:
-            fig, ax_box = plt.subplots(figsize=(6, 4.5))
+            fig, ax_box = plt.subplots(figsize=(6,4), dpi=300)
         else:
             ax_box = ax
         divider = make_axes_locatable(ax_box)
@@ -283,10 +283,9 @@ def plot_feature_boxplots(
             fliersize=3,
         )
         ax_box.axhline(0, color="black", lw=1, ls="--", alpha=0.7)
-        # Ocultamos tick labels del boxplot pero conservamos la etiqueta
-        # del eje X, que aparecerá entre el boxplot y la ECDF.
+        # La etiqueta del eje X se muestra debajo de la figura inferior.
         ax_box.tick_params(labelbottom=False)
-        ax_box.set_xlabel(x_label_full)
+        ax_box.set_xlabel("")
         ax_box.set_ylabel(y_label)
 
         sorted_feat = data[feature_name].dropna().sort_values().to_numpy()
@@ -294,7 +293,8 @@ def plot_feature_boxplots(
         ax_ecdf.plot(sorted_feat, ecdf_y, color="C0", lw=1.5)
         ax_ecdf.set_ylim(0.0, 1.05)
         ax_ecdf.set_xlim(sorted_feat[0], sorted_feat[-1])
-        ax_ecdf.set_ylabel("Frecuencia acum.")
+        ax_ecdf.set_xlabel(x_label_full)
+        ax_ecdf.set_ylabel("Frec. acum.")
 
         if created_fig:
             plt.tight_layout()
@@ -353,7 +353,7 @@ def plot_cross_sectional_curves(
                 corr_matrix[asset],
                 linewidth=1,
                 alpha=0.9,
-                marker="o",
+                # marker="o",
                 markersize=5,
                 label=asset,
             )
@@ -366,7 +366,7 @@ def plot_cross_sectional_curves(
                 kwargs = {
                     "linewidth": 1,
                     "alpha": 0.9,
-                    "marker": "o",
+                    # "marker": "o",
                     "markersize": 5,
                     "label": group_name,
                 }
@@ -380,7 +380,7 @@ def plot_cross_sectional_curves(
         color="black",
         linewidth=2.5,
         linestyle="--",
-        marker="o",
+        # marker="o",
         markersize=6,
         label=avg_label,
     )
