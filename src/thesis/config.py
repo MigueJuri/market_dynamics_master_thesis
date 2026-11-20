@@ -53,6 +53,20 @@ TABLES_DIR: Path = Path(
     os.environ.get("THESIS_TABLES_DIR", _PROJECT_ROOT / "outputs" / "tables")
 )
 
+#: Ruta al repositorio de la tesis (donde vive ``.thesis/results-ledger.md``).
+#: Se resuelve desde ``THESIS_REPO_DIR``; si no está definida se asume que la
+#: tesis comparte raíz con este repo de código.
+THESIS_REPO_DIR: Path | None = (
+    Path(p)
+    if (p := os.environ.get("THESIS_REPO_DIR")) and Path(p).exists()
+    else None
+)
+
+#: Publicar automáticamente métricas registradas al terminar el proceso.
+PUBLISH_RESULTS_TO_LEDGER: bool = (
+    os.environ.get("THESIS_PUBLISH_RESULTS", "1").lower() in ("1", "true", "yes")
+)
+
 # Reproducibilidad para consumidores del estado global de numpy.
 np.random.seed(SEED)
 
