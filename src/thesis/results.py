@@ -28,7 +28,7 @@ import re
 import subprocess
 import threading
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -172,6 +172,21 @@ def _get_git_rev() -> str:
         )
     except (subprocess.CalledProcessError, OSError):
         return _UNKNOWN
+
+
+def stamp_git_rev(records: list[ResultRecord]) -> list[ResultRecord]:
+    """Rellena ``git_rev`` con el commit actual cuando el record no lo trae.
+
+    Sólo se aplica a records recién producidos: una fila releída del ledger
+    conserva el commit con el que se publicó, de modo que la provenance no
+    se reescribe al re-sincronizar.
+    """
+    rev = _get_git_rev()
+    if rev == _UNKNOWN:
+        return records
+    return [
+        replace(rec, git_rev=rev) if rec.git_rev == _UNKNOWN else rec for rec in records
+    ]
 
 
 def _serialize_fingerprint(obj: Any) -> str:
@@ -433,6 +448,9 @@ def publish(
             else:
                 updated.append(rec)
         records = updated
+
+    # La provenance se fija con el commit vigente al publicar el resultado.
+    records = stamp_git_rev(records)
 
     validated: list[ResultRecord] = []
     for rec in records:

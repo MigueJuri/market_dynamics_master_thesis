@@ -31,7 +31,13 @@ _SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from thesis.results import LedgerConfig, ResultRecord, publish, validate_record
+from thesis.results import (
+    LedgerConfig,
+    ResultRecord,
+    publish,
+    stamp_git_rev,
+    validate_record,
+)
 from thesis.results_ledger import merge_records_into_ledger
 
 
@@ -73,6 +79,8 @@ def _publish_record(args: argparse.Namespace) -> int:
         if issues and args.verbose:
             print(f"WARN: {issues}", file=sys.stderr)
         records.append(rec)
+
+    records = stamp_git_rev(records)
 
     cfg = LedgerConfig.from_thesis_repo(args.thesis_repo)
     cfg.ledger_path.parent.mkdir(parents=True, exist_ok=True)

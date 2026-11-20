@@ -35,6 +35,9 @@ _LEDGER_COLUMNS: tuple[str, ...] = (
     "Protocolo",
 )
 
+#: Separador entre la ruta del código y el commit en la columna "Código+Git".
+_CODE_REV_SEPARATOR = " @ "
+
 #: Mapeo campo -> columna (el orden sigue el contrato con method-auditor).
 _FIELD_TO_COLUMN: dict[str, str] = {
     "result_id": "result_id",
@@ -80,13 +83,31 @@ def _parse_table_rows(text: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _split_code_cell(cell: str) -> tuple[str, str]:
+    """Separa la celda ``ruta @ commit`` en ``(ruta, commit)``.
+
+    Las filas escritas antes de que existiera ``git_rev`` no llevan el
+    separador: en ese caso el commit queda como ``unknown``.
+    """
+    if _CODE_REV_SEPARATOR in cell:
+        path, _, rev = cell.partition(_CODE_REV_SEPARATOR)
+        return path.strip(), rev.strip()
+    return cell.strip(), _UNKNOWN
+
+
 def _row_to_record(row: dict[str, Any]) -> ResultRecord:
     """Convierte una fila del ledger en :class:`ResultRecord`."""
     column_to_field = {v: k for k, v in _FIELD_TO_COLUMN.items()}
-    data: dict[str, Any] = {f: _UNKNOWN for f in ResultRecord.__dataclass_fields__}
+    data = {f: _UNKNOWN for f in ResultRecord.__dataclass_fields__}
     for col, value in row.items():
         field = column_to_field.get(col)
         if field is None:
+            continue
+        if col == "Código+Git":
+            path, rev = _split_code_cell(value)
+            data["code_path"] = path
+            if rev != _UNKNOWN:
+                data["git_rev"] = rev
             continue
         data[field] = value
     return ResultRecord(**data)
@@ -140,6 +161,19 @@ def parse_ledger(path: Path | str) -> dict[str, Any]:
     }
 
 
+def _format_code_cell(code_path: Any, git_rev: Any) -> str:
+    """Compone la celda ``Código+Git`` como ``ruta @ commit``.
+
+    Si el commit es desconocido se muestra sólo la ruta: es preferible una
+    celda sin commit a un commit inventado.
+    """
+    path = _format_value(code_path)
+    rev = _format_value(git_rev)
+    if rev == _UNKNOWN or not rev:
+        return path
+    return f"{path}{_CODE_REV_SEPARATOR}{rev}"
+
+
 def _render_table(records: list[ResultRecord]) -> str:
     """Renderiza la tabla markdown a partir de records."""
     if not records:
@@ -157,6 +191,8 @@ def _render_table(records: list[ResultRecord]) -> str:
                     value = row.get("result_id", _UNKNOWN)
                 else:
                     value = _UNKNOWN
+                if col == "Código+Git":
+                    value = _format_code_cell(row.get("code_path", _UNKNOWN), row.get("git_rev", _UNKNOWN))
                 cells.append(_format_value(value).replace("|", "\\|"))
             rows.append(cells)
 

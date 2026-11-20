@@ -295,8 +295,16 @@ def _lstm_adapter(
     return adapter
 
 
-def _generic_dataframe_adapter(chapter: str) -> Callable[[str, Any], list[ResultRecord]]:
-    """Factory de adapters para notebooks que exportan un ``metrics_df``."""
+def _generic_dataframe_adapter(
+    chapter: str,
+    code_path: str,
+) -> Callable[[str, Any], list[ResultRecord]]:
+    """Factory de adapters para notebooks que exportan un ``metrics_df``.
+
+    ``code_path`` es la ruta real del notebook que produce el experimento;
+    se declara de forma explícita porque el nombre del archivo no coincide
+    con el ``experiment_id`` en la mayoría de los casos.
+    """
 
     def adapter(experiment_id: str, payload: Any) -> list[ResultRecord]:
         if not isinstance(payload, dict):
@@ -310,7 +318,6 @@ def _generic_dataframe_adapter(chapter: str) -> Callable[[str, Any], list[Result
         records: list[ResultRecord] = []
         data_period, train_dates, val_dates, test_dates = _extract_period(config)
         protocol = _protocol_from_config(config)
-        code_path = f"notebooks/{experiment_id}.py"
 
         # Intentar detectar columna de modelo/estrategia.
         model_col = None
@@ -378,38 +385,121 @@ def _candidate_record(experiment_id: str, reason: str) -> list[ResultRecord]:
     return [rec]
 
 
+#: Ruta real del notebook que produce cada experimento canónico.
+#:
+#: Es la fuente de verdad del vínculo *resultado ↔ código*: el nombre del
+#: archivo no coincide con el ``experiment_id`` en la mayoría de los casos
+#: (``feature_analysis/momentum`` → ``momentum_analysis.py``).
+CODE_PATHS: dict[str, str] = {
+    "volatility/lstm_daily": "notebooks/volatility/Volatilidad_LSTM.py",
+    "volatility/lstm_alpaca": "notebooks/volatility/Volatilidad_LSTM_Alpaca.py",
+    "volatility/lstm_description": "notebooks/volatility/Volatilidad_LSTM_Descripcion.py",
+    "feature_analysis/momentum": "notebooks/feature_analysis/momentum_analysis.py",
+    "feature_analysis/volatility": "notebooks/feature_analysis/volatility_analysis.py",
+    "feature_analysis/momentum_volatility": (
+        "notebooks/feature_analysis/momentum_volatility_analysis.py"
+    ),
+    "feature_analysis/moving_average_distance": (
+        "notebooks/feature_analysis/moving_average_distance_analysis.py"
+    ),
+    "feature_analysis/per": "notebooks/feature_analysis/per_analysis.py",
+    "trend_following/strategy_v2": (
+        "notebooks/trend_following_strategy/Trend_Following_Strategy_v2.py"
+    ),
+    "pair_trading/selection_mi": "notebooks/pair_trading/1_PairSelectionMutualInformation.py",
+    "pair_trading/selection_pearson": "notebooks/pair_trading/2_PairSelectionPearson.py",
+    "pair_trading/practical": "notebooks/pair_trading/PracticalPairTrading.py",
+    "pair_trading/spread": "notebooks/pair_trading/Spread.py",
+    "pair_trading/ou": "notebooks/pair_trading/OUProcess.py",
+    "btc/btc": "notebooks/btc/BTC.py",
+    "spy/characterization": "notebooks/spy/SPY_caracterizacion.py",
+    "spy/sectors": "notebooks/spy/SPY_sectores.py",
+    "spy/orderbook": "notebooks/spy/OrderBook.py",
+}
+
+#: Nombre con el que el experimento aparece en el ledger cuando no coincide
+#: con el sufijo del ``experiment_id``.
+DISPLAY_NAMES: dict[str, str] = {
+    "volatility/lstm_daily": "LSTM diario",
+    "volatility/lstm_alpaca": "LSTM Alpaca",
+}
+
+
+def display_name(experiment_id: str) -> str:
+    """Nombre del experimento tal como aparece en el ledger."""
+    return DISPLAY_NAMES.get(experiment_id, experiment_id.split("/")[-1])
+
+
+def resolve_code_path(experiment: str) -> str:
+    """Ruta real del notebook para un experimento del ledger.
+
+    Devuelve ``unknown`` si el experimento no está en :data:`CODE_PATHS`.
+    """
+    for experiment_id, path in CODE_PATHS.items():
+        if display_name(experiment_id) == experiment:
+            return path
+    return _UNKNOWN
+
+
 #: Registro global de adaptadores.  Los ``experiment_id`` ausentes se marcan
 #: automáticamente como ``candidate`` en :func:`thesis.results.publish`.
 ADAPTERS: dict[str, Callable[[str, Any], list[ResultRecord]]] = {
     "volatility/lstm_daily": _lstm_adapter(
-        experiment="LSTM diario",
-        code_path="notebooks/volatility/Volatilidad_LSTM.py",
+        experiment=DISPLAY_NAMES["volatility/lstm_daily"],
+        code_path=CODE_PATHS["volatility/lstm_daily"],
         asset_default="SPY",
     ),
     "volatility/lstm_alpaca": _lstm_adapter(
-        experiment="LSTM Alpaca",
-        code_path="notebooks/volatility/Volatilidad_LSTM_Alpaca.py",
+        experiment=DISPLAY_NAMES["volatility/lstm_alpaca"],
+        code_path=CODE_PATHS["volatility/lstm_alpaca"],
         asset_default="SPY",
     ),
     # Feature analysis
-    "feature_analysis/momentum": _generic_dataframe_adapter("Momentum"),
-    "feature_analysis/volatility": _generic_dataframe_adapter("Volatilidad"),
-    "feature_analysis/momentum_volatility": _generic_dataframe_adapter("Momentum-Volatilidad"),
-    "feature_analysis/moving_average_distance": _generic_dataframe_adapter("Moving Average Distance"),
-    "feature_analysis/per": _generic_dataframe_adapter("PER"),
+    "feature_analysis/momentum": _generic_dataframe_adapter(
+        "Momentum", CODE_PATHS["feature_analysis/momentum"]
+    ),
+    "feature_analysis/volatility": _generic_dataframe_adapter(
+        "Volatilidad", CODE_PATHS["feature_analysis/volatility"]
+    ),
+    "feature_analysis/momentum_volatility": _generic_dataframe_adapter(
+        "Momentum-Volatilidad", CODE_PATHS["feature_analysis/momentum_volatility"]
+    ),
+    "feature_analysis/moving_average_distance": _generic_dataframe_adapter(
+        "Moving Average Distance",
+        CODE_PATHS["feature_analysis/moving_average_distance"],
+    ),
+    "feature_analysis/per": _generic_dataframe_adapter(
+        "PER", CODE_PATHS["feature_analysis/per"]
+    ),
     # Trend following
-    "trend_following/strategy_v2": _generic_dataframe_adapter("Trend Following"),
+    "trend_following/strategy_v2": _generic_dataframe_adapter(
+        "Trend Following", CODE_PATHS["trend_following/strategy_v2"]
+    ),
     # Pair trading
-    "pair_trading/selection_mi": _generic_dataframe_adapter("Pair Trading"),
-    "pair_trading/selection_pearson": _generic_dataframe_adapter("Pair Trading"),
-    "pair_trading/practical": _generic_dataframe_adapter("Pair Trading"),
-    "pair_trading/spread": _generic_dataframe_adapter("Pair Trading"),
-    "pair_trading/ou": _generic_dataframe_adapter("Pair Trading"),
+    "pair_trading/selection_mi": _generic_dataframe_adapter(
+        "Pair Trading", CODE_PATHS["pair_trading/selection_mi"]
+    ),
+    "pair_trading/selection_pearson": _generic_dataframe_adapter(
+        "Pair Trading", CODE_PATHS["pair_trading/selection_pearson"]
+    ),
+    "pair_trading/practical": _generic_dataframe_adapter(
+        "Pair Trading", CODE_PATHS["pair_trading/practical"]
+    ),
+    "pair_trading/spread": _generic_dataframe_adapter(
+        "Pair Trading", CODE_PATHS["pair_trading/spread"]
+    ),
+    "pair_trading/ou": _generic_dataframe_adapter(
+        "Pair Trading", CODE_PATHS["pair_trading/ou"]
+    ),
     # BTC / SPY
-    "btc/btc": _generic_dataframe_adapter("Bitcoin"),
-    "spy/characterization": _generic_dataframe_adapter("SPY"),
-    "spy/sectors": _generic_dataframe_adapter("SPY"),
-    "spy/orderbook": _generic_dataframe_adapter("SPY"),
+    "btc/btc": _generic_dataframe_adapter("Bitcoin", CODE_PATHS["btc/btc"]),
+    "spy/characterization": _generic_dataframe_adapter(
+        "SPY", CODE_PATHS["spy/characterization"]
+    ),
+    "spy/sectors": _generic_dataframe_adapter("SPY", CODE_PATHS["spy/sectors"]),
+    "spy/orderbook": _generic_dataframe_adapter("SPY", CODE_PATHS["spy/orderbook"]),
     # Descripción del problema de volatilidad
-    "volatility/lstm_description": _generic_dataframe_adapter("Volatilidad"),
+    "volatility/lstm_description": _generic_dataframe_adapter(
+        "Volatilidad", CODE_PATHS["volatility/lstm_description"]
+    ),
 }
