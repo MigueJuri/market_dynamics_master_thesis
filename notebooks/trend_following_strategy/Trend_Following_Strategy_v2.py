@@ -447,3 +447,24 @@ print("Weight distribution (quantiles):")
 print(weights.quantile([0.10, 0.25, 0.50, 0.75, 0.90]).round(4))
 
 # %%
+# %%
+# ## Publicación de métricas en el ledger
+#
+# Celda final que envía las métricas disponibles al ledger estandarizado de la
+# tesis.  No recalcula resultados; captura las variables del notebook.
+
+if __name__ == "__main__":
+    from thesis.results import publish
+
+    _payload = {}
+    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
+        if _key in globals():
+            _payload[_key.lower()] = globals()[_key]
+
+    publish(
+        experiment_id="trend_following/strategy_v2",
+        payload=_payload,
+        chapter="Trend Following",
+    )
+
+# %%

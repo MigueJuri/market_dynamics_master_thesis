@@ -404,3 +404,24 @@ for tau_f in (126, 504):
 #   relevante si el CSV está fechado "as-of" (valor de fin de mes
 #   publicado el día 1 del mes siguiente): en ese caso el PER del mes en
 #   curso no era información pública durante ese mes.
+# %%
+# ## Publicación de métricas en el ledger
+#
+# Celda final que envía las métricas disponibles al ledger estandarizado de la
+# tesis.  No recalcula resultados; captura las variables del notebook.
+
+if __name__ == "__main__":
+    from thesis.results import publish
+
+    _payload = {}
+    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
+        if _key in globals():
+            _payload[_key.lower()] = globals()[_key]
+
+    publish(
+        experiment_id="feature_analysis/per",
+        payload=_payload,
+        chapter="PER",
+    )
+
+# %%

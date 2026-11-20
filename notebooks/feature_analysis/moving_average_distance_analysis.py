@@ -246,3 +246,24 @@ plot_cross_sectional_curves(
     tau_to_yf=lambda L: 2 * L / TRADING_DAYS,
 )
 # %%
+# %%
+# ## Publicación de métricas en el ledger
+#
+# Celda final que envía las métricas disponibles al ledger estandarizado de la
+# tesis.  No recalcula resultados; captura las variables del notebook.
+
+if __name__ == "__main__":
+    from thesis.results import publish
+
+    _payload = {}
+    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
+        if _key in globals():
+            _payload[_key.lower()] = globals()[_key]
+
+    publish(
+        experiment_id="feature_analysis/moving_average_distance",
+        payload=_payload,
+        chapter="Moving Average Distance",
+    )
+
+# %%

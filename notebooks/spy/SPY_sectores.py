@@ -430,3 +430,24 @@ if __name__ == "__main__":
         plt.close("all")
 
 # %%
+# %%
+# ## Publicación de métricas en el ledger
+#
+# Celda final que envía las métricas disponibles al ledger estandarizado de la
+# tesis.  No recalcula resultados; captura las variables del notebook.
+
+if __name__ == "__main__":
+    from thesis.results import publish
+
+    _payload = {}
+    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
+        if _key in globals():
+            _payload[_key.lower()] = globals()[_key]
+
+    publish(
+        experiment_id="spy/sectors",
+        payload=_payload,
+        chapter="SPY",
+    )
+
+# %%

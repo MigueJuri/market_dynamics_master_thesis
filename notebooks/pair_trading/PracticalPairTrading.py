@@ -586,3 +586,24 @@ plt.title("Curva de capital", fontweight="bold")
 plt.legend(loc="best", fontsize=8)
 plt.grid(True, alpha=0.3)
 # %%
+# %%
+# ## Publicación de métricas en el ledger
+#
+# Celda final que envía las métricas disponibles al ledger estandarizado de la
+# tesis.  No recalcula resultados; captura las variables del notebook.
+
+if __name__ == "__main__":
+    from thesis.results import publish
+
+    _payload = {}
+    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
+        if _key in globals():
+            _payload[_key.lower()] = globals()[_key]
+
+    publish(
+        experiment_id="pair_trading/practical",
+        payload=_payload,
+        chapter="Pair Trading",
+    )
+
+# %%

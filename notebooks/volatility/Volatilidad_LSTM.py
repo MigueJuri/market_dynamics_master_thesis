@@ -1116,3 +1116,29 @@ if __name__ == "__main__":
     plt.show()
 
 # %%
+# %%
+# ## Publicación de métricas en el ledger
+#
+# Esta celda envía las métricas principales del experimento al ledger
+# estandarizado de la tesis.  No recalcula nada: reutiliza los diccionarios
+# ``CONFIG``, ``metrics`` y ``backtest`` producidos por las celdas anteriores.
+
+if __name__ == "__main__":
+    from thesis.results import publish
+
+    _payload = {
+        "config": CONFIG,
+        "metrics": {
+            "LSTM": metrics["lstm"],
+            "HAR-RV (Baseline)": metrics["har"],
+        },
+        "backtest": backtest["backtest"],
+        "summary": backtest["summary"],
+    }
+    publish(
+        experiment_id="volatility/lstm_daily",
+        payload=_payload,
+        chapter="Volatilidad",
+    )
+
+# %%
