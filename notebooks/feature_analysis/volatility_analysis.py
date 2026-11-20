@@ -23,6 +23,7 @@
 # %%
 from pathlib import Path
 import sys
+from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parents[1]  # raíz del repositorio (``thesis/``)
@@ -81,16 +82,18 @@ plot_scatter_grid(
 
 # %%
 # ## Análisis por cuantiles de volatilidad (ventana única)
-vol_window = 63
-target_window = 63
+vol_window = 21
+target_window = 49
 
 vol_series = realised_volatility(log_ret, vol_window)
 target_series = log_ret.rolling(target_window).sum().shift(-target_window)
 
 pearson_corr = plot_feature_boxplots(
     vol_series, target_series,
-    n_quantiles=5,
-    feature_name="volatility", target_name="forward return",
+    n_quantiles=7,
+    x_axis="bins",
+    feature_name=r"$\sigma$", target_name=r"$F_t$",
+    show_cumulative=True,
     feature_window=vol_window, target_window=target_window,
 )
 print(f"Pearson Correlation (vol → forward return): {pearson_corr:.3f}")
@@ -152,6 +155,41 @@ plot_cross_sectional_curves(
     tau_to_yf=lambda L: 2 * L / TRADING_DAYS,
 )
 # %%
+# ## Configuración del experimento
+#
+# ``CONFIG`` reúne los parámetros que definen el análisis.
+
+CONFIG: dict[str, Any] = {
+    "ticker": TICKER,
+    "start_date": START,
+    "end_date": END,
+    "vol_windows": list(vol_windows),
+    "vol_window": vol_window,
+    "target_window": target_window,
+    "matrix_correlation": "spearman",
+}
+
+# %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` resume las magnitudes ya calculadas en las celdas
+# anteriores (no se recalcula nada): la correlación de la ventana única, el
+# máximo de la matriz de correlación volatilidad–retorno futuro y el
+# promedio cross-sectional por sector.
+
+metrics_df = pd.DataFrame(
+    [
+        {
+            "model": "Volatilidad",
+            "pearson_corr": float(pearson_corr),
+            "max_corr_matrix": float(np.nanmax(vol_corr_matrix)),
+            "mean_avg_corr": float(np.nanmean(avg_corr.to_numpy())),
+        }
+    ]
+)
+
+# %%
+
 # %%
 # ## Publicación de métricas en el ledger
 #
@@ -161,14 +199,9 @@ plot_cross_sectional_curves(
 if __name__ == "__main__":
     from thesis.results import publish
 
-    _payload = {}
-    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
-        if _key in globals():
-            _payload[_key.lower()] = globals()[_key]
-
     publish(
         experiment_id="feature_analysis/volatility",
-        payload=_payload,
+        payload={"config": CONFIG, "metrics_df": metrics_df},
         chapter="Volatilidad",
     )
 

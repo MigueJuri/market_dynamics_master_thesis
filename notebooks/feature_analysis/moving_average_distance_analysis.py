@@ -36,6 +36,7 @@
 # %%
 from pathlib import Path
 import sys
+from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parents[1]  # raíz del repositorio (``thesis/``)
@@ -187,7 +188,7 @@ window_label = {"fixed": "SMA", "exponential": "EMA"}[WINDOW_TYPE]
 plot_correlation_matrix(
     dist_corr_matrix, lookbacks, lookaheads,
     title=f"Distance-to-{window_label} → Future Distance Pearson Correlation",
-    xlabel=r"$\tau_p$ (MA window)", ylabel=r"$\tau_f$ (forward window)",
+    xlabel=r"$\tau_p$ (años)", ylabel=r"$\tau_f$ (años)",
     cbar_label="Correlación de Pearson",
 )
 
@@ -246,6 +247,42 @@ plot_cross_sectional_curves(
     tau_to_yf=lambda L: 2 * L / TRADING_DAYS,
 )
 # %%
+# ## Configuración del experimento
+#
+# ``CONFIG`` reúne los parámetros que definen el análisis.
+
+CONFIG: dict[str, Any] = {
+    "ticker": TICKER,
+    "start_date": START,
+    "end_date": END,
+    "window_type": WINDOW_TYPE,
+    "tau_p": tau_p,
+    "tau_f": tau_f,
+    "feature_lags": list(feature_lags),
+    "ret_lags": list(ret_lags),
+}
+
+# %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` resume las magnitudes ya calculadas en las celdas
+# anteriores (no se recalcula nada): la correlación de la ventana única, el
+# máximo de la matriz de correlación distancia–retorno futuro y el promedio
+# cross-sectional por sector.
+
+metrics_df = pd.DataFrame(
+    [
+        {
+            "model": "Moving Average Distance",
+            "pearson_corr": float(pearson_corr),
+            "max_corr_matrix": float(np.nanmax(dist_corr_matrix)),
+            "mean_avg_corr": float(np.nanmean(avg_corr.to_numpy())),
+        }
+    ]
+)
+
+# %%
+
 # %%
 # ## Publicación de métricas en el ledger
 #
@@ -255,14 +292,9 @@ plot_cross_sectional_curves(
 if __name__ == "__main__":
     from thesis.results import publish
 
-    _payload = {}
-    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
-        if _key in globals():
-            _payload[_key.lower()] = globals()[_key]
-
     publish(
         experiment_id="feature_analysis/moving_average_distance",
-        payload=_payload,
+        payload={"config": CONFIG, "metrics_df": metrics_df},
         chapter="Moving Average Distance",
     )
 

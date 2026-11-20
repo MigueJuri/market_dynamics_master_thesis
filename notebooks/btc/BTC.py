@@ -732,7 +732,49 @@ if __name__ == "__main__":
         plt.close("all")
 
 
- # %%
+# %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` recoge las magnitudes ya calculadas en las etapas
+# anteriores (no se recalcula nada): los parámetros de la regresión
+# cuantílica power-law por cuantil (α, β y R²) y los picos destacados con su
+# fecha y su residuo suavizado.
+#
+# Las dos familias de magnitudes no comparten columnas, así que el frame va
+# en formato largo: una fila por magnitud, con ``model`` como etiqueta de la
+# magnitud y ``value`` como su valor.
+
+if __name__ == "__main__":
+    _btc_rows = []
+    for _q, _res in fit.items():
+        _params = _res["params"]
+        _obs_log = reg_df["log_price"].to_numpy()
+        _fit_log = np.log10(_res["prediction"].to_numpy())
+        _ss_res = float(np.sum((_obs_log - _fit_log) ** 2))
+        _ss_tot = float(np.sum((_obs_log - _obs_log.mean()) ** 2))
+        _btc_rows.append(
+            {"model": f"alpha (q={_q:.2f})", "value": float(_params["Intercept"])}
+        )
+        _btc_rows.append(
+            {"model": f"beta (q={_q:.2f})", "value": float(_params["log_days"])}
+        )
+        _btc_rows.append(
+            {"model": f"r2 (q={_q:.2f})", "value": 1.0 - _ss_res / _ss_tot}
+        )
+
+    for _date, _row in peak_sel.iterrows():
+        _label = f"Pico {_row['id']} ({_date:%Y-%m-%d})"
+        _btc_rows.append(
+            {"model": f"resid_ma ({_label})", "value": float(_row["value"])}
+        )
+        _btc_rows.append(
+            {"model": f"close ({_label})", "value": float(_row["close"])}
+        )
+
+    metrics_df = pd.DataFrame(_btc_rows)
+
+# %%
+
 # %%
 # ## Publicación de métricas en el ledger
 #
@@ -742,14 +784,9 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     from thesis.results import publish
 
-    _payload = {}
-    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
-        if _key in globals():
-            _payload[_key.lower()] = globals()[_key]
-
     publish(
         experiment_id="btc/btc",
-        payload=_payload,
+        payload={"config": CONFIG, "metrics_df": metrics_df},
         chapter="Bitcoin",
     )
 

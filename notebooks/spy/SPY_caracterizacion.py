@@ -608,7 +608,7 @@ if __name__ == "__main__":
         alpha=0.7,
         label=f"IC {1 - alpha:.0%} (bootstrap i.i.d.)",
     )
-    ax_r2.set_title(r"Retornos al cuadrado $x_t^2$")
+    # ax_r2.set_title(r"Retornos al cuadrado $x_t^2$")
     ax_r2.set_xlabel("Lag $k$ (días)")
     ax_r2.legend(loc="upper right")
     ax_r2.set_ylabel(r"$\rho_k$")
@@ -651,11 +651,17 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     r_2 = log_ret.values**2
     r_2_log = np.log(r_2[r_2 > 0])
+    log_r_2_moments = {
+        "media": float(np.mean(r_2_log)),
+        "varianza": float(np.var(r_2_log)),
+        "asimetría": float(stats.skew(r_2_log)),
+        "curtosis": float(stats.kurtosis(r_2_log, fisher=True)),
+    }
     squared_params = fit_squared_return_distributions(log_ret.values)
     r_2_grid = np.linspace(0.0, np.percentile(r_2, 99.5), 500)
     r_2_log_grid = np.linspace(r_2_log.min(), r_2_log.max(), 500)
 
-    fig, (ax_lin, ax_log) = plt.subplots(2, 1, figsize=CONFIG["figsize_hist_sq"])
+    fig, (ax_lin, ax_log) = plt.subplots(2, 1, figsize=(8,5))
 
     ax_lin.hist(
         r_2,
@@ -674,12 +680,14 @@ if __name__ == "__main__":
         ),
         color=CONFIG["color_normal"],
         linewidth=1.8,
+        linestyle="--",
+        alpha = 0.8,
         label="Log-normal",
     )
     ax_lin.set_xlabel(r"$x_t^2$")
     ax_lin.set_ylabel("Densidad")
-    ax_lin.set_xlim(left=-1e-5, right=float(np.percentile(r_2, 95)))
-    ax_lin.set_title("Retornos al cuadrado")
+    ax_lin.set_xlim(left=-1e-5, right=float(np.percentile(r_2, 90)))
+    # ax_lin.set_title("Retornos al cuadrado")
     ax_lin.text(
         0.1,
         0.95,
@@ -707,11 +715,13 @@ if __name__ == "__main__":
         ),
         color=CONFIG["color_normal"],
         linewidth=1.8,
+        linestyle="--",
+        alpha = 0.8,
         label="Normal",
     )
     ax_log.set_xlabel(r"$\log(x_t^2)$")
     ax_log.set_ylabel("Densidad")
-    ax_log.set_title("Logaritmo de retornos al cuadrado (escala lineal)")
+    # ax_log.set_title("Logaritmo de retornos al cuadrado (escala lineal)")
     ax_log.text(
         0.1,
         0.95,
@@ -745,6 +755,9 @@ if __name__ == "__main__":
         f"Normal log(r²): mu={squared_params['log_mu']:.5f}, "
         f"sigma={squared_params['log_sigma']:.5f}"
     )
+    print("Primeros cuatro momentos de log(r²):")
+    for name, value in log_r_2_moments.items():
+        print(f"  {name}: {value:.8f}")
 
 # %% [markdown]
 # ## Celda 8 — clustering de volatilidad y regímenes
@@ -797,7 +810,7 @@ if __name__ == "__main__":
         volatility.values,
         linewidth=0.8,
         color=CONFIG["color_vol"],
-        label=rf"Volatilidad EWMA anualizada ($\lambda$={CONFIG['lambda_ewma']})",
+        label=rf"Volatilidad EMA ($\lambda$={CONFIG['lambda_ewma']})",
     )
     ax_vol.axhline(
         vol_threshold,
@@ -807,8 +820,8 @@ if __name__ == "__main__":
         linewidth=1.0,
         label=f"Percentil {CONFIG['vol_quantile']:.0%} = {vol_threshold:.1%}",
     )
-    ax_vol.set_ylabel(r"$\sigma$ anualizada")
-    ax_vol.set_title(f"{CONFIG['ticker']}: precio y regímenes de alta volatilidad")
+    ax_vol.set_ylabel(r"$\sigma$")
+    # ax_vol.set_title(f"{CONFIG['ticker']}: precio y regímenes de alta volatilidad")
     ax_vol.legend(loc="upper left")
 
     ax_price.semilogy(
@@ -828,16 +841,16 @@ if __name__ == "__main__":
         interpolate=True,
         label=rf"$\sigma_t$ > percentil {CONFIG['vol_quantile']:.0%}",
     )
-    ax_price.set_ylabel("Precio ajustado (USD, escala log)")
+    ax_price.set_ylabel("Precio (USD, escala log)")
     ax_price.set_xlabel("Fecha")
     ax_price.legend(loc="upper left")
-
     ax_price.xaxis.set_major_locator(mdates.YearLocator(base=2))
     ax_price.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-    ax_price.set_yticks([30, 50, 100, 200, 500])
-    formatter = mticker.ScalarFormatter()
-    formatter.set_scientific(False)
-    ax_price.yaxis.set_major_formatter(formatter)
+
+    price_ticks = [25, 50, 100, 200, 500]
+    ax_price.set_yticks(price_ticks)
+    ax_price.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
+    ax_price.yaxis.set_minor_locator(mticker.NullLocator())
 
     fig.tight_layout()
 
@@ -852,7 +865,7 @@ if __name__ == "__main__":
     # Media EWMA causal: en la fecha t se usa únicamente x_(t-1).
     ewma_mean = (
         log_ret.shift(1)
-        .ewm(alpha=1.0 - CONFIG["lambda_ewma"], adjust=False)
+        .ewm(alpha=1.0 - CONFIG["lambda_ewma"], adjust=False, min_periods=30)
         .mean()
         * CONFIG["trading_days"]
     )
@@ -860,7 +873,7 @@ if __name__ == "__main__":
     fig_mu_vol, (ax_mean, ax_vol) = plt.subplots(
         2,
         1,
-        figsize=CONFIG["figsize_vol"],
+        figsize=(9,4),
         sharex=True,
     )
 
@@ -870,12 +883,22 @@ if __name__ == "__main__":
         linewidth=0.8,
         color=CONFIG["color_mu"],
     )
-    ax_mean.axhline(0.0, color="black", linewidth=0.8, alpha=0.5)
-    ax_mean.set_ylabel(r"$\bar{x}$ EWMA anualizada")
-    ax_mean.set_title(
-        rf"{CONFIG['ticker']}: media y volatilidad EWMA "
-        rf"($\lambda$={CONFIG['lambda_ewma']})"
+    ax_mean.text(
+        0.02,
+        0.95,
+        "a",
+        transform=ax_mean.transAxes,
+        va="top",
+        ha="left",
+        fontsize=12,
+        fontweight="bold",
     )
+    ax_mean.axhline(0.0, color="black", linewidth=0.8, alpha=0.5)
+    ax_mean.set_ylabel(r"$\mu$")
+    # ax_mean.set_title(
+    #     rf"{CONFIG['ticker']}: media y volatilidad EWMA "
+    #     rf"($\lambda$={CONFIG['lambda_ewma']})"
+    # )
 
     ax_vol.plot(
         volatility.index,
@@ -883,7 +906,17 @@ if __name__ == "__main__":
         linewidth=0.8,
         color=CONFIG["color_vol"],
     )
-    ax_vol.set_ylabel(r"$\sigma$ anualizada")
+    ax_vol.text(
+        0.02,
+        0.95,
+        "b",
+        transform=ax_vol.transAxes,
+        va="top",
+        ha="left",
+        fontsize=12,
+        fontweight="bold",
+    )
+    ax_vol.set_ylabel(r"$\sigma$")
     ax_vol.set_xlabel("Fecha")
     ax_vol.xaxis.set_major_locator(mdates.YearLocator(base=2))
     ax_vol.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
@@ -901,6 +934,8 @@ if __name__ == "__main__":
         plt.show()
     else:
         plt.close(fig_mu_vol)
+
+
 
 # %% [markdown]
 # ## Celda 9 — bandas incondicionales: por qué $\sigma$ constante no alcanza
@@ -929,7 +964,7 @@ if __name__ == "__main__":
     )
     ax.fill_between(
         log_ret.index,
-        mu - sigma,
+        mu - sigma, 
         mu + sigma,
         color=CONFIG["color_sigma1"],
         alpha=0.35,
@@ -969,9 +1004,9 @@ if __name__ == "__main__":
 # %% [markdown]
 # ## Celda 10 — promedio móvil de retornos
 #
-# El promedio móvil centrado de cinco años suaviza las fluctuaciones diarias de
-# los retornos logarítmicos y permite observar la evolución de su media local.
-# Tanto la media móvil como la línea horizontal se expresan como retornos
+# El promedio móvil de cinco años suaviza las fluctuaciones diarias de los
+# retornos logarítmicos y permite observar la evolución de su media local. Tanto
+# la media móvil como la línea horizontal se expresan como retornos
 # logarítmicos anualizados, usando el número de ruedas configurado.
 
 # %%
@@ -979,11 +1014,17 @@ if __name__ == "__main__":
     return_ma_window = CONFIG["return_ma_years"] * CONFIG["trading_days"]
     annualization_factor = CONFIG["trading_days"]
     log_ret_ma = (
-        log_ret.rolling(return_ma_window, center=True).mean() * annualization_factor
+        log_ret.rolling(return_ma_window).mean() * annualization_factor
     )
     historical_mean = float(log_ret.mean() * annualization_factor)
 
-    fig, ax = plt.subplots(figsize=CONFIG["figsize_bands"])
+    fig, ax = plt.subplots(figsize=(6,3), dpi = 300)
+    ax.axhline(
+        0.0,
+        color="black",
+        linewidth=0.2,
+        # alpha=0.5,
+    )
     ax.plot(
         log_ret_ma.index,
         log_ret_ma.values,
@@ -991,7 +1032,6 @@ if __name__ == "__main__":
         linewidth=1.2,
         label=(
             f"Media móvil de {CONFIG['return_ma_years']} años "
-            "de retornos logarítmicos anualizados"
         ),
     )
     ax.axhline(
@@ -1001,12 +1041,13 @@ if __name__ == "__main__":
         linewidth=1.0,
         label=f"Promedio histórico = {historical_mean:.2%}",
     )
+
     ax.set_xlabel("Fecha")
-    ax.set_ylabel("Retorno logarítmico anualizado")
-    ax.set_title(
-        f"{CONFIG['ticker']}: promedio móvil de "
-        f"{CONFIG['return_ma_years']} años de retornos logarítmicos anualizados"
-    )
+    ax.set_ylabel(r"$\mu_{\text{anual}}$")
+    # ax.set_title(
+    #     f"{CONFIG['ticker']}: promedio móvil de "
+    #     f"{CONFIG['return_ma_years']} años de retornos logarítmicos anualizados"
+    # )
     ax.legend(loc="best")
     fig.tight_layout()
 
@@ -1083,6 +1124,55 @@ if __name__ == "__main__":
 # - J.P. Morgan / Reuters (1996). *RiskMetrics — Technical Document*, 4th ed.
 
 # %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` recoge las magnitudes ya calculadas en las celdas
+# anteriores (no se recalcula nada): la tabla resumen, los momentos de los
+# retornos y los parámetros de la densidad ajustada (normal y t de Student).
+#
+# Las fuentes tienen métricas heterogéneas (tabla resumen en texto, momentos
+# y parámetros numéricos), así que el frame va en formato largo: una fila por
+# magnitud, con ``model`` como etiqueta de la magnitud y ``value`` como su
+# valor.
+
+if __name__ == "__main__":
+    _summary_obs_col = summary.columns[1]
+    _summary_ref_col = summary.columns[2]
+
+    _summary_rows = [
+        {"model": f"{row['Métrica']} (observado)", "value": row[_summary_obs_col]}
+        for _, row in summary.iterrows()
+    ] + [
+        {
+            "model": f"{row['Métrica']} (normalidad i.i.d.)",
+            "value": row[_summary_ref_col],
+        }
+        for _, row in summary.iterrows()
+    ]
+
+    _moment_rows = [
+        {
+            "model": f"{stat} ({label})",
+            "value": float(moments.loc[stat, label]),
+        }
+        for label in moments.columns
+        for stat in ("media", "desvío", "asimetría", "curtosis (exceso)")
+    ]
+
+    _density_rows = [
+        {"model": "mu (Normal)", "value": float(params["mu"])},
+        {"model": "sigma (Normal)", "value": float(params["sigma"])},
+        {"model": "nu (t-Student)", "value": float(params["df"])},
+        {"model": "loc (t-Student)", "value": float(params["loc"])},
+        {"model": "scale (t-Student)", "value": float(params["scale"])},
+    ]
+
+    metrics_df = pd.DataFrame(
+        [*_summary_rows, *_moment_rows, *_density_rows]
+    )
+
+# %%
+
 # %%
 # ## Publicación de métricas en el ledger
 #
@@ -1092,14 +1182,9 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     from thesis.results import publish
 
-    _payload = {}
-    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
-        if _key in globals():
-            _payload[_key.lower()] = globals()[_key]
-
     publish(
         experiment_id="spy/characterization",
-        payload=_payload,
+        payload={"config": CONFIG, "metrics_df": metrics_df},
         chapter="SPY",
     )
 

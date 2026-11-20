@@ -113,7 +113,7 @@ CONFIG: dict[str, Any] = {
     "ticker": "SPY",
     "start_date": "2015-01-01",
     "end_date": None,
-    "timeframe": "15Min",
+    "timeframe": "1Min",
     "feed": "sip",
     "adjustment": "all",
     # Divisiones temporales
@@ -121,8 +121,8 @@ CONFIG: dict[str, Any] = {
     "val_end": "2022-12-31",
     # Secuencias y features
     "lookback": 5,
-    "forecast_horizon": 5,
-    "smoothing_window": 15,
+    "forecast_horizon": 1,
+    "smoothing_window": 5,
     "linex_b": 0.8,
     "features": [
         "rv_daily",
@@ -1255,5 +1255,30 @@ if __name__ == "__main__":
     fig.tight_layout()
     fig.savefig(PLOT_PATHS["april2025"], dpi=150, bbox_inches="tight")
     plt.show()
+
+# %%
+# ## Publicación de métricas en el ledger
+#
+# Esta celda envía las métricas principales del experimento al ledger
+# estandarizado de la tesis.  No recalcula nada: reutiliza los diccionarios
+# ``CONFIG``, ``metrics`` y ``backtest`` producidos por las etapas
+# anteriores.
+
+if __name__ == "__main__":
+    from thesis.results import publish
+
+    publish(
+        experiment_id="volatility/lstm_alpaca",
+        payload={
+            "config": CONFIG,
+            "metrics": {
+                "LSTM": metrics["lstm"],
+                "HAR-RV": metrics["har"],
+            },
+            "backtest": backtest["backtest"],
+            "summary": backtest["summary"],
+        },
+        chapter="Volatilidad",
+    )
 
 # %%

@@ -356,3 +356,50 @@ if __name__ == "__main__":
     plt.show()
 
 # %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` recoge las magnitudes ya calculadas en las celdas
+# anteriores (no se recalcula nada): los primeros retardos de la
+# autocorrelación de los retornos y de los retornos cuadrados, el R² del
+# mejor predictor lineal AR(1) (el cuadrado de la autocorrelación del primer
+# retardo) y los momentos de la volatilidad realizada causal y forward.
+
+if __name__ == "__main__":
+    metrics_df = pd.DataFrame(
+        [
+            {
+                "model": CONFIG["ticker"],
+                "acf_ret_lag1": float(acf_ret[1]),
+                "acf_ret_lag5": float(acf_ret[5]),
+                "acf_ret_lag10": float(acf_ret[10]),
+                "acf_ret_lag20": float(acf_ret[20]),
+                "acf_sq_lag1": float(acf_sq[1]),
+                "acf_sq_lag5": float(acf_sq[5]),
+                "acf_sq_lag10": float(acf_sq[10]),
+                "acf_sq_lag20": float(acf_sq[20]),
+                "acf_ret_r2": float(acf_ret[1] ** 2),
+                "n_obs": int(n_obs),
+                "realized_vol_mean": float(realized_vol.mean()),
+                "realized_vol_std": float(realized_vol.std()),
+                "fwd_vol_mean": float(fwd_vol_ann.mean()),
+                "fwd_vol_std": float(fwd_vol_ann.std()),
+            }
+        ]
+    )
+
+# %%
+# ## Publicación de métricas en el ledger
+#
+# Celda final que envía las métricas disponibles al ledger estandarizado de la
+# tesis.  No recalcula resultados; captura las variables del notebook.
+
+if __name__ == "__main__":
+    from thesis.results import publish
+
+    publish(
+        experiment_id="volatility/lstm_description",
+        payload={"config": CONFIG, "metrics_df": metrics_df},
+        chapter="Volatilidad",
+    )
+
+# %%

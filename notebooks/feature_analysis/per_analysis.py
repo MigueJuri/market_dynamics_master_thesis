@@ -50,6 +50,7 @@
 # %%
 import sys
 from pathlib import Path
+from typing import Any
 
 # Permite ejecutar el archivo desde ``notebooks/`` o desde ``notebooks/feature_analysis/``.
 _HERE = Path(__file__).resolve().parent
@@ -404,6 +405,50 @@ for tau_f in (126, 504):
 #   relevante si el CSV está fechado "as-of" (valor de fin de mes
 #   publicado el día 1 del mes siguiente): en ese caso el PER del mes en
 #   curso no era información pública durante ese mes.
+
+# %%
+# ## Configuración del experimento
+#
+# ``CONFIG`` reúne los parámetros que definen el análisis.
+
+CONFIG: dict[str, Any] = {
+    "ticker": TICKER,
+    "start_date": START,
+    "end_date": END,
+    "tau_f": list(TAU_F),
+    "variants": list(VARIANTS.keys()),
+    "pe_reference": PE_REFERENCE,
+    "min_horizon_sessions": MIN_HORIZON_SESSIONS,
+}
+
+# %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` reformatea la ``corr_table`` ya calculada (no se recalcula
+# nada) en formato ancho: una fila por variante de la característica (columna
+# ``model``) y una columna por métrica y horizonte, de modo que cada celda
+# del ledger corresponde a una combinación única de variante, métrica y
+# horizonte.
+
+_PER_METRIC_COLS = [
+    "pearson",
+    "spearman",
+    "pearson_sub",
+    "spearman_sub",
+    "pearson_m",
+    "spearman_m",
+]
+
+metrics_df = corr_table.pivot(
+    index="variante", columns="tau_f", values=_PER_METRIC_COLS
+).sort_index()
+metrics_df.columns = [
+    f"{metric}_tau{int(tau)}" for metric, tau in metrics_df.columns
+]
+metrics_df = metrics_df.reset_index().rename(columns={"variante": "model"})
+
+# %%
+
 # %%
 # ## Publicación de métricas en el ledger
 #
@@ -413,14 +458,9 @@ for tau_f in (126, 504):
 if __name__ == "__main__":
     from thesis.results import publish
 
-    _payload = {}
-    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
-        if _key in globals():
-            _payload[_key.lower()] = globals()[_key]
-
     publish(
         experiment_id="feature_analysis/per",
-        payload=_payload,
+        payload={"config": CONFIG, "metrics_df": metrics_df},
         chapter="PER",
     )
 

@@ -430,6 +430,31 @@ if __name__ == "__main__":
         plt.close("all")
 
 # %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` recoge las magnitudes ya calculadas en las etapas
+# anteriores (no se recalcula nada): la entropía de Shannon y el HHI de
+# concentración, en su media, mínimo y máximo, más la suma de los pesos del
+# snapshot actual.
+
+if __name__ == "__main__":
+    metrics_df = pd.DataFrame(
+        [
+            {
+                "model": CONFIG["ticker"],
+                "entropy_mean": float(entropy.mean()),
+                "entropy_min": float(entropy.min()),
+                "entropy_max": float(entropy.max()),
+                "hhi_mean": float(hhi.mean()),
+                "hhi_min": float(hhi.min()),
+                "hhi_max": float(hhi.max()),
+                "snapshot_weight_sum": float(snapshot.sum()),
+            }
+        ]
+    )
+
+# %%
+
 # %%
 # ## Publicación de métricas en el ledger
 #
@@ -439,14 +464,9 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     from thesis.results import publish
 
-    _payload = {}
-    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
-        if _key in globals():
-            _payload[_key.lower()] = globals()[_key]
-
     publish(
         experiment_id="spy/sectors",
-        payload=_payload,
+        payload={"config": CONFIG, "metrics_df": metrics_df},
         chapter="SPY",
     )
 

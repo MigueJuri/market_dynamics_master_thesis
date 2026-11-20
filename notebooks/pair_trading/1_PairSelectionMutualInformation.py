@@ -73,6 +73,7 @@
 # %%
 import sys
 from pathlib import Path
+from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parents[1]
@@ -729,6 +730,52 @@ cointegrated_symbols = sorted(
 )
 print(cointegrated_symbols)
 # %%
+# ## Configuración del experimento
+#
+# ``CONFIG`` reúne los parámetros que definen la selección de pares.
+
+CONFIG: dict[str, Any] = {
+    "start_date": START,
+    "end_date": END,
+    "min_history_obs": PAIR_SELECTION_MIN_HISTORY_OBS,
+    "k_neighbors": K_NEIGHBORS,
+    "n_clusters": n_clusters,
+    "n_candidatos": N_CANDIDATOS,
+    "significancia_adf": SIGNIFICANCIO_ADF,
+    "min_sesiones_adf": MIN_SESIONES_ADF,
+    "seed": SEED,
+}
+
+# %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` recoge las magnitudes ya calculadas en las celdas
+# anteriores (no se recalcula nada): los pares con mayor información mutua
+# KSG y las métricas de alineación sectorial del clustering de Ward.
+#
+# Las dos familias de magnitudes no comparten columnas, así que el frame va
+# en formato largo: una fila por magnitud, con ``model`` como etiqueta de la
+# magnitud y ``value`` como su valor.
+
+N_TOP_PARES_METRICAS = 10
+
+metrics_df = pd.DataFrame(
+    [
+        *[
+            {"model": f"MI KSG ({t1}–{t2})", "value": float(val)}
+            for t1, t2, val in top_20_pairs[:N_TOP_PARES_METRICAS]
+        ],
+        {"model": "weighted_purity", "value": float(report.weighted_purity)},
+        {"model": "normalized_entropy", "value": float(report.normalized_entropy)},
+        {"model": "mean_hhi", "value": float(report.mean_hhi)},
+        {"model": "ari", "value": float(report.ari)},
+        {"model": "ami", "value": float(report.ami)},
+        {"model": "v_measure", "value": float(report.v_measure)},
+    ]
+)
+
+# %%
+
 # %%
 # ## Publicación de métricas en el ledger
 #
@@ -738,14 +785,9 @@ print(cointegrated_symbols)
 if __name__ == "__main__":
     from thesis.results import publish
 
-    _payload = {}
-    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
-        if _key in globals():
-            _payload[_key.lower()] = globals()[_key]
-
     publish(
         experiment_id="pair_trading/selection_mi",
-        payload=_payload,
+        payload={"config": CONFIG, "metrics_df": metrics_df},
         chapter="Pair Trading",
     )
 

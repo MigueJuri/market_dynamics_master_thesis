@@ -16,6 +16,7 @@
 import warnings
 from pathlib import Path
 import sys
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -447,6 +448,70 @@ print("Weight distribution (quantiles):")
 print(weights.quantile([0.10, 0.25, 0.50, 0.75, 0.90]).round(4))
 
 # %%
+# ## Configuración del experimento
+#
+# ``CONFIG`` reúne los parámetros que definen la estrategia y su protocolo
+# de evaluación.
+
+CONFIG: dict[str, Any] = {
+    "ticker": TICKER,
+    # Ventanas EWMA (en sesiones) y quemado inicial.
+    "fast_span": FAST_SPAN,
+    "slow_span": SLOW_SPAN,
+    "burn_in": BURN_IN,
+    # Umbrales de la barrera triple.
+    "pt_sl": list(PT_SL),
+    "min_ret": MIN_RET,
+    "vol_span": VOL_SPAN,
+    "num_bars": NUM_BARS,
+    # Protocolo de evaluación.
+    "annual_rf": ANNUAL_RF,
+    "trading_days": TRADING_DAYS,
+    "cost_bps": 0.0,
+}
+
+# %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` recoge las magnitudes ya calculadas en las celdas
+# anteriores (no se recalcula nada): dos filas de desempeño (estrategia y
+# buy & hold) y una fila con la evaluación de la barrera triple.
+
+metrics_df = pd.DataFrame(
+    [
+        {
+            "model": "Strategy",
+            "total_return": float(total_strat),
+            "ann_return": float(ann_strat),
+            "vol": float(vol_strat),
+            "sharpe": float(sharpe_strat),
+            "maxdd": float(max_dd_strat),
+            "n_trades": int(n_trades),
+        },
+        {
+            "model": "Buy & Hold",
+            "total_return": float(total_bh),
+            "ann_return": float(ann_bh),
+            "vol": float(vol_bh),
+            "sharpe": float(sharpe_bh),
+            "maxdd": float(max_dd_bh),
+        },
+        {
+            "model": "Triple-Barrier F1",
+            "precision": float(precision_unweighted),
+            "recall": float(recall_unweighted),
+            "f1": float(f1_unweighted),
+            "precision_weighted": float(precision_weighted),
+            "recall_weighted": float(recall_weighted),
+            "f1_weighted": float(f1_weighted),
+            "hit_rate": float(hit_rate),
+            "hit_rate_weighted": float(hit_rate_w),
+        },
+    ]
+)
+
+# %%
+
 # %%
 # ## Publicación de métricas en el ledger
 #
@@ -456,14 +521,9 @@ print(weights.quantile([0.10, 0.25, 0.50, 0.75, 0.90]).round(4))
 if __name__ == "__main__":
     from thesis.results import publish
 
-    _payload = {}
-    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
-        if _key in globals():
-            _payload[_key.lower()] = globals()[_key]
-
     publish(
         experiment_id="trend_following/strategy_v2",
-        payload=_payload,
+        payload={"config": CONFIG, "metrics_df": metrics_df},
         chapter="Trend Following",
     )
 

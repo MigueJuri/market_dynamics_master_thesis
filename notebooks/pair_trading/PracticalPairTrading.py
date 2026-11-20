@@ -37,6 +37,7 @@
 # %%
 import sys
 from pathlib import Path
+from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parents[1]
@@ -47,6 +48,13 @@ if str(_SRC) not in sys.path:
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+try:  # ``display`` solo existe en el kernel de Jupyter.
+    from IPython.display import display
+except ImportError:  # pragma: no cover - ejecución como script
+
+    def display(obj: Any) -> None:  # type: ignore[misc]
+        print(obj)
 
 from thesis.backtest_diagnostics import compute_pair_backtest_diagnostics
 from thesis.config import DATA_DIR, END, START
@@ -586,6 +594,46 @@ plt.title("Curva de capital", fontweight="bold")
 plt.legend(loc="best", fontsize=8)
 plt.grid(True, alpha=0.3)
 # %%
+# ## Configuración del experimento
+#
+# ``CONFIG`` reúne los parámetros que definen el par, las ventanas del
+# backtest walk-forward y las reglas de entrada y salida.
+
+CONFIG: dict[str, Any] = {
+    "ticker_a": TICKER_A,
+    "ticker_b": TICKER_B,
+    "start_date": START_DATE,
+    "end_date": END_DATE,
+    "z_window": Z_WINDOW,
+    "hedge_window": HEDGE_WINDOW,
+    "entry_z": ENTRY_Z,
+    "exit_z": EXIT_Z,
+    "cost": COST,
+    "max_abs_beta": MAX_ABS_BETA,
+    "benchmark_ticker": BENCHMARK_TICKER,
+}
+
+# %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` recoge las magnitudes ya calculadas en las celdas
+# anteriores (no se recalcula nada): las métricas del backtest de la
+# estrategia (Sharpe, retorno total, drawdown máximo y número de
+# operaciones) y la comparativa con los benchmarks del mismo periodo.
+
+metrics_df = comparativa.rename(
+    columns={"estrategia": "model", "retorno_total": "total_return"}
+)[["model", "total_return", "sharpe"]].copy()
+metrics_df["max_drawdown"] = np.nan
+metrics_df["trades"] = np.nan
+# La fila de la estrategia reproduce las métricas del propio backtest
+# (comprobado con ``assert`` en la celda de coherencia).
+_strat_mask = metrics_df["model"] == "Estrategia pair trading"
+metrics_df.loc[_strat_mask, "max_drawdown"] = float(bt.max_drawdown)
+metrics_df.loc[_strat_mask, "trades"] = int(bt.trades)
+
+# %%
+
 # %%
 # ## Publicación de métricas en el ledger
 #
@@ -595,14 +643,9 @@ plt.grid(True, alpha=0.3)
 if __name__ == "__main__":
     from thesis.results import publish
 
-    _payload = {}
-    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
-        if _key in globals():
-            _payload[_key.lower()] = globals()[_key]
-
     publish(
         experiment_id="pair_trading/practical",
-        payload=_payload,
+        payload={"config": CONFIG, "metrics_df": metrics_df},
         chapter="Pair Trading",
     )
 

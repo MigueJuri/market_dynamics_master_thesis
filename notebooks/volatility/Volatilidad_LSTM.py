@@ -100,7 +100,7 @@ CONFIG: dict[str, Any] = {
     # Secuencias y features
     "lookback": 5,
     "forecast_horizon": 5,
-    "smoothing_window": 15,
+    "smoothing_window": 1,
     "linex_b": 0.8,
     "features": [
         "rv_daily",
@@ -1115,7 +1115,7 @@ if __name__ == "__main__":
     fig.savefig(PLOT_PATHS["april2025"], dpi=150, bbox_inches="tight")
     plt.show()
 
-# %%
+
 # %%
 # ## Publicación de métricas en el ledger
 #

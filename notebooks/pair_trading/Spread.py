@@ -67,6 +67,9 @@
 # %%
 import sys
 from pathlib import Path
+from typing import Any
+
+import pandas as pd
 
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parents[1]
@@ -77,6 +80,7 @@ if str(_SRC) not in sys.path:
 from thesis.config import DATA_DIR
 from thesis.market_data import load_multiple_prices
 from thesis.pair_trading import (
+    adf_test,
     extract_and_construct_spread,
     fit_ou_process,
 )
@@ -192,6 +196,48 @@ plot_pair_overview(
 )
 
 # %%
+# ## Configuración del experimento
+#
+# ``CONFIG`` reúne los parámetros que definen el par y su ventana de
+# análisis.
+
+CONFIG: dict[str, Any] = {
+    "ticker_a": TICKER_A,
+    "ticker_b": TICKER_B,
+    "start_date": START_DATE,
+    "end_date": END_DATE,
+    "dt": 1.0,
+}
+
+# %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` recoge las magnitudes ya calculadas en las celdas
+# anteriores (no se recalcula nada): el hedge ratio, los parámetros del
+# proceso de Ornstein-Uhlenbeck, el z-score actual y el diagnóstico ADF del
+# spread (el mismo test que ya se aplicó al construir el spread).
+
+_adf = adf_test(spread_series)
+
+metrics_df = pd.DataFrame(
+    [
+        {
+            "model": f"{TICKER_A}–{TICKER_B}",
+            "hedge_ratio": float(hedge_ratio),
+            "ou_theta": float(ou_params.theta),
+            "ou_mu": float(ou_params.mu),
+            "ou_sigma": float(ou_params.sigma),
+            "ou_half_life": float(ou_params.half_life),
+            "ou_r_squared": float(ou_params.r_squared),
+            "z_score": float(z_score_t),
+            "adf_statistic": float(_adf.statistic),
+            "adf_pvalue": float(_adf.pvalue),
+        }
+    ]
+)
+
+# %%
+
 # %%
 # ## Publicación de métricas en el ledger
 #
@@ -201,14 +247,9 @@ plot_pair_overview(
 if __name__ == "__main__":
     from thesis.results import publish
 
-    _payload = {}
-    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
-        if _key in globals():
-            _payload[_key.lower()] = globals()[_key]
-
     publish(
         experiment_id="pair_trading/spread",
-        payload=_payload,
+        payload={"config": CONFIG, "metrics_df": metrics_df},
         chapter="Pair Trading",
     )
 

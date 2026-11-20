@@ -56,6 +56,7 @@ from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
+import pandas as pd
 
 
 def _find_repo_root(start: Path) -> Path:
@@ -418,6 +419,34 @@ if __name__ == "__main__":
         plt.close("all")
 
 # %%
+
+# %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` recoge las magnitudes ya calculadas en las etapas
+# anteriores (no se recalcula nada): el rango relativo de la distribución,
+# el número de bins y de niveles válidos, el rango de precio y el número de
+# buckets del precio medio promediado.
+
+if __name__ == "__main__":
+    metrics_df = pd.DataFrame(
+        [
+            {
+                "model": CONFIG["symbol"],
+                "max_range": float(max_range),
+                "n_bins_bid": int(len(bids_binned)),
+                "n_bins_ask": int(len(asks_binned)),
+                "price_min": float(df_avg["MidPrice"].min()),
+                "price_max": float(df_avg["MidPrice"].max()),
+                "n_valid_levels_bid": int(len(snap_bids)),
+                "n_valid_levels_ask": int(len(snap_asks)),
+                "n_mid_buckets": int(len(df_avg)),
+            }
+        ]
+    )
+
+# %%
+
 # %%
 # ## Publicación de métricas en el ledger
 #
@@ -427,14 +456,9 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     from thesis.results import publish
 
-    _payload = {}
-    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
-        if _key in globals():
-            _payload[_key.lower()] = globals()[_key]
-
     publish(
         experiment_id="spy/orderbook",
-        payload=_payload,
+        payload={"config": CONFIG, "metrics_df": metrics_df},
         chapter="SPY",
     )
 

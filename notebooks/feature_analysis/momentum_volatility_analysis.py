@@ -37,6 +37,7 @@
 # %%
 from pathlib import Path
 import sys
+from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parents[1]  # raíz del repositorio (``thesis/``)
@@ -115,7 +116,7 @@ target_by_lag = {
 
 plot_scatter_grid(
     feature_by_lag, target_by_lag,
-    feature_label="Momentum / vol", target_label="Future return / vol",
+    feature_label=r"$\tau_p=$", target_label=r"$\tau_f= $",
     feature_format=lambda k: f"{k}d", target_format=lambda k: f"{k}d",
 )
 
@@ -148,7 +149,7 @@ print(f"Pearson Correlation: {pearson_corr:.3f}")
 sharpe_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
     log_ret.shift(1), log_ret,
     max_lookback=2 * TRADING_DAYS, max_lookahead=2 * TRADING_DAYS,
-    steps=100, overlap=True,
+    steps=100, overlap=True, min_valid=50,
     feature_op=scaled_return_op,
     target_transform=future_return_over_past_volatility,
     target_window_type="fixed",
@@ -157,8 +158,8 @@ sharpe_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
 plot_correlation_matrix(
     sharpe_corr_matrix, lookbacks, lookaheads,
     title="Momentum/Volatility → Future Return/Volatility Correlation",
-    xlabel=r"$\tau_p$ (volatility-scaled momentum)",
-    ylabel=r"$\tau_f$ (forward window)",
+    xlabel=r"$\tau_p$",
+    ylabel=r"$\tau_f$",
     cbar_label="Correlación de Pearson",
 )
 
@@ -212,7 +213,42 @@ plot_cross_sectional_curves(
 )
 
 # %%
- 
+# ## Configuración del experimento
+#
+# ``CONFIG`` reúne los parámetros que definen el análisis.
+
+CONFIG: dict[str, Any] = {
+    "ticker": TICKER,
+    "start_date": START,
+    "end_date": END,
+    "sigma_floor": SIGMA_FLOOR,
+    "tau_p": tau_p,
+    "tau_f": tau_f,
+    "feature_lags": list(feature_lags),
+    "ret_lags": list(ret_lags),
+}
+
+# %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` resume las magnitudes ya calculadas en las celdas
+# anteriores (no se recalcula nada): la correlación de la ventana única, el
+# máximo de la matriz de correlación momentum/volatilidad–retorno futuro y
+# el promedio cross-sectional por sector.
+
+metrics_df = pd.DataFrame(
+    [
+        {
+            "model": "Momentum-Volatilidad",
+            "pearson_corr": float(pearson_corr),
+            "max_corr_matrix": float(np.nanmax(sharpe_corr_matrix)),
+            "mean_avg_corr": float(np.nanmean(avg_corr.to_numpy())),
+        }
+    ]
+)
+
+# %%
+
 # %%
 # ## Publicación de métricas en el ledger
 #
@@ -222,14 +258,9 @@ plot_cross_sectional_curves(
 if __name__ == "__main__":
     from thesis.results import publish
 
-    _payload = {}
-    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
-        if _key in globals():
-            _payload[_key.lower()] = globals()[_key]
-
     publish(
         experiment_id="feature_analysis/momentum_volatility",
-        payload=_payload,
+        payload={"config": CONFIG, "metrics_df": metrics_df},
         chapter="Momentum-Volatilidad",
     )
 

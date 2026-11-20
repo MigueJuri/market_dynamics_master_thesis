@@ -21,6 +21,7 @@
 # %%
 from pathlib import Path
 import sys
+from typing import Any
 
 # Permite ejecutar el archivo desde ``notebooks/`` o desde ``notebooks/feature_analysis/``.
 _HERE = Path(__file__).resolve().parent
@@ -85,8 +86,7 @@ target_by_lag = {r: forward_return(price, r) for r in ret_to_predict_lags}
 scale = 0.7
 plot_scatter_grid(
     momentum_by_lag, target_by_lag,
-    figsize=(12.0*scale, 10.0*scale),
-    feature_label="Momentum", target_label="Retorno Futuro",
+    feature_label=r"$M_t$, ", target_label=r"$F_t$, ",
     feature_format=lambda k: rf"$\tau_p=${k/252:.2f} años", target_format=lambda k: rf"$\tau_f=${k/252:.2f} años",
 )
 
@@ -101,9 +101,9 @@ future_return = forward_return(price, ret_k)
 pearson_corr = plot_feature_boxplots(
     avg_momentum, future_return,
     n_quantiles= 10,
-    x_axis = "quantiles",
-    feature_name="Momentum", target_name="Retorno futuro",
-    feature_window=mom_k, target_window=ret_k,
+    x_axis = "bins",
+    feature_name=r"$M_t$", target_name="$F_t$",
+    feature_window=mom_k, target_window=ret_k, show_cumulative = True
 )
 print(f"Pearson Correlation: {pearson_corr:.3f}")
 
@@ -112,7 +112,7 @@ print(f"Pearson Correlation: {pearson_corr:.3f}")
 mom_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
     log_ret, log_ret,
     max_lookback=2 * TRADING_DAYS, max_lookahead=2 * TRADING_DAYS,
-    steps=300, overlap=True,
+    steps=100, overlap=True ,
     feature_op="sum", target_op="sum", correlation="pearson",
 )
 plot_correlation_matrix(
@@ -138,25 +138,26 @@ plot_correlation_matrix(
 # motivación que las bandas i.i.d. de la ACF en
 # ``notebooks/spy/SPY_caracterizacion.py``.
 
-half_windows = np.arange(5, TRADING_DAYS + 1, 5)
+half_windows = np.arange(5, 4*TRADING_DAYS + 1, 5)
 tau_years = 2 * half_windows / TRADING_DAYS
 
-point, ci_low, ci_high = bootstrap_momentum_forward_correlation(
-    log_ret, half_windows, n_bootstrap=1000, seed=SEED,
+point, median, ci_low, ci_high = bootstrap_momentum_forward_correlation(
+    log_ret, half_windows, n_bootstrap=5000, seed=SEED, alpha=0.50, 
 )
 
 fig, ax = plt.subplots(figsize=(7.0, 3.5))
 ax.plot(tau_years, point, color="tab:blue", label="Observado")
+ax.plot(tau_years, median, color="tab:orange", ls="--", label="Mediana bootstrap")
 ax.fill_between(
     tau_years, ci_low, ci_high, color="tab:blue", alpha=0.3,
-    label="IC 95 % (bootstrap i.i.d.)",
+    label="IC 50 % (bootstrap i.i.d.)",
 )
 ax.axhline(0, color="gray", lw=0.8, ls="--")
 ax.set_xlabel(r"$\tau$ (años)")
 ax.set_ylabel("Correlación de Pearson")
-ax.set_title(
-    "Momentum–retorno futuro: correlación en $\\tau$ con banda nula i.i.d."
-)
+# ax.set_title(
+#     "Momentum–retorno futuro: correlación en $\\tau$ con banda nula i.i.d."
+# )
 ax.legend()
 plt.tight_layout()
 plt.show()
@@ -204,6 +205,56 @@ plot_cross_sectional_curves(
     tau_to_yf=lambda L: 2 * L / TRADING_DAYS,
 )
 # %%
+# ## Configuración del experimento
+#
+# ``CONFIG`` reúne los parámetros que definen el análisis.  Los valores de
+# la banda bootstrap son un espejo de los usados en la llamada anterior.
+
+CONFIG: dict[str, Any] = {
+    "ticker": TICKER,
+    "start_date": START,
+    "end_date": END,
+    "momentum_lags": list(momentum_lags),
+    "ret_to_predict_lags": list(ret_to_predict_lags),
+    "mom_k": mom_k,
+    "ret_k": ret_k,
+    "half_windows": half_windows.tolist(),
+    "n_bootstrap": 5000,
+    "bootstrap_alpha": 0.50,
+    "seed": SEED,
+}
+
+# %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` resume las magnitudes ya calculadas en las celdas
+# anteriores (no se recalcula nada): la correlación de la ventana única, la
+# matriz de correlación momentum–retorno futuro, el promedio cross-sectional
+# por sector y la banda nula bootstrap en el $\tau$ más informativo (el de
+# mayor correlación observada en valor absoluto).
+
+_mom_tau_idx = int(np.nanargmax(np.abs(point)))
+
+metrics_df = pd.DataFrame(
+    [
+        {
+            "model": "Momentum",
+            "pearson_corr": float(pearson_corr),
+            "max_corr_matrix": float(np.nanmax(mom_corr_matrix)),
+            "median_corr_matrix": float(np.nanmedian(mom_corr_matrix)),
+            "mean_avg_corr": float(np.nanmean(avg_corr.to_numpy())),
+            "bootstrap_point": float(point[_mom_tau_idx]),
+            "bootstrap_median": float(median[_mom_tau_idx]),
+            "bootstrap_ci_low": float(ci_low[_mom_tau_idx]),
+            "bootstrap_ci_high": float(ci_high[_mom_tau_idx]),
+            "bootstrap_tau_years": float(tau_years[_mom_tau_idx]),
+        }
+    ]
+)
+
+# %%
+
+# %%
 # ## Publicación de métricas en el ledger
 #
 # Celda final que envía las métricas disponibles al ledger estandarizado de la
@@ -212,14 +263,9 @@ plot_cross_sectional_curves(
 if __name__ == "__main__":
     from thesis.results import publish
 
-    _payload = {}
-    for _key in ("CONFIG", "config", "metrics", "results", "summary", "backtest"):
-        if _key in globals():
-            _payload[_key.lower()] = globals()[_key]
-
     publish(
         experiment_id="feature_analysis/momentum",
-        payload=_payload,
+        payload={"config": CONFIG, "metrics_df": metrics_df},
         chapter="Momentum",
     )
 

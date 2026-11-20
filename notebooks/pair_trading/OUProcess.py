@@ -64,6 +64,7 @@
 # %%
 import sys
 from pathlib import Path
+from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parents[1]
@@ -73,6 +74,7 @@ if str(_SRC) not in sys.path:
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 from thesis.pair_trading import simulate_gbm, simulate_ou_process
 
@@ -144,3 +146,64 @@ for label, ax in zip(["(a)", "(b)"], (ax1, ax2)):
 
 plt.tight_layout()
 plt.show()
+
+# %%
+# ## Configuración de la simulación
+#
+# ``CONFIG`` reúne los parámetros de la simulación: los del proceso de
+# Ornstein-Uhlenbeck del spread y los del movimiento browniano geométrico
+# del primer activo.
+
+CONFIG: dict[str, Any] = {
+    # Proceso OU (spread)
+    "T": T,
+    "dt": dt,
+    "theta": theta,
+    "mu_ou": mu_ou,
+    "sigma_ou": sigma_ou,
+    "x0": x0,
+    # Movimiento browniano geométrico (activo 1)
+    "s0": S0,
+    "mu_gbm": mu_gbm,
+    "sigma_gbm": sigma_gbm,
+    # Reconstrucción del activo 2
+    "beta": beta,
+}
+
+# %%
+# ## Métricas del experimento
+#
+# ``metrics_df`` recoge los parámetros del proceso simulado (no se recalcula
+# nada): los del OU y los descriptivos de la trayectoria del spread.
+
+metrics_df = pd.DataFrame(
+    [
+        {
+            "model": "OU",
+            "theta": float(theta),
+            "mu": float(mu_ou),
+            "sigma": float(sigma_ou),
+            "x0": float(x0),
+            "half_life": float(np.log(2.0) / theta),
+            "spread_mean": float(np.mean(spread)),
+            "spread_std": float(np.std(spread, ddof=1)),
+        }
+    ]
+)
+
+# %%
+# ## Publicación de métricas en el ledger
+#
+# Celda final que envía las métricas disponibles al ledger estandarizado de la
+# tesis.  No recalcula resultados; captura las variables del notebook.
+
+if __name__ == "__main__":
+    from thesis.results import publish
+
+    publish(
+        experiment_id="pair_trading/ou",
+        payload={"config": CONFIG, "metrics_df": metrics_df},
+        chapter="Pair Trading",
+    )
+
+# %%
