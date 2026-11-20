@@ -98,12 +98,50 @@ def test_lstm_daily_adapter():
     assert all(r.chapter == "Volatilidad" for r in records)
 
 
+def test_lstm_alpaca_adapter():
+    adapter = ADAPTERS["volatility/lstm_alpaca"]
+    records = adapter("volatility/lstm_alpaca", _lstm_payload())
+    assert records
+    assert all(isinstance(r, ResultRecord) for r in records)
+    assert any(r.metric_name == "R²" and r.model == "LSTM" for r in records)
+    assert any(r.experiment == "LSTM Alpaca" for r in records)
+    assert all(r.chapter == "Volatilidad" for r in records)
+
+
 def test_lstm_daily_adapter_candidate_on_bad_payload():
     adapter = ADAPTERS["volatility/lstm_daily"]
     records = adapter("volatility/lstm_daily", "no es dict")
     assert len(records) == 1
     assert records[0].status == "candidate"
     assert "adapter pendiente" in records[0].notes
+
+
+#: Los 18 experimentos canónicos de los notebooks del repositorio.
+CANONICAL_EXPERIMENTS = (
+    "feature_analysis/momentum",
+    "feature_analysis/volatility",
+    "feature_analysis/momentum_volatility",
+    "feature_analysis/moving_average_distance",
+    "feature_analysis/per",
+    "trend_following/strategy_v2",
+    "pair_trading/selection_mi",
+    "pair_trading/selection_pearson",
+    "pair_trading/practical",
+    "pair_trading/spread",
+    "pair_trading/ou",
+    "btc/btc",
+    "spy/characterization",
+    "spy/sectors",
+    "spy/orderbook",
+    "volatility/lstm_daily",
+    "volatility/lstm_alpaca",
+    "volatility/lstm_description",
+)
+
+
+def test_all_canonical_experiments_have_adapter():
+    missing = [exp for exp in CANONICAL_EXPERIMENTS if exp not in ADAPTERS]
+    assert not missing
 
 
 @pytest.mark.parametrize(
@@ -119,10 +157,12 @@ def test_lstm_daily_adapter_candidate_on_bad_payload():
         "pair_trading/selection_pearson",
         "pair_trading/practical",
         "pair_trading/spread",
+        "pair_trading/ou",
         "btc/btc",
         "spy/characterization",
         "spy/sectors",
         "spy/orderbook",
+        "volatility/lstm_description",
     ],
 )
 def test_generic_adapters_accept_payload(experiment_id: str):
@@ -130,6 +170,25 @@ def test_generic_adapters_accept_payload(experiment_id: str):
     records = adapter(experiment_id, _generic_payload())
     assert records
     assert all(isinstance(r, ResultRecord) for r in records)
+    assert all(r.status == "candidate" for r in records)
+    assert all(r.metric_value != "adapter_pending" for r in records)
+
+
+def test_generic_adapter_skips_nan_metrics():
+    """Las métricas que no aplican a una fila (``nan``) no se publican."""
+    payload = {
+        "config": {"ticker": "SPY", "start_date": "1993-01-01", "end_date": "2026-01-01"},
+        "metrics_df": pd.DataFrame(
+            [
+                {"model": "A", "sharpe": 1.5, "max_drawdown": float("nan")},
+                {"model": "B", "sharpe": 1.6, "max_drawdown": -0.2},
+            ]
+        ),
+    }
+    records = ADAPTERS["pair_trading/practical"]("pair_trading/practical", payload)
+    assert records
+    assert all(r.metric_name != "max_drawdown" or r.model == "B" for r in records)
+    assert not any(r.metric_name == "max_drawdown" and r.model == "A" for r in records)
 
 
 def test_generic_adapter_candidate_on_empty_payload():

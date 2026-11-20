@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from thesis.results import _UNKNOWN, ResultRecord, derive_result_id
@@ -195,91 +196,103 @@ def _records_from_summary(
     return records
 
 
-def _lstm_daily_adapter(experiment_id: str, payload: Any) -> list[ResultRecord]:
-    """Adapter para ``volatility/Volatilidad_LSTM.py``."""
-    if not isinstance(payload, dict):
-        return _candidate_record(experiment_id, "payload no es dict")
+def _lstm_adapter(
+    experiment: str,
+    code_path: str,
+    asset_default: str = "SPY",
+) -> Callable[[str, Any], list[ResultRecord]]:
+    """Factory de adapters para los experimentos de volatilidad con LSTM.
 
-    config = payload.get("config", {})
-    metrics = payload.get("metrics", {})
-    backtest = payload.get("backtest", {})
-    summary = payload.get("summary")
-    chapter = "Volatilidad"
-    experiment = "LSTM diario"
-    asset = config.get("ticker", "SPY")
-    code_path = "notebooks/volatility/Volatilidad_LSTM.py"
-    target = "log-vol realizada forward 5d anualizada"
+    El payload esperado es ``{"config": ..., "metrics": {modelo: métricas},
+    "backtest": {...}, "summary": DataFrame}``: las métricas de cada modelo
+    se expanden en un record por métrica, el backtest aporta las métricas de
+    vol-timing y el ``summary`` la comparación de estrategias.
+    """
 
-    records: list[ResultRecord] = []
-    if isinstance(metrics, dict):
-        records.extend(
-            _records_from_model_metrics(
-                chapter=chapter,
-                experiment=experiment,
-                config=config,
-                metrics_by_model=metrics,
-                code_path=code_path,
-                asset=asset,
-                baseline="HAR-RV",
-                target_definition=target,
+    def adapter(experiment_id: str, payload: Any) -> list[ResultRecord]:
+        if not isinstance(payload, dict):
+            return _candidate_record(experiment_id, "payload no es dict")
+
+        config = payload.get("config", {})
+        metrics = payload.get("metrics", {})
+        backtest = payload.get("backtest", {})
+        summary = payload.get("summary")
+        chapter = "Volatilidad"
+        asset = config.get("ticker", asset_default)
+        target = "log-vol realizada forward 5d anualizada"
+
+        records: list[ResultRecord] = []
+        if isinstance(metrics, dict):
+            records.extend(
+                _records_from_model_metrics(
+                    chapter=chapter,
+                    experiment=experiment,
+                    config=config,
+                    metrics_by_model=metrics,
+                    code_path=code_path,
+                    asset=asset,
+                    baseline="HAR-RV",
+                    target_definition=target,
+                )
             )
-        )
 
-    # Métricas de vol-timing del backtest.
-    if isinstance(backtest, dict):
-        data_period, train_dates, val_dates, test_dates = _extract_period(config)
-        protocol = _protocol_from_config(config)
-        bt_metrics = {
-            k: v
-            for k, v in backtest.items()
-            if k in ("sharpe_improvement", "sharpe_vs_bh", "total_vol", "total_base", "total_bh")
-        }
-        for metric_name, value in bt_metrics.items():
-            label = metric_name.replace("_", " ")
-            rec = ResultRecord(
-                result_id=derive_result_id(
+        # Métricas de vol-timing del backtest.
+        if isinstance(backtest, dict):
+            data_period, train_dates, val_dates, test_dates = _extract_period(config)
+            protocol = _protocol_from_config(config)
+            bt_metrics = {
+                k: v
+                for k, v in backtest.items()
+                if k in ("sharpe_improvement", "sharpe_vs_bh", "total_vol", "total_base", "total_bh")
+            }
+            for metric_name, value in bt_metrics.items():
+                label = metric_name.replace("_", " ")
+                rec = ResultRecord(
+                    result_id=derive_result_id(
+                        chapter=chapter,
+                        experiment=experiment,
+                        metric_name=label,
+                        model="Vol-Timed",
+                        asset=asset,
+                        fingerprint={"metric": metric_name},
+                    ),
                     chapter=chapter,
                     experiment=experiment,
                     metric_name=label,
+                    metric_value=value,
+                    unit=_METRIC_UNITS.get(metric_name, _UNKNOWN),
                     model="Vol-Timed",
+                    baseline="Buy & Hold",
                     asset=asset,
-                    fingerprint={"metric": metric_name},
-                ),
-                chapter=chapter,
-                experiment=experiment,
-                metric_name=label,
-                metric_value=value,
-                unit=_METRIC_UNITS.get(metric_name, _UNKNOWN),
-                model="Vol-Timed",
-                baseline="Buy & Hold",
-                asset=asset,
-                data_period=data_period,
-                train_dates=train_dates,
-                val_dates=val_dates,
-                test_dates=test_dates,
-                target_definition=target,
-                protocol=protocol,
-                code_path=code_path,
-                status="published",
-            )
-            records.append(rec)
+                    data_period=data_period,
+                    train_dates=train_dates,
+                    val_dates=val_dates,
+                    test_dates=test_dates,
+                    target_definition=target,
+                    protocol=protocol,
+                    code_path=code_path,
+                    status="published",
+                )
+                records.append(rec)
 
-    if isinstance(summary, pd.DataFrame):
-        records.extend(
-            _records_from_summary(
-                chapter=chapter,
-                experiment=experiment,
-                config=config,
-                summary=summary,
-                code_path=code_path,
-                asset=asset,
-                baseline="Buy & Hold",
+        if isinstance(summary, pd.DataFrame):
+            records.extend(
+                _records_from_summary(
+                    chapter=chapter,
+                    experiment=experiment,
+                    config=config,
+                    summary=summary,
+                    code_path=code_path,
+                    asset=asset,
+                    baseline="Buy & Hold",
+                )
             )
-        )
 
-    if not records:
-        return _candidate_record(experiment_id, "sin métricas estructuradas")
-    return records
+        if not records:
+            return _candidate_record(experiment_id, "sin métricas estructuradas")
+        return records
+
+    return adapter
 
 
 def _generic_dataframe_adapter(chapter: str) -> Callable[[str, Any], list[ResultRecord]]:
@@ -311,6 +324,11 @@ def _generic_dataframe_adapter(chapter: str) -> Callable[[str, Any], list[Result
             for metric_name in df.columns:
                 if metric_name == model_col:
                     continue
+                value = row[metric_name]
+                if value is None or (isinstance(value, float) and np.isnan(value)):
+                    # La métrica no aplica a esta fila (p. ej. el drawdown de
+                    # un benchmark): no se publica una fila con ``nan``.
+                    continue
                 label = _METRIC_LABELS.get(metric_name, metric_name)
                 rec = ResultRecord(
                     result_id=derive_result_id(
@@ -323,7 +341,7 @@ def _generic_dataframe_adapter(chapter: str) -> Callable[[str, Any], list[Result
                     chapter=chapter,
                     experiment=experiment,
                     metric_name=label,
-                    metric_value=row[metric_name],
+                    metric_value=value,
                     unit=_METRIC_UNITS.get(metric_name, _UNKNOWN),
                     model=model,
                     asset=config.get("ticker", _UNKNOWN),
@@ -363,7 +381,16 @@ def _candidate_record(experiment_id: str, reason: str) -> list[ResultRecord]:
 #: Registro global de adaptadores.  Los ``experiment_id`` ausentes se marcan
 #: automáticamente como ``candidate`` en :func:`thesis.results.publish`.
 ADAPTERS: dict[str, Callable[[str, Any], list[ResultRecord]]] = {
-    "volatility/lstm_daily": _lstm_daily_adapter,
+    "volatility/lstm_daily": _lstm_adapter(
+        experiment="LSTM diario",
+        code_path="notebooks/volatility/Volatilidad_LSTM.py",
+        asset_default="SPY",
+    ),
+    "volatility/lstm_alpaca": _lstm_adapter(
+        experiment="LSTM Alpaca",
+        code_path="notebooks/volatility/Volatilidad_LSTM_Alpaca.py",
+        asset_default="SPY",
+    ),
     # Feature analysis
     "feature_analysis/momentum": _generic_dataframe_adapter("Momentum"),
     "feature_analysis/volatility": _generic_dataframe_adapter("Volatilidad"),
@@ -377,9 +404,12 @@ ADAPTERS: dict[str, Callable[[str, Any], list[ResultRecord]]] = {
     "pair_trading/selection_pearson": _generic_dataframe_adapter("Pair Trading"),
     "pair_trading/practical": _generic_dataframe_adapter("Pair Trading"),
     "pair_trading/spread": _generic_dataframe_adapter("Pair Trading"),
+    "pair_trading/ou": _generic_dataframe_adapter("Pair Trading"),
     # BTC / SPY
     "btc/btc": _generic_dataframe_adapter("Bitcoin"),
     "spy/characterization": _generic_dataframe_adapter("SPY"),
     "spy/sectors": _generic_dataframe_adapter("SPY"),
     "spy/orderbook": _generic_dataframe_adapter("SPY"),
+    # Descripción del problema de volatilidad
+    "volatility/lstm_description": _generic_dataframe_adapter("Volatilidad"),
 }
