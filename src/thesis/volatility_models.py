@@ -27,8 +27,12 @@ def set_volatility_seed(seed: int = 42) -> None:
 class HARRVModel:
     """Modelo HAR-RV (Corsi, 2009) estimado por MCO con covarianza HAC.
 
-    Especificación:
+    Especificación por defecto:
         ``y_t = β₀ + β_d·RV_t^(d) + β_w·RV_t^(w) + β_m·RV_t^(m) + ε_t``
+
+    Las columnas de features son configurables mediante ``feature_cols``,
+    lo que permite reutilizar el modelo con otras escalas o horizontes
+    (por ejemplo volatilidad realizada a 21, 63 y 189 días).
 
     El modelo se entrena y predice en espacio de log-volatilidad crudo,
     por lo que las predicciones son comparables con el target sin invertir
@@ -37,7 +41,8 @@ class HARRVModel:
 
     HAR_COLS: ClassVar[list[str]] = ["rv_daily", "rv_weekly", "rv_monthly"]
 
-    def __init__(self) -> None:
+    def __init__(self, feature_cols: list[str] | None = None) -> None:
+        self.feature_cols: list[str] = feature_cols or self.HAR_COLS
         self.ols_res_: sm.regression.linear_model.RegressionResultsWrapper | None = None
 
     def fit(
@@ -64,7 +69,9 @@ class HARRVModel:
         HARRVModel
             El propio modelo ajustado.
         """
-        X_ols = sm.add_constant(X_train[self.HAR_COLS].values)
+        X_ols = np.column_stack(
+            [np.ones(len(X_train)), X_train[self.feature_cols].to_numpy()]
+        )
         self.ols_res_ = sm.OLS(y_train, X_ols).fit(
             cov_type="HAC", cov_kwds={"maxlags": maxlags}
         )
@@ -74,7 +81,8 @@ class HARRVModel:
         """Genera predicciones en espacio de log-vol crudo."""
         if self.ols_res_ is None:
             raise RuntimeError("El modelo HAR-RV no ha sido entrenado.")
-        X_ols = sm.add_constant(X[self.HAR_COLS].values)
+        X_arr = X[self.feature_cols].to_numpy()
+        X_ols = np.column_stack([np.ones(len(X_arr)), X_arr])
         return self.ols_res_.predict(X_ols)
 
     def summary(self) -> str:

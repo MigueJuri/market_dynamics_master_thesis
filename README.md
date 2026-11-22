@@ -45,6 +45,7 @@ pip install -e ".[dev]"
 │   ├── features.py              # Características y targets
 │   ├── event_labeling.py        # Triple barrera
 │   ├── pair_trading.py          # Spread, OU, MI y clustering
+│   ├── portfolio.py             # Pesos long-only, backtest y métricas
 │   ├── volatility.py            # Features y target de volatilidad
 │   ├── volatility_intraday.py   # Features y target de volatilidad intradía
 │   ├── volatility_models.py     # LSTM, HAR-RV y entrenamiento
@@ -61,6 +62,7 @@ pip install -e ".[dev]"
 │   ├── btc/                     # Análisis de BTC (power-law y ciclos)
 │   ├── feature_analysis/        # Análisis de predictibilidad
 │   ├── pair_trading/            # Selección de pares, OU y trading
+│   ├── portfolio/               # 1/N, 1/σ, 1/σ² con EWMA y HAR-RV
 │   ├── spy/                     # Caracterización, sectores y LOB del SPY
 │   ├── trend_following_strategy/# Estrategia de momentum
 │   └── volatility/              # Predicción de volatilidad con LSTM

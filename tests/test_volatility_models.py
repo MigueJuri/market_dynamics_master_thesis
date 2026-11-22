@@ -65,6 +65,30 @@ def test_har_rv_model_accepts_maxlags() -> None:
     assert np.isfinite(preds).all()
 
 
+def test_har_rv_model_custom_features() -> None:
+    """``feature_cols`` permite entrenar con columnas arbitrarias."""
+    rng = np.random.default_rng(1)
+    X = pd.DataFrame(
+        {
+            "rv_h": rng.exponential(0.001, 80),
+            "rv_3h": rng.exponential(0.001, 80),
+            "rv_9h": rng.exponential(0.001, 80),
+        }
+    )
+    y = (
+        0.001
+        + 0.3 * X["rv_h"]
+        + 0.4 * X["rv_3h"]
+        + 0.2 * X["rv_9h"]
+        + rng.normal(0, 0.0001, 80)
+    )
+    model = HARRVModel(feature_cols=["rv_h", "rv_3h", "rv_9h"])
+    model.fit(X.iloc[:60], y[:60])
+    preds = model.predict(X.iloc[60:])
+    assert len(preds) == 20
+    assert np.isfinite(preds).all()
+
+
 def test_lstm_forward_shape() -> None:
     set_volatility_seed(0)
     model = VolatilityLSTM(n_features=4, hidden=8, dropout=0.2)

@@ -200,6 +200,43 @@ def compute_volatility_features(df: pd.DataFrame) -> pd.DataFrame:
     return feat
 
 
+def log_trailing_realized_vol(
+    log_ret: pd.Series,
+    window: int,
+    annualize: int = TRADING_DAYS,
+) -> pd.Series:
+    """Log-volatilidad realizada anualizada sobre una ventana de lookback.
+
+    Para cada fecha ``t``:
+
+    .. math::
+        x_t = \\frac{1}{2}\\log\\!\\left(
+            A \\cdot \\frac{1}{w}\\sum_{i=t-w+1}^{t} r_i^2
+        \\right)
+
+    donde ``A`` es el factor de anualización y ``w`` la ventana de
+    retornos cuadrados.
+
+    Parameters
+    ----------
+    log_ret : pd.Series
+        Retornos logarítmicos diarios.
+    window : int
+        Ventana de lookback en sesiones.
+    annualize : int
+        Factor de anualización (por defecto 252).
+
+    Returns
+    -------
+    pd.Series
+        Log-volatilidad anualizada indexada por fecha.  Las primeras
+        ``window - 1`` observaciones son ``NaN`` por la warm-up.
+    """
+    mean_r2 = (log_ret**2).rolling(window, min_periods=window).mean()
+    vol = (annualize * mean_r2).clip(lower=1e-12)
+    return (0.5 * np.log(vol)).rename(f"log_rv_{window}")
+
+
 def compute_log_vol_target(
     df: pd.DataFrame,
     horizon: int,
