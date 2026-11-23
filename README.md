@@ -52,6 +52,7 @@ pip install -e ".[dev]"
 │   ├── volatility_evaluation.py # Métricas y backtest de volatilidad
 │   ├── btc.py                   # OHLCV de BTC, power-law y ciclos
 │   ├── characterization.py      # Momentos, ACF, EWMA y bootstrap del SPY
+│   ├── gbm.py                   # MLE, bandas y densidad del GBM
 │   ├── sector_composition.py    # Pesos sectoriales del S&P 500 y entropía
 │   └── plotting.py              # Visualizaciones reutilizables
 │
@@ -63,7 +64,7 @@ pip install -e ".[dev]"
 │   ├── feature_analysis/        # Análisis de predictibilidad
 │   ├── pair_trading/            # Selección de pares, OU y trading
 │   ├── portfolio/               # 1/N, 1/σ, 1/σ² con EWMA y HAR-RV
-│   ├── spy/                     # Caracterización, sectores y LOB del SPY
+│   ├── spy/                     # Caracterización, sectores, LOB y GBM del SPY
 │   ├── trend_following_strategy/# Estrategia de momentum
 │   └── volatility/              # Predicción de volatilidad con LSTM
 │

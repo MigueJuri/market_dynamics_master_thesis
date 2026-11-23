@@ -1,6 +1,6 @@
-# SPY: caracterización, composición sectorial y libro de órdenes (LOB)
+# SPY: caracterización, composición sectorial, libro de órdenes (LOB) y GBM
 
-Este directorio reúne tres cuadernos sobre el **SPY**:
+Este directorio reúne cuatro cuadernos sobre el **SPY**:
 
 1. [`SPY_caracterizacion.py`](SPY_caracterizacion.py): **caracterización
    estadística** de los retornos diarios y de sus cuadrados (hechos
@@ -11,7 +11,11 @@ Este directorio reúne tres cuadernos sobre el **SPY**:
    histórica y entropía de Shannon);
 3. [`OrderBook.py`](OrderBook.py): **estructura de liquidez** del libro de
    órdenes del SPY a partir de los ficheros LOBSTER (perfil de liquidez
-   relativo y absoluto, snapshot del libro y precio medio promediado).
+   relativo y absoluto, snapshot del libro y precio medio promediado);
+4. [`GeometricBrownianMotion.py`](GeometricBrownianMotion.py): **test del GBM
+   de parámetros constantes** (calibración MLE, bandas de probabilidad
+   exactas, cobertura empírica, μ y σ en ventana móvil y correlación
+   drift-volatilidad).
 
 Todos los cuadernos son **descriptivos**, no predictivos: resumen el estado del
 mercado, pero no anticipan su evolución.
@@ -45,15 +49,17 @@ rotación sectorial.
 
 ```text
 notebooks/spy/
-├── README.md                  ← este archivo
-├── SPY_caracterizacion.py     ← caracterización de retornos (jupytext py:percent)
-├── SPY_sectores.py            ← orquestador por etapas (jupytext py:percent)
-└── OrderBook.py               ← orquestador por etapas (jupytext py:percent)
+├── README.md                     ← este archivo
+├── SPY_caracterizacion.py        ← caracterización de retornos (jupytext py:percent)
+├── SPY_sectores.py               ← orquestador por etapas (jupytext py:percent)
+├── GeometricBrownianMotion.py    ← orquestador por etapas (jupytext py:percent)
+└── OrderBook.py                  ← orquestador por etapas (jupytext py:percent)
 
 src/thesis/
-├── characterization.py        ← momentos, ACF, EWMA y bootstrap
-├── sector_composition.py      ← datos, ponderación y entropía
-└── orderbook.py               ← carga, validación y extracción del LOB
+├── characterization.py           ← momentos, ACF, EWMA y bootstrap
+├── gbm.py                        ← MLE, bandas y densidad del GBM
+├── sector_composition.py         ← datos, ponderación y entropía
+└── orderbook.py                  ← carga, validación y extracción del LOB
 ```
 
 El cuaderno está escrito en formato jupytext `py:percent` y tiene **una celda
@@ -608,6 +614,131 @@ uv run pytest tests/test_characterization.py -v
   orden 4 como si fueran estables.
 - La caracterización es **descriptiva**: sirve para fijar las restricciones
   del modelo, no para anticipar el precio.
+
+---
+
+## GBM (Movimiento Geométrico Browniano)
+
+### Pregunta central
+
+**¿es consistente el S&P 500 con un GBM de parámetros constantes?**
+
+La respuesta es **descriptiva**: el cuaderno calibra $\mu$ y $\sigma$ con el
+tramo in-sample y pone a prueba, out-of-sample, las hipótesis que sostienen
+al modelo (distribución exacta de $S_t$, cobertura de las bandas, constancia
+de $\mu$ y $\sigma$ en el tiempo e independencia entre drift y volatilidad).
+El GBM queda como *benchmark* —la distribución nula frente a la que se
+contrastan ARCH/GARCH o Heston— y no como una señal.
+
+### Pipeline
+
+El cuaderno `GeometricBrownianMotion.py` tiene **una celda por etapa** y todo
+el cómputo reutilizable vive en `src/thesis/gbm.py` (**sin** `matplotlib`):
+
+| Celda | Contenido | Resultado en el espacio de nombres |
+| --- | --- | --- |
+| 0 | magics `%autoreload 2` (recarga en caliente de `src/`) | `_INTERACTIVE` |
+| 1 | imports y `CONFIG` | `CONFIG`, `OUTPUT_DIR` |
+| 2 | datos (cierre ajustado cacheado + log-retornos + split) | `price`, `log_ret`, `train_ret`, `test_price`, `S0` |
+| 3 | calibración MLE con *moving block bootstrap* | `point`, `ci` |
+| 4 | *fan chart* (densidad exacta del GBM) | `bands`, `median_path`, `log_grid`, `density`, `fig_fan` |
+| 5 | cobertura empírica de las bandas | `coverage` |
+| 6 | $\mu$ y $\sigma$ en ventana móvil | `rolling`, `fig_roll` |
+| 7 | drift vs. volatilidad (efecto apalancamiento) | `r`, `p_value`, `fig_drift` |
+| 8 | tabla resumen | `summary` |
+
+### Fórmulas
+
+* **MLE** (anualizado, con $\Delta t = 1/252$): drift geométrico
+  $\tilde\mu = \mathbb{E}[x]/\Delta t$, volatilidad
+  $\sigma = \mathrm{std}(x)/\sqrt{\Delta t}$ y drift aritmético
+  $\mu = \tilde\mu + \sigma^2/2$ (corrección de Itô).
+* **Bandas exactas (Lema de Itô)**: $\ln S_t \sim \mathcal{N}(\ln S_0 +
+  \tilde\mu t,\; \sigma^2 t)$, luego el cuantil $q$ es
+  $\exp\!\big(N(q; \ln S_0 + \tilde\mu t,\ \sigma\sqrt{t})\big)$.  En $t = 0$
+  la banda colapsa a una delta de Dirac ($S_0$): la escala $\sigma\sqrt{t}$
+  se sustituye por `1e-12`.
+* **Cobertura**: para un nivel nominal $p$ la banda central es
+  $[(1-p)/2,\ 1-(1-p)/2]$: 50 % → 0.25/0.75, 80 % → 0.10/0.90,
+  95 % → 0.025/0.975.
+* **Ventana móvil**: los tres parámetros se reestiman en una ventana
+  *trailing* de 60 sesiones (causal: la fila $t$ usa $t-59 \dots t$).
+
+### API pública (`src/thesis/gbm.py`)
+
+* ``BAND_LEVELS = (0.025, 0.10, 0.25, 0.50, 0.75, 0.90, 0.975)``
+  Cuantiles del *fan chart*.
+
+* ``gbm_mle_params(x, trading_days=252) -> np.ndarray``
+  ``[drift_geo, sigma, mu]`` anualizados (fail-fast: vector finito, al menos
+  dos observaciones y ``trading_days > 0``).
+
+* ``gbm_quantile_bands(S0, drift_geo, sigma, t_grid, levels=BAND_LEVELS) -> dict``
+  Cuantil exacto de $S_t$ para cada nivel y cada instante.
+
+* ``gbm_density_grid(S0, drift_geo, sigma, t_grid, n_bins=200) -> (log_grid, density)``
+  Densidad lognormal en la grilla de precios: ``density`` tiene forma
+  ``(n_bins, n_t)`` (filas = niveles de precio, columnas = instantes) y
+  **cada fila está normalizada a 1** (densidad relativa por nivel de precio).
+
+* ``gbm_coverage(test_price, bands, levels=(0.5, 0.8, 0.95)) -> pd.DataFrame``
+  Fracción de observaciones dentro de cada banda central; columnas
+  ``nominal``, ``lower_quantile``, ``upper_quantile`` y ``coverage``.
+
+* ``rolling_gbm_params(log_ret, window=60, trading_days=252) -> pd.DataFrame``
+  ``drift_geo``, ``sigma`` y ``mu`` anualizados en ventana móvil causal.
+
+Importar el módulo **no** descarga datos ni dibuja figuras: los efectos con
+red, disco o pantalla viven dentro de funciones explícitas.  El módulo no se
+exporta en `thesis/__init__.py` (igual que `characterization.py`); se usa
+`from thesis.gbm import ...`.
+
+### Artefactos
+
+| Artefacto | Descripción |
+|---|---|
+| `outputs/spy_gbm_fan_chart.png` | *Fan chart*: densidad exacta del GBM frente al precio realizado |
+| `outputs/spy_gbm_rolling_params.png` | $\mu$ y $\sigma$ locales vs. estáticos |
+| `outputs/spy_gbm_drift_vs_sigma.png` | Drift local vs. volatilidad local (efecto apalancamiento) |
+
+Las figuras se guardan en `outputs/` con una ruta **anclada a la raíz del
+repositorio**, no al directorio de trabajo.
+
+Tests (sintéticos, sin red):
+
+```bash
+uv run pytest tests/test_gbm.py -v
+```
+
+El test marcado con `integration` (spot-check con SPY) requiere red o la caché
+de `data/` y se omite por defecto:
+
+```bash
+uv run pytest -m integration -v
+```
+
+### Interpretación y precauciones
+
+- **Look-ahead**: la calibración (etapa 3) usa **sólo** el tramo in-sample
+  (`train_ret`, `≤ split_date`) y las bandas se proyectan out-of-sample: no
+  hay look-ahead en el test del modelo.
+- **Las estadísticas de ventana móvil (etapas 6 y 7) son descriptivas**: se
+  calculan sobre toda la muestra y **no** son señales (igual que el
+  percentil 90 de la caracterización).
+- **La cobertura empírica de una sola trayectoria es ruidosa**: la banda se
+  ensancha con $\sqrt{t}$ y la desviación del camino respecto de la mediana
+  es un paseo aleatorio, así que la fracción de días dentro de la banda puede
+  apartarse del nominal en ambos sentidos.
+- **La densidad del *fan chart* es relativa**: cada nivel de precio se
+  normaliza por su densidad máxima a lo largo del tiempo, de modo que el
+  color indica *cuándo* fue plausible cada precio, no su probabilidad
+  absoluta.
+- **La semilla es explícita**: el intervalo de la etapa 3 usa
+  `block_bootstrap_ci(..., seed=...)`; la versión original del cuaderno
+  dependía del `np.random.seed` global, así que el IC puede variar levemente
+  respecto de aquella (a cambio de ser reproducible).
+- **El GBM de parámetros constantes no describe bien a SPY**: $\mu$ y $\sigma$
+  varían en el tiempo y no son independientes (efecto apalancamiento).
 
 ---
 
