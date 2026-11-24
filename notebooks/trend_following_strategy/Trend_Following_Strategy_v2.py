@@ -26,6 +26,18 @@ from sklearn.metrics import f1_score, precision_score, recall_score
 
 warnings.filterwarnings("ignore")
 
+# Las figuras se crean con el ancho real del texto de LaTeX (~6.3 in) para que
+# la fuente de 11 pt coincida con la del cuerpo al incluirlas con \textwidth.
+TEXTWIDTH_IN = 6.3
+plt.rcParams.update({
+    "font.size": 11,
+    "axes.labelsize": 11,
+    "axes.titlesize": 11,
+    "legend.fontsize": 11,
+    "xtick.labelsize": 11,
+    "ytick.labelsize": 11,
+})
+
 # Añadimos ``src/`` al path para poder importar ``thesis.*`` desde cualquier
 # ubicación relativa dentro del repositorio.
 _HERE = Path(__file__).resolve().parent
@@ -83,7 +95,7 @@ slow_log = log_close.ewm(span=SLOW_SPAN, adjust=False).mean()
 fast_price = np.exp(fast_log)
 slow_price = np.exp(slow_log)
 
-fig, ax = plt.subplots(figsize=(6, 3), dpi = 300)
+fig, ax = plt.subplots(figsize=(TEXTWIDTH_IN, 3.8), dpi=300)
 ax.plot(close.index, close, label='Precio', color='steelblue', lw=0.8, alpha=0.7)
 ax.plot(fast_price.index, fast_price, label=f'EWMA corta ({FAST_SPAN})', color='orange', lw=1)
 ax.plot(slow_price.index, slow_price, label=f'EWMA larga ({SLOW_SPAN})', color='green', lw=1.2, alpha=0.9)
@@ -96,7 +108,7 @@ ax.scatter(bear.index, close.loc[bear.index], marker='v', color='red',       s=3
 # ax.set_title('EWMA Crossover Events on Log-Price (log scale)')
 ax.set_ylabel('Price (USD, escala log)')
 ax.set_yscale('log')
-ax.legend(fontsize=8)
+ax.legend(loc='upper left')
 plt.tight_layout()
 plt.show()
 
@@ -186,7 +198,7 @@ print(f"Buy & Hold total return: {total_bh:+.2%}")
 print(f"Number of position changes: {n_trades}")
 
 # ── Plot ──────────────────────────────────────────────────────────────────
-fig, axes = plt.subplots(2, 1, figsize=(14, 9),
+fig, axes = plt.subplots(2, 1, figsize=(TEXTWIDTH_IN, 6.5), dpi=300,
                          gridspec_kw={'height_ratios': [2, 1]})
 
 # ── Top panel: price + EWMA + events ─────────────────────────────────────
@@ -227,7 +239,7 @@ sl_patch  = mpatches.Patch(color='red',       label='SL hit (-1)')
 vb_patch  = mpatches.Patch(color='grey',      label='Vertical (0)')
 long_patch = mpatches.Patch(color='limegreen', alpha=0.3, label='Long period')
 ax.legend(handles=[pt_patch, sl_patch, vb_patch, long_patch] +
-          ax.get_legend_handles_labels()[0][:3], fontsize=7)
+          ax.get_legend_handles_labels()[0][:3], ncol=2, loc='upper left')
 ax.set_title('Price, EWMA Crossovers, and Triple-Barrier Outcomes')
 ax.set_ylabel('Price (USD, log scale)')
 ax.set_yscale('log')
@@ -240,7 +252,7 @@ ax2.axhline(1.0, color='black', lw=0.6, ls=':')
 ax2.set_title('Equity Curves (no transaction costs)')
 ax2.set_ylabel('Cumulative Return')
 ax2.set_yscale('log')
-ax2.legend(fontsize=8)
+ax2.legend(loc='upper left')
 
 plt.tight_layout()
 plt.show()
@@ -303,7 +315,7 @@ print(f"{'Max drawdown':<28}{max_dd_strat:>14.2%}{max_dd_bh:>14.2%}")
 print(f"{'Number of position changes':<28}{int(n_trades):>14d}{'-':>14s}")
 
 # ── Annualized equity curves plot ─────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(6, 3), dpi=300)
+fig, ax = plt.subplots(figsize=(TEXTWIDTH_IN, 3.8), dpi=300)
 ax.plot(cum_strat.index, cum_strat,
         label=f'Estrategia (SR: {sharpe_strat:.2f}, CAGR: {ann_strat:.2%})',
         lw=1.2, color='darkorange')
@@ -314,7 +326,7 @@ ax.axhline(1.0, color='black', lw=0.6, ls=':')
 # ax.set_title('Equity Curves (no transaction costs)')
 ax.set_ylabel('Retorno acumulado')
 ax.set_yscale('log')
-ax.legend(fontsize=8)
+ax.legend(loc='upper left', fontsize=9)
 plt.tight_layout()
 plt.show()
 
@@ -349,7 +361,7 @@ print(f"  Min excess wealth    : {min_diff:+.2f}")
 print(f"  % of bars ahead      : {positive_pct:.2%}")
 
 # ── Plot: relative equity difference ──────────────────────────────────────
-fig, axes = plt.subplots(2, 1, figsize=(12, 7),
+fig, axes = plt.subplots(2, 1, figsize=(TEXTWIDTH_IN, 5.5), dpi=300,
                          gridspec_kw={'height_ratios': [2, 1]},
                          sharex=True)
 
@@ -365,7 +377,7 @@ ax.fill_between(relative_diff.index, relative_diff, 0.0,
                 label='Buy & Hold ahead')
 ax.set_title('Strategy vs. Buy & Hold — Wealth Difference')
 ax.set_ylabel('Cum. wealth difference')
-ax.legend(loc='best', fontsize=8)
+ax.legend(loc='best')
 
 ax2 = axes[1]
 ax2.plot(relative_log.index, relative_log, color='steelblue', lw=1.0,
@@ -378,7 +390,7 @@ ax2.fill_between(relative_log.index, relative_log, 0.0,
 ax2.set_title('Strategy vs. Buy & Hold — Logarithmic Difference')
 ax2.set_ylabel('log(wealth ratio)')
 ax2.set_xlabel('Date')
-ax2.legend(loc='best', fontsize=8)
+ax2.legend(loc='lower left')
 
 plt.tight_layout()
 plt.show()
