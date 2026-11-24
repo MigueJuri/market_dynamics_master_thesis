@@ -35,6 +35,7 @@ from thesis.characterization import (
     fit_return_distribution,
     fit_squared_return_distributions,
     freedman_diaconis_bins,
+    hac_acf,
     heteroskedastic_robust_acf,
     high_volatility_mask,
     sample_acf,
@@ -367,6 +368,52 @@ def test_bootstrap_acf_block_band_widens_with_persistence() -> None:
     assert acf_persist[1] > 0.7
     # Con dependencia, la varianza del estimador es mayor que la de ruido blanco.
     assert ci_persist[1] > ci_white[1]
+
+
+def test_hac_acf_white_noise_matches_bartlett() -> None:
+    """En ruido blanco el error HAC coincide (aprox.) con 1/sqrt(T)."""
+    n = 5_000
+    x = _white_noise(n, seed=31)
+    acf, hw = hac_acf(x, max_lags=20, alpha=0.05)
+    assert acf.shape == hw.shape == (21,)
+    assert hw[0] == 0.0
+    bartlett = 1.959964 / np.sqrt(n)
+    np.testing.assert_allclose(hw[1:], bartlett, rtol=0.3)
+
+
+def test_hac_acf_ar1_standard_error_matches_theory() -> None:
+    """En AR(1) gaussiano, se(rho_1) ~ sqrt((1 - phi^2)/T)."""
+    n, phi = 20_000, 0.5
+    rng = np.random.default_rng(32)
+    eps = rng.standard_normal(n)
+    x = np.empty(n)
+    x[0] = eps[0]
+    for t in range(1, n):
+        x[t] = phi * x[t - 1] + eps[t]
+    acf, hw = hac_acf(x, max_lags=5, alpha=0.05)
+    assert acf[1] == pytest.approx(phi, abs=0.05)
+    assert hw[1] == pytest.approx(1.959964 * np.sqrt((1 - phi**2) / n), rel=0.25)
+
+
+def test_hac_acf_arch_squared_band_wider_than_bartlett() -> None:
+    """Con ARCH, la banda HAC de x² supera a la de Bartlett."""
+    n = 8_000
+    rng = np.random.default_rng(33)
+    eps = rng.standard_normal(n)
+    x = np.empty(n)
+    x[0] = eps[0]
+    for t in range(1, n):
+        x[t] = np.sqrt(0.2 + 0.5 * x[t - 1] ** 2) * eps[t]
+    _, hw = hac_acf(x**2, max_lags=10, alpha=0.05)
+    assert np.mean(hw[1:4]) > 1.959964 / np.sqrt(n)
+
+
+def test_hac_acf_rejects_invalid_args() -> None:
+    x = _white_noise(100, seed=34)
+    with pytest.raises(ValueError):
+        hac_acf(x, max_lags=100)
+    with pytest.raises(ValueError):
+        hac_acf(x, max_lags=10, alpha=0.0)
 
 
 def test_bootstrap_acf_rejects_invalid_args() -> None:

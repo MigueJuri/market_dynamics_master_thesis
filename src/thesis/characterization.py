@@ -280,6 +280,81 @@ def sample_acf(x: Any, max_lags: int = 50) -> np.ndarray:
     return acf
 
 
+def hac_acf(
+    x: Any,
+    max_lags: int = 50,
+    alpha: float = 0.05,
+    bandwidth: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """ACF muestral con errores estándar HAC (Newey-West) sobre ``rho_k``.
+
+    Implementa el estimador robusto de Francq-Zakoïan / Lobato-Nankervis-Savin:
+    ``rho_k`` se linealiza como ``mean(psi_t)`` con
+    ``psi_t = [(z_t - m)(z_(t-k) - m) - rho_k (z_t - m)^2] / gamma_0`` y su
+    varianza asintótica es la varianza de largo plazo de ``psi_t`` (núcleo de
+    Bartlett) dividida por ``T``.  Es válido bajo heterocedasticidad y
+    dependencia arbitraria (p. ej. ``z = x²``), sin elegir tamaño de bloque.
+
+    Parameters
+    ----------
+    bandwidth : int, optional
+        Truncamiento del núcleo; por defecto ``floor(4 (T/100)^(2/9))``.
+
+    Returns
+    -------
+    (acf, half_width)
+        Arrays de longitud ``max_lags + 1``; la banda es ``acf ± half_width``
+        y el lag cero no tiene banda.
+    """
+    values = _finite_values(x, "values")
+    if max_lags < 0:
+        raise ValueError("max_lags no puede ser negativo")
+    if max_lags >= values.size:
+        raise ValueError("max_lags debe ser menor que el tamaño de la muestra")
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("alpha debe estar entre 0 y 1")
+
+    n_obs = values.size
+    if bandwidth is None:
+        bandwidth = int(np.floor(4.0 * (n_obs / 100.0) ** (2.0 / 9.0)))
+    if bandwidth < 0:
+        raise ValueError("bandwidth no puede ser negativo")
+
+    acf = sample_acf(values, max_lags)
+    centered = values - values.mean()
+    gamma_0 = np.mean(centered**2)
+    z_value = stats.norm.ppf(1.0 - alpha / 2.0)
+
+    half_width = np.zeros(max_lags + 1)
+    for k in range(1, max_lags + 1):
+        psi = (
+            centered[k:] * centered[:-k] - acf[k] * centered[k:] ** 2
+        ) / gamma_0
+        psi = psi - psi.mean()
+        m = psi.size
+        long_run = np.dot(psi, psi) / m
+        for j in range(1, min(bandwidth, m - 1) + 1):
+            weight = 1.0 - j / (bandwidth + 1.0)
+            long_run += 2.0 * weight * np.dot(psi[j:], psi[:-j]) / m
+        half_width[k] = z_value * np.sqrt(max(long_run, 0.0) / m)
+    return acf, half_width
+
+
+def ljung_box_pvalues(x: Any, lags: Sequence[int] = (10, 20, 50)) -> pd.Series:
+    """P-valores de Ljung-Box (``H0``: sin autocorrelación hasta el lag ``m``).
+
+    Aplicado a ``x²`` equivale al test de McLeod-Li (efectos ARCH).
+    """
+    from statsmodels.stats.diagnostic import acorr_ljungbox
+
+    values = _finite_values(x, "values")
+    lag_list = [int(m) for m in lags]
+    if not lag_list or min(lag_list) < 1 or max(lag_list) >= values.size:
+        raise ValueError("lags debe contener enteros en [1, T - 1]")
+    result = acorr_ljungbox(values, lags=lag_list, return_df=True)
+    return pd.Series(result["lb_pvalue"].to_numpy(), index=lag_list, name="lb_pvalue")
+
+
 def bootstrap_acf(
     x: Any,
     max_lags: int = 50,
