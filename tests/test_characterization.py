@@ -324,33 +324,33 @@ def test_bootstrap_ci_rejects_invalid_arguments() -> None:
 
 
 def test_bootstrap_acf_shapes_and_reproducibility() -> None:
-    """La ACF con bootstrap i.i.d. devuelve (acf, banda) con la forma esperada."""
+    """La ACF con block bootstrap devuelve (acf, banda) con la forma esperada."""
     x = _white_noise(600, seed=15)
 
-    acf, ci = bootstrap_acf(x, max_lags=20, reps=200, alpha=0.05, seed=SEED)
+    acf, ci = bootstrap_acf(x, max_lags=20, block_size=10, reps=200, alpha=0.05, seed=SEED)
     assert acf.shape == (21,)
     assert ci.shape == (21,)
     assert acf[0] == pytest.approx(1.0)
     assert ci[0] == 0.0
     assert np.all(ci[1:] >= 0.0)
 
-    acf_2, ci_2 = bootstrap_acf(x, max_lags=20, reps=200, alpha=0.05, seed=SEED)
+    acf_2, ci_2 = bootstrap_acf(x, max_lags=20, block_size=10, reps=200, alpha=0.05, seed=SEED)
     np.testing.assert_allclose(acf, acf_2)
     np.testing.assert_allclose(ci, ci_2)
 
 
 def test_bootstrap_acf_white_noise_within_band() -> None:
-    """En ruido blanco casi ningún lag queda fuera de la banda i.i.d."""
+    """En ruido blanco casi ningún lag queda fuera de la banda por bloques."""
     x = _white_noise(1_000, seed=16)
-    acf, ci = bootstrap_acf(x, max_lags=20, reps=300, alpha=0.05, seed=SEED)
+    acf, ci = bootstrap_acf(x, max_lags=20, block_size=10, reps=300, alpha=0.05, seed=SEED)
 
     outside = int(np.sum(np.abs(acf[1:]) > ci[1:]))
     # Banda nominal del 5 %: se esperan ~1 lag fuera; el umbral es holgado.
     assert outside <= 8
 
 
-def test_bootstrap_acf_band_is_null_band() -> None:
-    """La banda i.i.d. no hereda la dependencia: es la banda nula del estimador."""
+def test_bootstrap_acf_block_band_widens_with_persistence() -> None:
+    """El bootstrap por bloques conserva la dependencia: la banda se ensancha."""
     n = 1_000
     rng = np.random.default_rng(23)
     persistent = np.empty(n)
@@ -359,19 +359,14 @@ def test_bootstrap_acf_band_is_null_band() -> None:
         persistent[t] = 0.9 * persistent[t - 1] + rng.standard_normal()
     white = _white_noise(n, seed=24)
 
-    acf_white, ci_white = bootstrap_acf(white, max_lags=10, reps=400, alpha=0.05, seed=SEED)
-    acf_persist, ci_persist = bootstrap_acf(
-        persistent, max_lags=10, reps=400, alpha=0.05, seed=SEED
-    )
+    kwargs = {"max_lags": 10, "block_size": 20, "reps": 400, "alpha": 0.05, "seed": SEED}
+    acf_white, ci_white = bootstrap_acf(white, **kwargs)
+    acf_persist, ci_persist = bootstrap_acf(persistent, **kwargs)
 
-    # La autocorrelación puntual cambia por completo...
     assert acf_white[1] == pytest.approx(0.0, abs=0.1)
     assert acf_persist[1] > 0.7
-    # ... pero la banda es (casi) la misma: el remuestreo i.i.d. rompe la
-    # dependencia, de modo que la banda no se ensancha con la persistencia.
-    assert ci_persist[1] == pytest.approx(ci_white[1], rel=0.35)
-    # La banda nula queda cerca de la de Bartlett: 1.96 / sqrt(n).
-    assert ci_white[1] == pytest.approx(1.959964 / np.sqrt(n), rel=0.25)
+    # Con dependencia, la varianza del estimador es mayor que la de ruido blanco.
+    assert ci_persist[1] > ci_white[1]
 
 
 def test_bootstrap_acf_rejects_invalid_args() -> None:
@@ -383,6 +378,8 @@ def test_bootstrap_acf_rejects_invalid_args() -> None:
         bootstrap_acf(x, max_lags=10, reps=0)
     with pytest.raises(ValueError):
         bootstrap_acf(x, max_lags=10, reps=10, alpha=0.0)
+    with pytest.raises(ValueError):
+        bootstrap_acf(x, max_lags=10, block_size=0, reps=10)
 
 
 def test_unconditional_band_excursions_heavy_tails() -> None:

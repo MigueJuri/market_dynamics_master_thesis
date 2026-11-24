@@ -283,33 +283,32 @@ def sample_acf(x: Any, max_lags: int = 50) -> np.ndarray:
 def bootstrap_acf(
     x: Any,
     max_lags: int = 50,
+    block_size: int = 10,
     reps: int = 3_000,
     alpha: float = 0.05,
     seed: int = 42,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """ACF muestral con bandas de confianza por bootstrap i.i.d.
+    """ACF muestral con bandas de confianza por moving block bootstrap.
 
     El estimador de autocorrelación se recalcula sobre cada réplica del
-    bootstrap: cada réplica remuestrea observaciones individuales con
-    reemplazo, de modo que las réplicas **no heredan** la dependencia
-    temporal de la serie original.  La distribución del estimador en las
-    réplicas es por tanto la distribución nula (banda equivalente a la de
-    Bartlett, pero obtenida por simulación sobre la distribución empírica).
+    *moving block bootstrap* (Künsch, 1989): se concatenan bloques
+    consecutivos de longitud ``block_size``, de modo que la dependencia
+    temporal de corto plazo (dentro de cada bloque) se conserva.  La
+    autocorrelación en lags ``k >= block_size`` se atenúa por las uniones
+    entre bloques, por lo que ``block_size`` debería ser, al menos, del orden
+    de ``max_lags`` si se desea cubrir toda la ACF.
 
-    Advertencia
-    -----------
-    A diferencia del *moving block bootstrap* (:func:`block_bootstrap_ci`),
-    este remuestreo **destruye la dependencia temporal**.  Para series
-    persistentes (por ejemplo, los retornos al cuadrado) la banda resultante
-    subestima la incertidumbre real del estimador: el conteo
-    ``|acf| > half_width`` contrasta contra la hipótesis nula de
-    independencia, no contra la varianza muestral verdadera.
+    La banda es el intervalo percentil de las réplicas, **centrado en la
+    estimación puntual** (no en cero): su semiancho es la mayor distancia
+    entre la estimación y los extremos del intervalo.  Un lag es
+    «significativo» (``|acf| > half_width``) cuando el intervalo no contiene
+    al cero.
 
     Returns
     -------
     (acf, half_width)
-        Arrays de longitud ``max_lags + 1``; la banda es simétrica
-        ``± half_width`` alrededor de cero y el lag cero no tiene banda.
+        Arrays de longitud ``max_lags + 1``; la banda es ``acf ± half_width``
+        y el lag cero no tiene banda.
     """
 
     values = _finite_values(x, "returns")
@@ -317,22 +316,18 @@ def bootstrap_acf(
         raise ValueError("max_lags no puede ser negativo")
     if max_lags >= values.size:
         raise ValueError("max_lags debe ser menor que el tamaño de la muestra")
-    if not 0.0 < alpha < 1.0:
-        raise ValueError("alpha debe estar entre 0 y 1")
 
-    point, interval = bootstrap_ci(
+    point, interval = block_bootstrap_ci(
         values,
         lambda v: sample_acf(v, max_lags),
+        block_size=block_size,
         reps=reps,
         alpha=alpha,
         seed=seed,
     )
-    # El remuestreo i.i.d. no hereda la dependencia temporal de la serie: la
-    # distribución del estimador en las réplicas se centra en cero (es la
-    # distribución nula del estimador), no en el valor puntual.  La banda
-    # simétrica es entonces la envolvente del intervalo percentil alrededor
-    # de cero, no una banda centrada en el estimador puntual.
-    half_width = np.maximum(np.abs(interval[0]), np.abs(interval[1]))
+    half_width = np.maximum(
+        np.abs(interval[1] - point), np.abs(point - interval[0])
+    )
     half_width[0] = 0.0
     point[0] = 1.0
     return point, half_width
