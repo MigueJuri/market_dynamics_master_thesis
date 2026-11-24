@@ -31,12 +31,12 @@ Antes de tocar nada:
    commit. Si hay archivos ya preparados (`A`, `M` en la primera columna),
    `git reset HEAD <archivo>` para sacarlos del índice antes de preparar
    los tuyos, y vuelve a comprobarlos al terminar.
-2. Lee `AGENTS.md`, `README.md` y `pyproject.toml`.
+2. Lee `CLAUDE.md`, `README.md` y `pyproject.toml`.
 3. Explora `src/<paquete>/`: convenciones de nombres, estilo de docstrings,
    tipado, idioma y estructura de los módulos existentes.
 4. Revisa `tests/` para copiar el estilo de tests ya presente.
 5. Localiza los comandos de verificación **reales** del repo. No los
-   asumes: búscalos en `pyproject.toml`, `README.md` o `AGENTS.md`.
+   asumes: búscalos en `pyproject.toml`, `README.md` o `CLAUDE.md`.
 
 En este repositorio son:
 
@@ -258,17 +258,16 @@ uv run ruff format --check src tests
 
 Si `ruff format` reporta cambios, aplícalos y vuelve a pasar `ruff check`.
 
-**Protocolo Git (respeta `AGENTS.md`):**
+**Protocolo Git (respeta `CLAUDE.md`):**
 
 1. Muestra el diff después de cada modificación.
 2. Para archivos nuevos: `git add` y muestra `git diff --cached`.
 3. Antes de commitear, revisa `git status`, `git diff` y
    `git log --oneline -10`. Prepara **solo** los archivos de la tarea.
 4. No incluyas secretos, datos ni artefactos generados.
-5. **Pregunta al usuario** el alcance y el mensaje del commit antes de
-   crearlo. Agrupa toda la unidad lógica en un único commit.
-6. En cambios grandes, pregunta antes de hacer `git push`. Nunca uses
-   `--force`.
+5. Agrupa toda la unidad lógica en un único commit y haz `git push` a
+   `origin` inmediatamente, sin pedir confirmación (`CLAUDE.md` §8).
+   Nunca uses `--force`.
 
 **Estilo de mensaje:** asunto imperativo en español, sin punto final, y un
 cuerpo que explique el *porqué* (problema → solución → decisiones → tests),

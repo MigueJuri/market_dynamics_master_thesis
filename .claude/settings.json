@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git show:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(git fetch:*)",
+      "Bash(uv run:*)",
+      "Bash(python3 -m py_compile:*)",
+      "Bash(python3 scripts/:*)",
+      "Bash(rg:*)",
+      "Bash(grep:*)",
+      "Edit(/docs/plans/**)",
+      "Edit(/scripts/**)",
+      "Edit(/CLAUDE.md)",
+      "Edit(/.claude/**)"
+    ],
+    "ask": [
+      "Read(/data/**)",
+      "Read(**/*.csv)",
+      "Read(**/*.parquet)",
+      "Read(**/*.npy)",
+      "Read(**/*.npz)",
+      "Read(**/*.pt)",
+      "Read(**/*.pth)",
+      "Read(**/*.ckpt)",
+      "Read(**/*.safetensors)",
+      "Read(**/*.ipynb)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Read(/.env)",
+      "Read(/.env.*)"
+    ]
+  }
+}

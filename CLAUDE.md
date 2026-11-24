@@ -20,14 +20,13 @@ uv run pytest                    # suite por defecto (sin integración)
 uv run pytest -m integration     # tests con red/datos reales
 uv run ruff check src tests
 python3 scripts/df_peek.py <ruta.csv|parquet>
-bash scripts/nb_to_py.sh [dir_destino]
 ```
 
 ## 3. Reglas de datos
 
-- Nunca leer datos crudos grandes ni el JSON de `.ipynb` completo.
+- Nunca leer datos crudos grandes completos (`data/`, `.csv`, `.parquet`, etc.).
 - Inspeccionar con `scripts/df_peek.py` o `head -n <archivo>`.
-- Los notebooks se leen vía `scripts/nb_to_py.sh` (`py:percent`) si es necesario.
+- Los notebooks son `.py` en formato `py:percent`; leer solo las celdas necesarias.
 
 ## 4. Reglas de código cuantitativo
 
@@ -45,30 +44,24 @@ bash scripts/nb_to_py.sh [dir_destino]
 - Cada figura/tabla debe ser producida por un único script o celda.
 - **No** crear carpetas de exportación ni scripts de sincronización entre repos.
 
-## 6. Tabla de enrutamiento de modelos
+## 6. Flujos de trabajo
 
-| Agente      | Modelo                           | Cuándo usarlo                     |
-|-------------|----------------------------------|-----------------------------------|
-| `build`     | `opencode-go/minimax-m3`         | default; ejecutar un plan y tests |
-| `quick`     | `opencode-go/minimax-m3`         | cambios de código pequeños y rápidos con mínimo gasto de tokens |
-| `planner`   | `opencode-go/deepseek-v4-pro`    | análisis y planificación (escribe `docs/plans/`) |
-| `explore`   | `opencode-go/mimo-v2.6-flash`    | localizar definiciones            |
-| `reviewer`  | `opencode-go/kimi-k3.1-pro`      | revisión de rigor y leakage       |
-| `small_model` | `opencode-go/deepseek-v4.1-flash`| títulos y tareas livianas         |
+| Flujo | Cómo |
+|-------|------|
+| Planificar | `/write-plan <slug> <tarea>` → escribe `docs/plans/<slug>.md`, no implementa |
+| Ejecutar un plan | `/exec docs/plans/<slug>.md` → implementa, testea, commit + push |
+| Cambio pequeño | `/quick <cambio>` → un único cambio puntual, verificación mínima |
+| Integrar un archivo externo | skill `integrate-existing-file` (se activa al pedir integrar un script/cuaderno) |
 
-`plan` (agente nativo de opencode) queda disponible en modo solo lectura: no
-escribe nada. Para planificar y persistir el plan se usa `planner`.
-
-DeepSeek requiere región *Global* habilitada en Console → Privacy.
+Para localizar código en muchos archivos, usar el subagente `Explore`.
 
 ## 7. Reglas de tokens/sesiones
 
-- Una tarea por sesión; planear con `/plan <tarea>` (`planner`).
-- Implementar en una **sesión nueva** con `/exec <plan-file>` (`build`).
-- No cambiar de modelo en medio de sesión.
-- Compactar contexto antes de ~80K tokens; limitar salida de herramientas.
-- Pedir diffs, no reescrituras completas de archivos.
-- Si algo excede el tamaño de la sesión, delegar a una skill o a `docs/ai/`.
+- Una tarea por sesión. Planificar con `/write-plan` e implementar en una
+  sesión nueva (`/clear`) con `/exec <plan-file>`: el plan lleva el contexto.
+- `/compact` antes de ~80K tokens; limitar la salida de herramientas
+  (`rg -n`, `head`, rangos de líneas, `df_peek.py`).
+- Ediciones con diffs puntuales, no reescrituras completas de archivos.
 
 ## 8. Git y seguridad
 

@@ -53,6 +53,7 @@ figures/
 *.pkl
 *.pickle
 *.json
+!.claude/settings.json
 *.png
 *.jpg
 *.jpeg

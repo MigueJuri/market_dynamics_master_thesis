@@ -151,7 +151,7 @@ def _resolve_thesis_repo_dir(thesis_repo_dir: Path | str | None = None) -> Path:
         return _config.THESIS_REPO_DIR
     project_root = Path(__file__).resolve().parents[2]
     fallback = project_root / ".thesis"
-    if fallback.exists() or (project_root / "AGENTS.md").exists():
+    if fallback.exists() or (project_root / "CLAUDE.md").exists():
         return project_root
     raise RuntimeError(
         "No se pudo resolver el repositorio de la tesis. "
