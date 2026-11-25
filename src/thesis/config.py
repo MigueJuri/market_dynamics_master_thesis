@@ -70,16 +70,3 @@ PUBLISH_RESULTS_TO_LEDGER: bool = (
 # Reproducibilidad para consumidores del estado global de numpy.
 np.random.seed(SEED)
 
-FIGSIZE = (7.0, 3.5)
-PLOT_RC = {
-    "figure.dpi": 130,
-    "savefig.dpi": 300,
-    "axes.grid": True,
-    "grid.alpha": 0.3,
-    "grid.linestyle": "--",
-    "grid.linewidth": 0.5,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "font.size": 9,
-    "legend.frameon": False,
-}

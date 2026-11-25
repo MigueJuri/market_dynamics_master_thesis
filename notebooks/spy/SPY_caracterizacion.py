@@ -128,14 +128,17 @@ from thesis.characterization import (
     sample_acf,
     unconditional_band_excursions,
 )
-from thesis.config import DATA_DIR, PLOT_RC
+from thesis.config import DATA_DIR
 from thesis.market_data import load_single_price
 from thesis.timeseries import log_returns, simple_returns
 
 #: Directorio de figuras (anclado a la raíz del repositorio, no al CWD).
 OUTPUT_DIR = _ROOT / "outputs"
 
-plt.rcParams.update(PLOT_RC)
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
 CONFIG: dict[str, Any] = {
     # --- Datos ---

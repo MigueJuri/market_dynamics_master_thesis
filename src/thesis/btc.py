@@ -712,9 +712,9 @@ def plot_btc_quantreg(
     bottom_dates = _as_dates(BTC_BOTTOMS if bottoms is None else bottoms)
 
     if ax is None:
-        linear_fig, ax0 = plt.subplots(figsize=(12, 5))
-        temporal_fig, ax1 = plt.subplots(figsize=(12, 5))
-        power_law_fig, ax2 = plt.subplots(figsize=(12, 5))
+        linear_fig, ax0 = plt.subplots()
+        temporal_fig, ax1 = plt.subplots()
+        power_law_fig, ax2 = plt.subplots()
     else:
         axes = list(ax)
         if len(axes) != 3:
@@ -822,9 +822,6 @@ def plot_btc_quantreg(
     ax2.legend()
     ax2.grid(True, which="both", ls="--", alpha=0.4)
 
-    linear_fig.tight_layout()
-    temporal_fig.tight_layout()
-    power_law_fig.tight_layout()
     return linear_fig, temporal_fig, power_law_fig
 
 

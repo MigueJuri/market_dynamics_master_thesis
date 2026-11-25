@@ -13,18 +13,25 @@ from __future__ import annotations
 from typing import Literal
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import PercentFormatter
 import numpy as np
 import pandas as pd
 from scipy.cluster import hierarchy as sch
 from scipy.spatial.distance import squareform
 
 from thesis.config import TRADING_DAYS
+from thesis.plotting import _figsize
 from thesis.volatility import compute_log_vol_target, log_trailing_realized_vol
 from thesis.volatility_models import HARRVModel
 
 VolatilityModel = Literal["ewma", "har_rv"]
 PORTFOLIO_NAMES: tuple[str, str, str] = ("1/N", "1/σ", "1/σ²")
 COLORS: dict[str, str] = {"1/N": "gray", "1/σ": "blue", "1/σ²": "green"}
+
+
+def _tex(name: str) -> str:
+    """Etiqueta de leyenda compatible con ``text.usetex`` (σ → ``$\\sigma$``)."""
+    return name.replace("σ²", r"$\sigma^2$").replace("σ", r"$\sigma$")
 
 
 def ewma_weights(n: int, lambda_: float = 0.94) -> np.ndarray:
@@ -424,7 +431,7 @@ def calculate_metrics(
 def plot_equity_drawdown(
     port_rets: pd.DataFrame,
     benchmark: pd.Series | None = None,
-    figsize: tuple[float, float] = (12.0, 8.0),
+    figsize: tuple[float, float] | None = None,
 ) -> plt.Figure:
     """Gráfico de riqueza acumulada y drawdown.
 
@@ -435,24 +442,24 @@ def plot_equity_drawdown(
     benchmark : pd.Series | None
         Retornos netos diarios de un benchmark opcional.
     figsize : tuple
-        Tamaño de la figura.
+        Tamaño de la figura; por defecto ancho ``figure.figsize`` del estilo.
 
     Returns
     -------
     plt.Figure
         Figura con los dos subplots.
     """
-    fig, axes = plt.subplots(2, 1, figsize=figsize)
+    fig, axes = plt.subplots(2, 1, figsize=_figsize(figsize, 0.67))
     cum = (1.0 + port_rets).cumprod()
 
     ax = axes[0]
     for k in cum.columns:
-        ax.plot(cum.index, cum[k], label=k, color=COLORS.get(k, None), linewidth=1.5)
+        ax.plot(cum.index, cum[k], label=_tex(k), color=COLORS.get(k, None), linewidth=1.5)
     if benchmark is not None:
         bench_cum = (1.0 + benchmark).cumprod()
         ax.plot(bench_cum.index, bench_cum, label="Benchmark", color="red", alpha=0.5)
     ax.set_title("Riqueza Acumulada (neta de costos)")
-    ax.set_ylabel("Crecimiento ($1 inv)")
+    ax.set_ylabel(r"Crecimiento (\$1 invertido)")
     ax.set_yscale("log")
     ax.legend()
 
@@ -462,7 +469,7 @@ def plot_equity_drawdown(
         ax.plot(
             dd.index,
             dd,
-            label=f"Drawdown {k}",
+            label=f"Drawdown {_tex(k)}",
             color=COLORS.get(k, None),
             linewidth=1.0,
         )
@@ -476,14 +483,13 @@ def plot_equity_drawdown(
     ax.set_ylabel("Caída desde máximo")
     ax.legend()
 
-    fig.tight_layout()
     return fig
 
 
 def plot_portfolio_composition(
     weights_df: pd.DataFrame,
     title: str = "Evolución de Pesos",
-    figsize: tuple[float, float] = (14.0, 7.0),
+    figsize: tuple[float, float] | None = None,
     events: list[tuple[str, str, str]] | None = None,
 ) -> plt.Figure:
     """Stacked area de la evolución de pesos.
@@ -495,7 +501,7 @@ def plot_portfolio_composition(
     title : str
         Título del gráfico.
     figsize : tuple
-        Tamaño de la figura.
+        Tamaño de la figura; por defecto ancho ``figure.figsize`` del estilo.
     events : list | None
         Lista de ``(fecha, etiqueta, color)`` para líneas verticales.
 
@@ -507,7 +513,7 @@ def plot_portfolio_composition(
     if weights_df.empty:
         raise ValueError("weights_df está vacío.")
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=_figsize(figsize, 0.5))
     cols = plt.cm.tab20(np.linspace(0.0, 1.0, len(weights_df.columns)))
     ax.stackplot(
         weights_df.index,
@@ -517,12 +523,12 @@ def plot_portfolio_composition(
         alpha=0.85,
     )
 
-    ax.set_title(title, fontsize=14, weight="bold")
+    ax.set_title(title)
     ax.set_ylabel("Asignación de peso")
     ax.set_xlabel("Tiempo")
     ax.set_ylim(0.0, 1.0)
     ax.set_xlim(weights_df.index[0], weights_df.index[-1])
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0%}"))
+    ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
 
     handles, labels = ax.get_legend_handles_labels()
     ax.legend(
@@ -544,15 +550,14 @@ def plot_portfolio_composition(
         d = pd.to_datetime(date)
         if weights_df.index[0] < d < weights_df.index[-1]:
             ax.axvline(d, color=color, linestyle="--", linewidth=1.5)
-            ax.text(d, 1.02, label, color=color, ha="center", weight="bold")
+            ax.text(d, 1.02, label, color=color, ha="center")
 
-    fig.tight_layout()
     return fig
 
 
 def plot_avg_weights(
     weights_dict: dict[str, pd.DataFrame],
-    figsize: tuple[float, float] = (12.0, 6.0),
+    figsize: tuple[float, float] | None = None,
 ) -> plt.Figure:
     """Barras de peso promedio por portfolio.
 
@@ -561,7 +566,7 @@ def plot_avg_weights(
     weights_dict : dict[str, pd.DataFrame]
         Diccionario de pesos por portfolio.
     figsize : tuple
-        Tamaño de la figura.
+        Tamaño de la figura; por defecto ancho ``figure.figsize`` del estilo.
 
     Returns
     -------
@@ -572,8 +577,8 @@ def plot_avg_weights(
     sort_col = "1/σ²" if "1/σ²" in avg.columns else avg.columns[0]
     avg = avg.sort_values(sort_col, ascending=False)
 
-    fig, ax = plt.subplots(figsize=figsize)
-    avg.plot.bar(
+    fig, ax = plt.subplots(figsize=_figsize(figsize, 0.5))
+    avg.rename(columns=_tex).plot.bar(
         ax=ax,
         color=[COLORS.get(c, None) for c in avg.columns],
         alpha=0.85,
@@ -582,10 +587,9 @@ def plot_avg_weights(
     ax.set_title("Composición promedio por portfolio")
     ax.set_ylabel("Peso promedio")
     ax.set_xlabel("Activos")
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0%}"))
+    ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     plt.xticks(rotation=45, ha="right")
     ax.grid(axis="y", linestyle="--", alpha=0.3)
-    fig.tight_layout()
     return fig
 
 
@@ -625,7 +629,7 @@ def plot_market_topology(
 
     return_fig = ax is None
     if return_fig:
-        fig, ax = plt.subplots(figsize=(10.0, 6.0))
+        fig, ax = plt.subplots()
     else:
         fig = ax.figure
 
@@ -638,13 +642,10 @@ def plot_market_topology(
         labels=period_data.columns,
         ax=ax,
         leaf_rotation=90,
-        leaf_font_size=10,
         above_threshold_color="#AAAAAA",
     )
-    ax.set_title(title, fontsize=12, weight="bold")
+    ax.set_title(title)
     ax.set_ylabel("Distancia ultramétrica")
     ax.grid(axis="y", linestyle="--", alpha=0.3)
 
-    if return_fig:
-        fig.tight_layout()
     return fig

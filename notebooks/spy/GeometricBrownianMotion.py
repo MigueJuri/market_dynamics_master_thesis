@@ -111,7 +111,6 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from thesis.characterization import block_bootstrap_ci
-from thesis.config import PLOT_RC
 from thesis.gbm import (
     BAND_LEVELS,
     gbm_coverage,
@@ -126,7 +125,10 @@ from thesis.timeseries import log_returns
 #: Directorio de figuras (anclado a la raíz del repositorio, no al CWD).
 OUTPUT_DIR = _ROOT / "outputs"
 
-plt.rcParams.update(PLOT_RC)
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
 CONFIG: dict[str, Any] = {
     # --- Datos ---

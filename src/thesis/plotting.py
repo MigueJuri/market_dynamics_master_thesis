@@ -11,10 +11,7 @@ import pandas as pd
 import seaborn as sns
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from thesis.config import PLOT_RC, TRADING_DAYS
-
-
-plt.rcParams.update(PLOT_RC)
+from thesis.config import TRADING_DAYS
 
 
 # =============================================================================
@@ -44,6 +41,21 @@ def _year_ticks(
     return positions, labels
 
 
+def _figsize(
+    figsize: tuple[float, float] | None, ratio: float | None = None
+) -> tuple[float, float] | None:
+    """Tamaño explícito o, si es ``None``, ancho del estilo activo × ``ratio``.
+
+    Con ``ratio=None`` devuelve ``None`` y matplotlib usa ``figure.figsize``.
+    El ancho se lee de ``rcParams`` en cada llamada, de modo que sigue al
+    estilo cargado (``styles/thesis.mplstyle``: 155 mm = ``\\textwidth``).
+    """
+    if figsize is not None or ratio is None:
+        return figsize
+    width = plt.rcParams["figure.figsize"][0]
+    return (width, ratio * width)
+
+
 # =============================================================================
 # Visualización
 # =============================================================================
@@ -60,10 +72,13 @@ def plot_correlation_matrix(
     ticks_per_year: int = 4,
     cbar_label: str = "Correlación",
     cmap: str = "coolwarm",
-) -> None:
+    figsize: tuple[float, float] | None = None,
+) -> plt.Figure | None:
     """Heatmap de la matriz de correlación con ticks en fracciones de año."""
-    plt.figure(figsize=(10 / 2, 8 / 2), dpi=300)
-    ax = sns.heatmap(corr_matrix, cmap=cmap, center=0, cbar_kws={"label": cbar_label})
+    fig, ax = plt.subplots(figsize=figsize)
+    sns.heatmap(
+        corr_matrix, cmap=cmap, center=0, cbar_kws={"label": cbar_label}, ax=ax
+    )
 
     xticks, xlabels = _year_ticks(lookbacks, trading_days, ticks_per_year)
     ax.set_xticks(xticks)
@@ -73,11 +88,10 @@ def plot_correlation_matrix(
     ax.set_yticks(yticks)
     ax.set_yticklabels(ylabels, rotation=0)
 
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.gca().invert_yaxis()
-    plt.tight_layout()
-    plt.show()
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.invert_yaxis()
+    return fig
 
 
 def plot_scatter_grid(
@@ -87,13 +101,13 @@ def plot_scatter_grid(
     target_label: str = "Target",
     feature_format: Callable[[int], str] = str,
     target_format: Callable[[int], str] = str,
-    figsize: Tuple[float, float] = (6.0, 5.0),
+    figsize: Tuple[float, float] | None = None,
     scatter_kwargs: Optional[dict] = None,
     color_by_date: bool = True,
     cmap: str = "viridis",
     date_format: str = "%Y",
     alpha: float = 0.6,
-) -> None:
+) -> plt.Figure | None:
     """Grilla de scatter feature × target para todas las combinaciones de ventanas.
 
     ``feature_by_window`` y ``target_by_window`` deben compartir índices (o,
@@ -123,10 +137,9 @@ def plot_scatter_grid(
     fig, axes = plt.subplots(
         len(target_windows),
         len(feature_windows),
-        figsize=figsize,
+        figsize=_figsize(figsize, 0.85),
         sharex=False,
         sharey=False,
-        constrained_layout=True,
     )
 
     global_min, global_max = None, None
@@ -142,7 +155,7 @@ def plot_scatter_grid(
             if global_max is None or common_idx.max() > global_max:
                 global_max = common_idx.max()
     if global_min is None:
-        return
+        return fig
     vmin = mdates.date2num(global_min)
     vmax = mdates.date2num(global_max)
 
@@ -187,7 +200,7 @@ def plot_scatter_grid(
         cbar.ax.yaxis.set_major_formatter(mdates.DateFormatter(date_format))
         cbar.set_label("Fecha")
 
-    plt.show()
+    return fig
 
 
 def plot_feature_boxplots(
@@ -269,11 +282,14 @@ def plot_feature_boxplots(
     if show_cumulative:
         created_fig = ax is None
         if created_fig:
-            fig, ax_box = plt.subplots(figsize=(6,4), dpi=300)
+            # Con constrained_layout los dos ejes salen de la misma grilla.
+            fig, (ax_box, ax_ecdf) = plt.subplots(
+                2, 1, figsize=_figsize(None, 0.75), height_ratios=[1.0, 0.3]
+            )
         else:
             ax_box = ax
-        divider = make_axes_locatable(ax_box)
-        ax_ecdf = divider.append_axes("bottom", size="30%", pad=0.2)
+            divider = make_axes_locatable(ax_box)
+            ax_ecdf = divider.append_axes("bottom", size="30%", pad=0.2)
 
         sns.boxplot(
             data=data,
@@ -297,14 +313,10 @@ def plot_feature_boxplots(
         ax_ecdf.set_xlim(sorted_feat[0], sorted_feat[-1])
         ax_ecdf.set_xlabel(x_label_full)
         ax_ecdf.set_ylabel("Frec. acum.")
-
-        if created_fig:
-            plt.tight_layout()
-            plt.show()
     else:
         created_fig = ax is None
         if created_fig:
-            fig, ax = plt.subplots(figsize=(6, 3), dpi = 300)
+            fig, ax = plt.subplots()
 
         sns.boxplot(
             data=data,
@@ -319,10 +331,6 @@ def plot_feature_boxplots(
         ax.set_xlabel(x_label_full)
         ax.set_ylabel(y_label)
 
-        if created_fig:
-            plt.tight_layout()
-            plt.show()
-
     if return_correlation:
         return data[feature_name].corr(data[target_name])
     return None
@@ -336,10 +344,10 @@ def plot_cross_sectional_curves(
     avg_label: str = "Promedio",
     xlabel: str = r"$\tau$ (años)",
     ylabel: str = "Correlación de Pearson",
-    figsize: Tuple[float, float] = (6.0, 4.0),
+    figsize: Tuple[float, float] | None = None,
     tau_to_yf: Optional[Callable[[Sequence[int]], np.ndarray]] = None,
     trading_days: int = TRADING_DAYS,
-) -> None:
+) -> plt.Figure | None:
     """Curvas de correlación por activo con promedio cross-sectional."""
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -390,9 +398,8 @@ def plot_cross_sectional_curves(
 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.legend(loc="best", fontsize=9)
-    plt.tight_layout()
-    plt.show()
+    ax.legend(loc="best")
+    return fig
 
 
 # =============================================================================
@@ -403,7 +410,7 @@ def plot_cross_sectional_curves(
 def plot_sector_average_heatmap(
     matrix: pd.DataFrame,
     cmap: str = "viridis",
-    figsize: tuple[float, float] = (10, 8),
+    figsize: tuple[float, float] | None = None,
     title: str = "Matriz promedio sector x sector",
     cbar_label: str = "Valor medio",
     xlabel: str = "Sector GICS",
@@ -423,7 +430,7 @@ def plot_sector_average_heatmap(
         print("La matriz no contiene valores finitos.")
         return None
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=_figsize(figsize, 0.8))
     im = ax.imshow(
         matrix,
         cmap=cmap,
@@ -433,21 +440,19 @@ def plot_sector_average_heatmap(
     )
     ax.set_xticks(range(len(matrix.columns)), matrix.columns, rotation=45, ha="right")
     ax.set_yticks(range(len(matrix.index)), matrix.index)
-    ax.set_title(title, fontweight="bold")
+    ax.set_title(title)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     fig.colorbar(im, ax=ax, label=cbar_label)
-    plt.tight_layout()
-    plt.show()
     return fig
 
 
 def plot_cluster_sector_heatmap(
     contingency: pd.DataFrame,
-    figsize: Tuple[float, float] = (10, 7),
+    figsize: Tuple[float, float] | None = None,
     cmap: str = "Blues",
     title: str = "Sectores vs clusters",
-) -> None:
+) -> plt.Figure | None:
     """Heatmap de conteos sector × cluster.
 
     Se espera una tabla de contingencia que aún incluya las filas
@@ -457,21 +462,20 @@ def plot_cluster_sector_heatmap(
     data = contingency.drop(
         index=["cluster_size", "cluster_purity"], errors="ignore"
     ).astype(int)
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=_figsize(figsize, 0.7))
     sns.heatmap(data, annot=True, fmt="d", cmap=cmap, cbar=True, ax=ax)
-    ax.set_title(title, fontweight="bold")
+    ax.set_title(title)
     ax.set_xlabel("Cluster")
     ax.set_ylabel("Sector GICS")
-    plt.tight_layout()
-    plt.show()
+    return fig
 
 
 def plot_cluster_sector_composition(
     contingency: pd.DataFrame,
-    figsize: Tuple[float, float] = (10, 6),
+    figsize: Tuple[float, float] | None = None,
     palette: str = "tab20",
     title: str = "Composición sectorial por cluster",
-) -> None:
+) -> plt.Figure | None:
     """Barras apiladas al 100 % con la composición sectorial de cada cluster."""
     data = contingency.drop(index=["cluster_size", "cluster_purity"], errors="ignore")
     shares = data.div(data.sum(axis=0), axis=1).T
@@ -488,22 +492,21 @@ def plot_cluster_sector_composition(
     ax.set_xlim(0, 1)
     ax.set_xlabel("Proporción del cluster")
     ax.set_ylabel("Cluster")
-    ax.set_title(title, fontweight="bold")
+    ax.set_title(title)
     ax.legend(
         bbox_to_anchor=(1.05, 1.0),
         loc="upper left",
         title="Sector",
     )
-    plt.tight_layout()
-    plt.show()
+    return fig
 
 
 def plot_cluster_sector_summary(
     per_cluster: pd.DataFrame,
-    figsize: Tuple[float, float] = (12, 4.5),
-) -> None:
+    figsize: Tuple[float, float] | None = None,
+) -> plt.Figure | None:
     """Gráficas de pureza, entropía normalizada y HHI por cluster."""
-    fig, axes = plt.subplots(1, 3, figsize=figsize)
+    fig, axes = plt.subplots(1, 3, figsize=_figsize(figsize, 0.4))
 
     per_cluster.plot(
         y="purity",
@@ -542,8 +545,7 @@ def plot_cluster_sector_summary(
         ax.tick_params(axis="x", rotation=0)
         ax.grid(axis="y", alpha=0.3)
 
-    plt.tight_layout()
-    plt.show()
+    return fig
 
 
 def plot_sector_reordered_matrix(
@@ -551,7 +553,7 @@ def plot_sector_reordered_matrix(
     sector_labels: pd.Series | None = None,
     cluster_labels: pd.Series | None = None,
     cmap: str = "viridis",
-    figsize: tuple[float, float] = (10*0.5, 9*0.5),
+    figsize: tuple[float, float] | None = None,
     title: str = "Matriz ordenada por cluster",
     cbar_label: str = "Valor",
     separator_color: str = "white",
@@ -656,7 +658,7 @@ def plot_sector_reordered_matrix(
         return None
     vmin, vmax = float(finitos.min()), float(finitos.max())
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=_figsize(figsize, 0.9))
     im = ax.imshow(
         ordered_matrix,
         cmap=cmap,
@@ -667,9 +669,6 @@ def plot_sector_reordered_matrix(
     fig.colorbar(im, ax=ax, label=cbar_label, shrink=0.9, pad=0.01)
     ax.set_xticks([])
     ax.set_yticks([])
-
-    fig.subplots_adjust(left=0.01, right=0.99, bottom=0.01, top=0.99)
-    plt.show()
     return fig
 
 
@@ -681,9 +680,9 @@ def plot_sector_reordered_matrix(
 def plot_spread(
     spread: pd.Series,
     ou_params=None,
-    figsize: tuple[float, float] = (12.0, 5.0),
+    figsize: tuple[float, float] | None = None,
     title: str = "Spread del par",
-) -> None:
+) -> plt.Figure | None:
     """Spread con la media de equilibrio y bandas ``±k·sigma_eq`` del OU.
 
     Si ``ou_params`` es ``None`` se dibuja únicamente la serie y su media
@@ -698,7 +697,7 @@ def plot_spread(
     ou_params : thesis.pair_trading.OUParameters, opcional
         Parámetros del OU ajustados al spread.
     figsize : tuple
-        Tamaño de la figura.
+        Tamaño de la figura; por defecto ancho ``figure.figsize`` del estilo.
     title : str
         Título de la gráfica.
     """
@@ -706,7 +705,7 @@ def plot_spread(
         print("El spread está vacío: no hay nada que graficar.")
         return
 
-    _, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=figsize)
 
     ax.plot(
         spread.index,
@@ -723,7 +722,7 @@ def plot_spread(
     else:
         mu = ou_params.mu
         sigma_eq = ou_params.sigma_eq
-        ax.axhline(mu, color="black", linewidth=2, label=f"Equilibrio (μ = {mu:.4f})")
+        ax.axhline(mu, color="black", linewidth=2, label=rf"Equilibrio ($\mu = {mu:.4f}$)")
         for width, color, alpha in (
             (sigma_eq, "green", 0.20),
             (2 * sigma_eq, "orange", 0.15),
@@ -735,28 +734,27 @@ def plot_spread(
             ax.axhline(mu + width, color=color, linestyle="--", linewidth=1, alpha=0.7)
             ax.axhline(mu - width, color=color, linestyle="--", linewidth=1, alpha=0.7)
         subtitle = (
-            f"bandas ±1/2/3 σ$_{{eq}}$ = "
+            r"bandas $\pm 1/2/3\,\sigma_{\mathrm{eq}}$ = "
             f"{sigma_eq:.4f} | vida media "
             f"{ou_params.half_life:.1f} sesiones"
         )
 
     ax.set_xlabel("Fecha")
     ax.set_ylabel("Spread")
-    ax.set_title(f"{title}\n{subtitle}" if subtitle else title, fontweight="bold")
+    ax.set_title(f"{title}\n{subtitle}" if subtitle else title)
     ax.legend(loc="best")
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
+    return fig
 
 
 def plot_pair_prices(
     prices: pd.DataFrame,
     ticker_a: str,
     ticker_b: str,
-    figsize: tuple[float, float] = (12.0, 5.0),
+    figsize: tuple[float, float] | None = None,
     title: str = "Precios del par",
     log_scale: bool = False,
-) -> None:
+) -> plt.Figure | None:
     """Precios ajustados de los dos activos del par en un único eje.
 
     Parameters
@@ -766,7 +764,7 @@ def plot_pair_prices(
     ticker_a, ticker_b : str
         Tickers a graficar (deben ser columnas de ``prices``).
     figsize : tuple
-        Tamaño de la figura.
+        Tamaño de la figura; por defecto ancho ``figure.figsize`` del estilo.
     title : str
         Título de la gráfica.
     log_scale : bool
@@ -776,7 +774,7 @@ def plot_pair_prices(
         print("No hay precios para graficar. Verifica los tickers o el rango.")
         return
 
-    _, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=figsize)
     ax.plot(prices.index, prices[ticker_a], linewidth=1.6, label=ticker_a)
     ax.plot(prices.index, prices[ticker_b], linewidth=1.6, label=ticker_b)
 
@@ -787,11 +785,10 @@ def plot_pair_prices(
         ax.set_ylabel("Precio (USD)")
 
     ax.set_xlabel("Fecha")
-    ax.set_title(title, fontweight="bold")
+    ax.set_title(title)
     ax.legend(loc="best")
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
+    return fig
 
 
 def plot_pair_overview(
@@ -800,9 +797,9 @@ def plot_pair_overview(
     ticker_a: str,
     ticker_b: str,
     ou_params=None,
-    figsize: tuple[float, float] = (12.0, 8.0),
+    figsize: tuple[float, float] | None = None,
     log_scale: bool = True,
-) -> None:
+) -> plt.Figure | None:
     """Vista conjunta del par: precios arriba, spread abajo.
 
     Ambos subplots comparten el eje temporal, de modo que se pueden
@@ -821,7 +818,7 @@ def plot_pair_overview(
         Parámetros del OU; si se pasan, el subplot inferior incluye las
         bandas de equilibrio.
     figsize : tuple
-        Tamaño de la figura.
+        Tamaño de la figura; por defecto ancho ``figure.figsize`` del estilo.
     log_scale : bool
         Si ``True`` (por defecto) usa escala logarítmica en el subplot
         de precios.
@@ -833,16 +830,15 @@ def plot_pair_overview(
     fig, axes = plt.subplots(
         2,
         1,
-        figsize=figsize,
+        figsize=_figsize(figsize, 0.67),
         sharex=True,
         gridspec_kw={"height_ratios": [1, 1]},
-        dpi = 300
     )
 
     axes[0].plot(prices.index, prices[ticker_a], linewidth=1, label=ticker_a)
     axes[0].plot(prices.index, prices[ticker_b], linewidth=1, label=ticker_b)
     axes[0].set_ylabel("Precio (USD, log)" if log_scale else "Precio (USD)")
-    # axes[0].set_title(f"{ticker_a} vs {ticker_b}", fontweight="bold")
+    # axes[0].set_title(f"{ticker_a} vs {ticker_b}")
     axes[0].legend(loc="best")
     axes[0].grid(True, alpha=0.3)
     if log_scale:
@@ -858,7 +854,7 @@ def plot_pair_overview(
     if ou_params is not None:
         mu = ou_params.mu
         axes[1].axhline(
-            mu, color="black", linewidth=1, alpha = 0.5, label=f"Equilibrio (μ)"
+            mu, color="black", linewidth=1, alpha = 0.5, label=r"Equilibrio ($\mu$)"
         )
         for width, color, alpha in (
             (ou_params.sigma_eq, "green", 0.20),
@@ -870,7 +866,7 @@ def plot_pair_overview(
                 mu + width,
                 color=color,
                 alpha=alpha,
-                label=f"±{width / ou_params.sigma_eq:.0f}σ",
+                label=rf"$\pm{width / ou_params.sigma_eq:.0f}\sigma$",
             )
     else:
         axes[1].axhline(
@@ -885,9 +881,7 @@ def plot_pair_overview(
     axes[1].legend(loc="best")
     axes[1].grid(True, alpha=0.3)
 
-    # fig.suptitle("Par y spread", fontweight="bold")
-    plt.tight_layout()
-    plt.show()
+    return fig
 
 
 # =============================================================================
@@ -907,8 +901,8 @@ def plot_hedge_diagnostics(
     results: pd.DataFrame,
     in_sample_beta: float | None = None,
     beta_change_threshold: float = 0.01,
-    figsize: tuple[float, float] = (14.0, 10.0),
-) -> None:
+    figsize: tuple[float, float] | None = None,
+) -> plt.Figure | None:
     """Diagnóstico gráfico del hedge ratio walk-forward.
 
     Tres paneles:
@@ -930,13 +924,13 @@ def plot_hedge_diagnostics(
     beta_change_threshold : float
         Umbral a partir del cual se considera significativo el cambio.
     figsize : tuple
-        Tamaño de la figura.
+        Tamaño de la figura; por defecto ancho ``figure.figsize`` del estilo.
     """
     if results.empty:
         print("No hay resultados que graficar.")
         return
 
-    _, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=_figsize(figsize, 0.9), sharex=True)
 
     axes[0].plot(
         results.index,
@@ -959,11 +953,11 @@ def plot_hedge_diagnostics(
             color="gray",
             linestyle="--",
             linewidth=1.2,
-            label=f"β in-sample = {in_sample_beta:.4f}",
+            label=rf"$\beta$ in-sample = {in_sample_beta:.4f}",
         )
     axes[0].set_ylabel("Beta")
     axes[0].set_title(
-        "Hedge ratio: estimación diaria vs beta efectivo", fontweight="bold"
+        "Hedge ratio: estimación diaria vs beta efectivo"
     )
     axes[0].legend(loc="best")
     axes[0].grid(True, alpha=0.3)
@@ -972,7 +966,7 @@ def plot_hedge_diagnostics(
         results.index, results["alpha"], color="purple", linewidth=1.2, label="Alpha"
     )
     axes[1].set_ylabel("Alpha")
-    axes[1].set_title("Intercepto walk-forward", fontweight="bold")
+    axes[1].set_title("Intercepto walk-forward")
     axes[1].legend(loc="best")
     axes[1].grid(True, alpha=0.3)
 
@@ -983,7 +977,7 @@ def plot_hedge_diagnostics(
         width=1.0,
         color="steelblue",
         alpha=0.7,
-        label="|Δβ| diario",
+        label=r"$|\Delta\beta|$ diario",
     )
     axes[2].axhline(
         beta_change_threshold,
@@ -992,22 +986,21 @@ def plot_hedge_diagnostics(
         linewidth=1.2,
         label=f"umbral = {beta_change_threshold}",
     )
-    axes[2].set_ylabel("|Δβ|")
+    axes[2].set_ylabel(r"$|\Delta\beta|$")
     axes[2].set_xlabel("Fecha")
-    axes[2].set_title("Cambios del hedge ratio", fontweight="bold")
+    axes[2].set_title("Cambios del hedge ratio")
     axes[2].legend(loc="best")
     axes[2].grid(True, alpha=0.3)
 
-    plt.tight_layout()
-    plt.show()
+    return fig
 
 
 def plot_signal_diagnostics(
     results: pd.DataFrame,
     entry_z: float = 2.0,
     exit_z: float = 0.0,
-    figsize: tuple[float, float] = (14.0, 12.0),
-) -> None:
+    figsize: tuple[float, float] | None = None,
+) -> plt.Figure | None:
     """Diagnóstico gráfico de las señales y de la ejecución.
 
     Tres paneles:
@@ -1024,14 +1017,14 @@ def plot_signal_diagnostics(
     entry_z, exit_z : float
         Umbrales usados en el backtest.
     figsize : tuple
-        Tamaño de la figura.
+        Tamaño de la figura; por defecto ancho ``figure.figsize`` del estilo.
     """
     if results.empty:
         print("No hay resultados que graficar.")
         return
 
     entries, exits = _entry_exit_masks(results)
-    _, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=_figsize(figsize, 0.9), sharex=True)
 
     axes[0].plot(
         results.index, results["spread"], color="navy", linewidth=1.2, label="Spread"
@@ -1056,7 +1049,7 @@ def plot_signal_diagnostics(
     )
     axes[0].axhline(0, color="gray", linewidth=0.8, alpha=0.5)
     axes[0].set_ylabel("Spread")
-    axes[0].set_title("Spread con entradas y salidas", fontweight="bold")
+    axes[0].set_title("Spread con entradas y salidas")
     axes[0].legend(loc="best")
     axes[0].grid(True, alpha=0.3)
 
@@ -1071,7 +1064,7 @@ def plot_signal_diagnostics(
         exit_z, color="green", linestyle=":", linewidth=1.2, label=f"salida {exit_z}"
     )
     axes[1].set_ylabel("z-score")
-    axes[1].set_title("Z-score y umbrales de decisión", fontweight="bold")
+    axes[1].set_title("Z-score y umbrales de decisión")
     axes[1].legend(loc="best")
     axes[1].grid(True, alpha=0.3)
 
@@ -1098,18 +1091,17 @@ def plot_signal_diagnostics(
         )
     axes[2].set_ylabel("Días")
     axes[2].set_xlabel("Fecha")
-    axes[2].set_title("Duración de cada operación", fontweight="bold")
+    axes[2].set_title("Duración de cada operación")
     axes[2].legend(loc="best")
     axes[2].grid(True, alpha=0.3)
 
-    plt.tight_layout()
-    plt.show()
+    return fig
 
 
 def plot_return_diagnostics(
     results: pd.DataFrame,
-    figsize: tuple[float, float] = (14.0, 12.0),
-) -> None:
+    figsize: tuple[float, float] | None = None,
+) -> plt.Figure | None:
     """Diagnóstico gráfico del retorno, el notional y los costes.
 
     Tres paneles:
@@ -1125,13 +1117,13 @@ def plot_return_diagnostics(
     results : pd.DataFrame
         Salida del backtest.
     figsize : tuple
-        Tamaño de la figura.
+        Tamaño de la figura; por defecto ancho ``figure.figsize`` del estilo.
     """
     if results.empty:
         print("No hay resultados que graficar.")
         return
 
-    _, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=_figsize(figsize, 0.9), sharex=True)
 
     axes[0].plot(
         results.index,
@@ -1173,8 +1165,8 @@ def plot_return_diagnostics(
     )
     axes[0].axhline(0, color="gray", linewidth=0.8, alpha=0.5)
     axes[0].set_ylabel("Retorno diario")
-    axes[0].set_title("Descomposición del retorno diario", fontweight="bold")
-    axes[0].legend(loc="best", ncol=3, fontsize=8)
+    axes[0].set_title("Descomposición del retorno diario")
+    axes[0].legend(loc="best", ncol=3)
     axes[0].grid(True, alpha=0.3)
 
     axes[1].plot(
@@ -1182,7 +1174,7 @@ def plot_return_diagnostics(
         results["gross_notional"],
         color="black",
         linewidth=1.2,
-        label="Notional bruto (1 + |β|)",
+        label=r"Notional bruto ($1 + |\beta|$)",
     )
     axes[1].plot(
         results.index,
@@ -1199,7 +1191,7 @@ def plot_return_diagnostics(
         label="|Peso B|",
     )
     axes[1].set_ylabel("Exposición")
-    axes[1].set_title("Notional bruto y pesos efectivos", fontweight="bold")
+    axes[1].set_title("Notional bruto y pesos efectivos")
     axes[1].legend(loc="best")
     axes[1].grid(True, alpha=0.3)
 
@@ -1222,19 +1214,18 @@ def plot_return_diagnostics(
     twin.set_ylabel("Costes acumulados")
     axes[2].set_ylabel("Turnover")
     axes[2].set_xlabel("Fecha")
-    axes[2].set_title("Turnover y costes acumulados", fontweight="bold")
-    axes[2].legend(loc="best", fontsize=8)
+    axes[2].set_title("Turnover y costes acumulados")
+    axes[2].legend(loc="best")
     axes[2].grid(True, alpha=0.3)
 
-    plt.tight_layout()
-    plt.show()
+    return fig
 
 
 def plot_equity_diagnostics(
     results: pd.DataFrame,
-    figsize: tuple[float, float] = (14.0, 12.0),
+    figsize: tuple[float, float] | None = None,
     rolling_window: int = 252,
-) -> None:
+) -> plt.Figure | None:
     """Diagnóstico gráfico del equity, drawdown y estabilidad temporal.
 
     Tres paneles:
@@ -1248,7 +1239,7 @@ def plot_equity_diagnostics(
     results : pd.DataFrame
         Salida del backtest.
     figsize : tuple
-        Tamaño de la figura.
+        Tamaño de la figura; por defecto ancho ``figure.figsize`` del estilo.
     rolling_window : int
         Ventana de las métricas rolling, en sesiones.
     """
@@ -1256,7 +1247,7 @@ def plot_equity_diagnostics(
         print("No hay resultados que graficar.")
         return
 
-    _, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=_figsize(figsize, 0.9), sharex=True)
 
     equity = results["equity"]
     gross_equity = np.exp(results["gross_return"].cumsum())
@@ -1278,7 +1269,7 @@ def plot_equity_diagnostics(
             color="orange",
             linewidth=1.0,
             linestyle=":",
-            label="Buy & Hold A",
+            label=r"Buy \& Hold A",
         )
         axes[0].plot(
             results.index,
@@ -1286,7 +1277,7 @@ def plot_equity_diagnostics(
             color="blue",
             linewidth=1.0,
             linestyle=":",
-            label="Buy & Hold B",
+            label=r"Buy \& Hold B",
         )
     if "bh_equity_SPY" in results.columns:
         axes[0].plot(
@@ -1295,12 +1286,12 @@ def plot_equity_diagnostics(
             color="black",
             linewidth=1.2,
             linestyle="-.",
-            label="Buy & Hold SPY",
+            label=r"Buy \& Hold SPY",
         )
     axes[0].axhline(1.0, color="gray", linewidth=0.8, alpha=0.5)
     axes[0].set_ylabel("Capital")
-    axes[0].set_title("Curva de capital", fontweight="bold")
-    axes[0].legend(loc="best", fontsize=8)
+    axes[0].set_title("Curva de capital")
+    axes[0].legend(loc="best")
     axes[0].grid(True, alpha=0.3)
     axes[0].set_yscale("log")
 
@@ -1313,7 +1304,7 @@ def plot_equity_diagnostics(
         label="Drawdown",
     )
     axes[1].set_ylabel("Drawdown")
-    axes[1].set_title("Drawdown de la estrategia", fontweight="bold")
+    axes[1].set_title("Drawdown de la estrategia")
     axes[1].legend(loc="best")
     axes[1].grid(True, alpha=0.3)
 
@@ -1341,18 +1332,17 @@ def plot_equity_diagnostics(
     twin.set_ylabel("Volatilidad anualizada")
     axes[2].set_ylabel("Sharpe rolling")
     axes[2].set_xlabel("Fecha")
-    axes[2].set_title("Estabilidad temporal de la estrategia", fontweight="bold")
-    axes[2].legend(loc="best", fontsize=8)
+    axes[2].set_title("Estabilidad temporal de la estrategia")
+    axes[2].legend(loc="best")
     axes[2].grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
+    return fig
 
 
 def plot_equity(
     results: pd.DataFrame,
-    figsize: tuple[float, float] = (14.0, 12.0),
+    figsize: tuple[float, float] | None = None,
     rolling_window: int = 252,
-) -> None:
+) -> plt.Figure | None:
     """Diagnóstico gráfico del equity, drawdown y estabilidad temporal.
 
     Tres paneles:
@@ -1366,7 +1356,7 @@ def plot_equity(
     results : pd.DataFrame
         Salida del backtest.
     figsize : tuple
-        Tamaño de la figura.
+        Tamaño de la figura; por defecto ancho ``figure.figsize`` del estilo.
     rolling_window : int
         Ventana de las métricas rolling, en sesiones.
     """
@@ -1374,14 +1364,14 @@ def plot_equity(
         print("No hay resultados que graficar.")
         return
 
-    plt.figure(figsize=figsize)
+    fig, ax = plt.subplots(figsize=figsize)
 
     equity = results["equity"]
     gross_equity = np.exp(results["gross_return"].cumsum())
-    plt.plot(
+    ax.plot(
         equity.index, equity, color="green", linewidth=1.8, label="Estrategia (neto)"
     )
-    plt.plot(
+    ax.plot(
         gross_equity.index,
         gross_equity,
         color="darkgreen",
@@ -1390,37 +1380,38 @@ def plot_equity(
         label="Estrategia (sin costes)",
     )
     if "bh_equity_A" in results.columns:
-        plt.plot(
+        ax.plot(
             results.index,
             results["bh_equity_A"],
             color="orange",
             linewidth=1.0,
             linestyle=":",
-            label="Buy & Hold A",
+            label=r"Buy \& Hold A",
         )
-        plt.plot(
+        ax.plot(
             results.index,
             results["bh_equity_B"],
             color="blue",
             linewidth=1.0,
             linestyle=":",
-            label="Buy & Hold B",
+            label=r"Buy \& Hold B",
         )
     if "bh_equity_SPY" in results.columns:
-        plt.plot(
+        ax.plot(
             results.index,
             results["bh_equity_SPY"],
             color="black",
             linewidth=1.2,
             linestyle="-.",
-            label="Buy & Hold SPY",
+            label=r"Buy \& Hold SPY",
         )
-    plt.axhline(1.0, color="gray", linewidth=0.8, alpha=0.5)
-    plt.set_ylabel("Capital")
-    plt.set_title("Curva de capital", fontweight="bold")
-    plt.legend(loc="best", fontsize=8)
-    plt.grid(True, alpha=0.3)
-    plt.set_yscale("log")
+    ax.axhline(1.0, color="gray", linewidth=0.8, alpha=0.5)
+    ax.set_ylabel("Capital")
+    ax.set_title("Curva de capital")
+    ax.legend(loc="best")
+    ax.grid(True, alpha=0.3)
+    ax.set_yscale("log")
+    return fig
 
 
 def plot_backtest_dashboard(
@@ -1428,8 +1419,8 @@ def plot_backtest_dashboard(
     entry_z: float = 2.0,
     exit_z: float = 0.0,
     in_sample_beta: float | None = None,
-    figsize: tuple[float, float] = (16.0, 22.0),
-) -> None:
+    figsize: tuple[float, float] | None = None,
+) -> plt.Figure | None:
     """Dashboard de seis paneles para auditar un backtest de pair trading.
 
     Los paneles son, de arriba abajo:
@@ -1450,14 +1441,14 @@ def plot_backtest_dashboard(
     in_sample_beta : float | None
         Beta in-sample usado como referencia visual.
     figsize : tuple
-        Tamaño de la figura.
+        Tamaño de la figura; por defecto ancho ``figure.figsize`` del estilo.
     """
     if results.empty:
         print("No hay resultados que graficar.")
         return
 
     entries, exits = _entry_exit_masks(results)
-    _, axes = plt.subplots(6, 1, figsize=figsize, sharex=True)
+    fig, axes = plt.subplots(6, 1, figsize=_figsize(figsize, 1.35), sharex=True)
 
     axes[0].plot(
         results.index,
@@ -1480,11 +1471,11 @@ def plot_backtest_dashboard(
             color="gray",
             linestyle="--",
             linewidth=1.0,
-            label=f"β in-sample = {in_sample_beta:.4f}",
+            label=rf"$\beta$ in-sample = {in_sample_beta:.4f}",
         )
     axes[0].set_ylabel("Beta")
-    axes[0].set_title("1. Hedge ratio walk-forward vs beta efectivo", fontweight="bold")
-    axes[0].legend(loc="best", fontsize=8)
+    axes[0].set_title("1. Hedge ratio walk-forward vs beta efectivo")
+    axes[0].legend(loc="best")
     axes[0].grid(True, alpha=0.3)
 
     axes[1].plot(
@@ -1509,8 +1500,8 @@ def plot_backtest_dashboard(
         label="Salida",
     )
     axes[1].set_ylabel("Spread")
-    axes[1].set_title("2. Spread y operaciones", fontweight="bold")
-    axes[1].legend(loc="best", fontsize=8)
+    axes[1].set_title("2. Spread y operaciones")
+    axes[1].legend(loc="best")
     axes[1].grid(True, alpha=0.3)
 
     axes[2].plot(
@@ -1530,7 +1521,7 @@ def plot_backtest_dashboard(
     )
     twin.set_yticks([-1, 0, 1])
     axes[2].set_ylabel("z-score")
-    axes[2].set_title("3. Señales y posición", fontweight="bold")
+    axes[2].set_title("3. Señales y posición")
     axes[2].grid(True, alpha=0.3)
 
     axes[3].plot(
@@ -1558,8 +1549,8 @@ def plot_backtest_dashboard(
     )
     axes[3].axhline(0, color="gray", linewidth=0.8, alpha=0.5)
     axes[3].set_ylabel("Retorno diario")
-    axes[3].set_title("4. Descomposición del retorno", fontweight="bold")
-    axes[3].legend(loc="best", fontsize=8, ncol=3)
+    axes[3].set_title("4. Descomposición del retorno")
+    axes[3].legend(loc="best", ncol=3)
     axes[3].grid(True, alpha=0.3)
 
     axes[4].plot(
@@ -1576,7 +1567,7 @@ def plot_backtest_dashboard(
             color="orange",
             linewidth=1.0,
             linestyle=":",
-            label="Buy & Hold A",
+            label=r"Buy \& Hold A",
         )
         axes[4].plot(
             results.index,
@@ -1584,7 +1575,7 @@ def plot_backtest_dashboard(
             color="blue",
             linewidth=1.0,
             linestyle=":",
-            label="Buy & Hold B",
+            label=r"Buy \& Hold B",
         )
     if "bh_equity_SPY" in results.columns:
         axes[4].plot(
@@ -1593,12 +1584,12 @@ def plot_backtest_dashboard(
             color="black",
             linewidth=1.2,
             linestyle="-.",
-            label="Buy & Hold SPY",
+            label=r"Buy \& Hold SPY",
         )
     axes[4].axhline(1.0, color="gray", linewidth=0.8, alpha=0.5)
     axes[4].set_ylabel("Capital")
-    axes[4].set_title("5. Equity y benchmarks", fontweight="bold")
-    axes[4].legend(loc="best", fontsize=8)
+    axes[4].set_title("5. Equity y benchmarks")
+    axes[4].legend(loc="best")
     axes[4].grid(True, alpha=0.3)
 
     axes[5].fill_between(
@@ -1621,20 +1612,19 @@ def plot_backtest_dashboard(
     twin.set_ylabel("Turnover")
     axes[5].set_ylabel("Drawdown")
     axes[5].set_xlabel("Fecha")
-    axes[5].set_title("6. Drawdown y turnover", fontweight="bold")
-    axes[5].legend(loc="best", fontsize=8)
+    axes[5].set_title("6. Drawdown y turnover")
+    axes[5].legend(loc="best")
     axes[5].grid(True, alpha=0.3)
 
-    plt.tight_layout()
-    plt.show()
+    return fig
 
 
 def plot_pair_window_summary(
     summary,
     full_spread: pd.Series | None = None,
     beta_history: pd.Series | None = None,
-    figsize: tuple[float, float] = (14.0, 11.0),
-) -> None:
+    figsize: tuple[float, float] | None = None,
+) -> plt.Figure | None:
     """Compara el estado completo del par con su ventana más reciente.
 
     Tres paneles:
@@ -1658,7 +1648,7 @@ def plot_pair_window_summary(
     beta_history : pd.Series | None
         Serie con el hedge ratio walk-forward para contrastar.
     figsize : tuple
-        Tamaño de la figura.
+        Tamaño de la figura; por defecto ancho ``figure.figsize`` del estilo.
     """
     if summary is None or summary.spread.empty:
         print("No hay datos de la ventana reciente para graficar.")
@@ -1666,7 +1656,7 @@ def plot_pair_window_summary(
 
     spread = summary.spread
 
-    _, axes = plt.subplots(3, 1, figsize=figsize, sharex=False)
+    fig, axes = plt.subplots(3, 1, figsize=_figsize(figsize, 0.9), sharex=False)
 
     if full_spread is not None and not full_spread.empty:
         axes[0].plot(
@@ -1695,12 +1685,12 @@ def plot_pair_window_summary(
             color=color,
             alpha=alpha,
         )
-    axes[0].axhline(mu, color="black", linewidth=1.2, label=f"μ = {mu:.4f}")
+    axes[0].axhline(mu, color="black", linewidth=1.2, label=rf"$\mu = {mu:.4f}$")
     axes[0].axhline(mu + 2 * sigma, color="orange", linestyle="--", linewidth=0.9)
     axes[0].axhline(mu - 2 * sigma, color="orange", linestyle="--", linewidth=0.9)
     axes[0].set_ylabel("Spread")
-    axes[0].set_title("Spread: muestra completa vs última ventana", fontweight="bold")
-    axes[0].legend(loc="best", fontsize=8)
+    axes[0].set_title("Spread: muestra completa vs última ventana")
+    axes[0].legend(loc="best")
     axes[0].grid(True, alpha=0.3)
 
     if beta_history is not None and not beta_history.empty:
@@ -1717,17 +1707,17 @@ def plot_pair_window_summary(
             color="gray",
             linestyle="--",
             linewidth=1.2,
-            label=f"β muestra completa = {summary.full_hedge.beta:.4f}",
+            label=rf"$\beta$ muestra completa = {summary.full_hedge.beta:.4f}",
         )
     axes[1].axhline(
         summary.hedge.beta,
         color="darkorange",
         linewidth=1.6,
-        label=f"β última ventana = {summary.hedge.beta:.4f}",
+        label=rf"$\beta$ última ventana = {summary.hedge.beta:.4f}",
     )
     axes[1].set_ylabel("Beta")
-    axes[1].set_title("Hedge ratio: completo vs ventana reciente", fontweight="bold")
-    axes[1].legend(loc="best", fontsize=8)
+    axes[1].set_title("Hedge ratio: completo vs ventana reciente")
+    axes[1].legend(loc="best")
     axes[1].grid(True, alpha=0.3)
 
     z_recent = (spread - mu) / sigma if sigma > 0 else spread * np.nan
@@ -1739,8 +1729,8 @@ def plot_pair_window_summary(
     axes[2].axhline(0.0, color="green", linestyle=":", linewidth=1.1, label="salida")
     axes[2].set_ylabel("z-score")
     axes[2].set_xlabel("Fecha")
-    axes[2].set_title("Z-score de la ventana reciente", fontweight="bold")
-    axes[2].legend(loc="best", fontsize=8)
+    axes[2].set_title("Z-score de la ventana reciente")
+    axes[2].legend(loc="best")
     axes[2].grid(True, alpha=0.3)
 
     # Banda informative con la vida media de la reversión en ambas muestras.
@@ -1752,5 +1742,4 @@ def plot_pair_window_summary(
             etiqueta.append(f"reciente: {summary.ou.half_life:.1f} sesiones")
         axes[2].set_xlabel(f"Fecha   (vida media OU — {'; '.join(etiqueta)})")
 
-    plt.tight_layout()
-    plt.show()
+    return fig
