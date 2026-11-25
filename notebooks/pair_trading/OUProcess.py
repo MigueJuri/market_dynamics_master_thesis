@@ -78,6 +78,12 @@ import pandas as pd
 
 from thesis.pair_trading import simulate_gbm, simulate_ou_process
 
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
+
+
 # %%
 # ## Parámetros de la simulación
 #
@@ -118,7 +124,7 @@ price2 = np.exp((np.log(price1) - spread) / beta)
 #   se mueven juntas pero con un desfase controlado por el spread.
 # - Panel (b): el proceso OU simulado, con una línea horizontal en
 #   $\mu = 0$ como referencia.
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(W, 0.75 * W), sharex=True)
 
 ax1.plot(time_axis, price1, label="Activo A", color="navy")
 ax1.plot(time_axis, price2, label="Activo B", color="darkorange")
@@ -138,13 +144,10 @@ for label, ax in zip(["(a)", "(b)"], (ax1, ax2)):
     ax.text(
         0.03, 0.97, label,
         transform=ax.transAxes,
-        fontsize=12,
-        fontweight="bold",
         va="top",
         ha="left",
     )
 
-plt.tight_layout()
 plt.show()
 
 # %%

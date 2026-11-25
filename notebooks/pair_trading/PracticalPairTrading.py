@@ -76,6 +76,12 @@ from thesis.plotting import (
     plot_signal_diagnostics,
 )
 
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
+
+
 # %% [markdown]
 # ## Selección del par y parámetros
 
@@ -569,7 +575,7 @@ if "bh_equity_A" in results.columns:
         color="orange",
         linewidth=1.0,
         linestyle=":",
-        label="Buy & Hold A",
+        label=r"Buy \& Hold A",
     )
     plt.plot(
         results.index,
@@ -577,7 +583,7 @@ if "bh_equity_A" in results.columns:
         color="blue",
         linewidth=1.0,
         linestyle=":",
-        label="Buy & Hold B",
+        label=r"Buy \& Hold B",
     )
 # if "bh_equity_SPY" in results.columns:
 #     plt.plot(
@@ -590,8 +596,8 @@ if "bh_equity_A" in results.columns:
 #     )
 plt.axhline(1.0, color="gray", linewidth=0.8, alpha=0.5)
 plt.ylabel("Curvas de Capital (log scale)")
-plt.title("Curva de capital", fontweight="bold")
-plt.legend(loc="best", fontsize=8)
+plt.title("Curva de capital")
+plt.legend(loc="best")
 plt.grid(True, alpha=0.3)
 # %%
 # ## Configuración del experimento

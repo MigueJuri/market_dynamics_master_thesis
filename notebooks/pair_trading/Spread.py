@@ -85,6 +85,14 @@ from thesis.pair_trading import (
 )
 from thesis.plotting import plot_pair_overview, plot_pair_prices, plot_spread
 
+import matplotlib.pyplot as plt
+
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
+
+
 # %%
 # ## Selección del par y construcción del spread
 #
@@ -164,7 +172,7 @@ prices = load_multiple_prices(
 plot_spread(
     spread_series,
     ou_params,
-    title=f"Spread {TICKER_A}–{TICKER_B} (hedge ratio β = {hedge_ratio:.3f})",
+    title=rf"Spread {TICKER_A}--{TICKER_B} (hedge ratio $\beta = {hedge_ratio:.3f}$)",
 )
 
 # %%
@@ -192,7 +200,7 @@ plot_pair_overview(
     TICKER_A,
     TICKER_B,
     ou_params,
-    figsize=(6, 4)
+    figsize=(W, 0.65 * W)
 )
 
 # %%

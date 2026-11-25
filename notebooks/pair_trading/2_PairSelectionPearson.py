@@ -95,6 +95,12 @@ from thesis.plotting import (
     plot_sector_reordered_matrix,
 )
 
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
+
+
 # %%
 # ## Universo, ventana de análisis y retornos
 #
@@ -713,7 +719,7 @@ for i in range(0, len(returns_rolling) - WINDOW_SIZE, STEP_SIZE):
     matrices.append(rolling.values)
     dates.append(window.index[-1].strftime("%Y-%m-%d"))
 
-fig, ax = plt.subplots(figsize=(10, 8))
+fig, ax = plt.subplots(figsize=(W, 0.8 * W))
 cax = ax.imshow(matrices[0], cmap="coolwarm", interpolation="nearest",
                 vmin=-1, vmax=1)
 ax.set_xticks(range(len(static_labels)), static_labels, rotation=45)

@@ -115,6 +115,14 @@ from thesis.plotting import (
     plot_sector_reordered_matrix,
 )
 
+import matplotlib.pyplot as plt
+
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
+
+
 # %%
 # ## Universo, ventana de análisis y retornos
 #
