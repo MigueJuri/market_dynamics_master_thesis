@@ -43,6 +43,17 @@ python3 scripts/df_peek.py <ruta.csv|parquet>
 - Nombres descriptivos y estables: `<estrategia>_<dataset>_<metrica>.pdf/png`.
 - Cada figura/tabla debe ser producida por un único script o celda.
 - **No** crear carpetas de exportación ni scripts de sincronización entre repos.
+- **Formato de figuras (obligatorio en toda figura nueva o modificada)**: la
+  tesis usa `\textwidth` = 155 mm y cuerpo a 12 pt.
+  - En la celda de setup: `plt.style.use(_ROOT / "styles" / "thesis.mplstyle")`
+    y `W = plt.rcParams["figure.figsize"][0]`.
+  - Tamaño: el por defecto del estilo o `figsize=(W, ratio * W)`; nunca un
+    ancho distinto de `W` para figuras a ancho completo.
+  - Sin `dpi=`, sin `bbox_inches="tight"`, sin `fontsize=`/`fontweight=`
+    hardcodeados; guardar en `.pdf`.
+  - Texto compatible con `usetex`: escapar `% _ & #` (p. ej. `r"Retorno (\%)"`).
+  - Personalizar solo in situ (`plt.rc_context`, kwargs, `ax.set_*`); las
+    funciones de `src/` aceptan `figsize=None` y devuelven `fig`/`axes`.
 
 ## 6. Flujos de trabajo
 

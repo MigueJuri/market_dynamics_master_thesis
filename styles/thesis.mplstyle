@@ -1,0 +1,85 @@
+## Estilo de figuras de la tesis (LaTeX, \textwidth = 155 mm, cuerpo a 12 pt).
+##
+## Uso (celda de setup de cada notebook):
+##     plt.style.use(_ROOT / "styles" / "thesis.mplstyle")
+##     W = plt.rcParams["figure.figsize"][0]      # ancho de texto [in]
+## Editar este archivo y re-ejecutar la celda lo vuelve a aplicar: no hace
+## falta reiniciar el kernel. Personalizar figuras sueltas con
+## ``plt.rc_context({...})``, ``figsize=(W, ratio * W)`` o ``ax.set_*``.
+##
+## En LaTeX: \includegraphics{figura.pdf} (escala 1 == width=\textwidth).
+
+## --- Tamaño y guardado -----------------------------------------------------
+figure.figsize        : 6.1024, 3.7714   # 155 mm de ancho, proporción áurea
+figure.dpi            : 150              # solo pantalla
+figure.facecolor      : white
+figure.constrained_layout.use : True     # márgenes sin cambiar el tamaño
+savefig.format        : pdf
+savefig.dpi           : 300              # solo afecta a elementos raster
+savefig.bbox          : standard         # NO "tight": cambiaría el ancho final
+savefig.facecolor     : white
+savefig.transparent   : False
+pdf.fonttype          : 42
+
+## --- Tipografía (la misma del documento) ---------------------------------
+text.usetex           : True
+text.latex.preamble   : \usepackage[T1]{fontenc}\usepackage{lmodern}\usepackage{amsmath}\usepackage{amssymb}
+font.family           : serif
+font.serif            : Latin Modern Roman, Computer Modern Roman, cmr10, DejaVu Serif
+mathtext.fontset      : cm
+axes.formatter.use_mathtext : True
+
+font.size             : 12
+axes.labelsize        : 12
+axes.titlesize        : 12
+axes.titleweight      : normal
+figure.titlesize      : 12
+figure.titleweight    : normal
+legend.fontsize       : 12
+legend.title_fontsize : 12
+xtick.labelsize       : 12
+ytick.labelsize       : 12
+
+## --- Ejes ------------------------------------------------------------------
+axes.facecolor        : white
+axes.edgecolor        : 0.15
+axes.linewidth        : 0.6
+axes.labelcolor       : 0.1
+axes.spines.top       : False
+axes.spines.right     : False
+axes.axisbelow        : True
+axes.titlepad         : 6
+axes.labelpad         : 4
+axes.xmargin          : 0.01
+axes.prop_cycle       : cycler('color', ['4477AA', 'EE6677', '228833', 'CCBB44', '66CCEE', 'AA3377', 'BBBBBB'])
+
+axes.grid             : True
+grid.color            : 0.6
+grid.alpha            : 0.3
+grid.linestyle        : -
+grid.linewidth        : 0.4
+
+xtick.direction       : out
+ytick.direction       : out
+xtick.major.size      : 3
+ytick.major.size      : 3
+xtick.minor.size      : 1.5
+ytick.minor.size      : 1.5
+xtick.major.width     : 0.6
+ytick.major.width     : 0.6
+xtick.color           : 0.15
+ytick.color           : 0.15
+
+## --- Elementos -------------------------------------------------------------
+lines.linewidth       : 1.2
+lines.markersize      : 4
+patch.linewidth       : 0.5
+hist.bins             : auto
+scatter.edgecolors    : none
+
+legend.frameon        : False
+legend.handlelength   : 1.6
+legend.borderaxespad  : 0.4
+legend.columnspacing  : 1.2
+
+image.cmap            : viridis
