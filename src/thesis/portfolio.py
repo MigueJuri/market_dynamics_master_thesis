@@ -513,7 +513,7 @@ def plot_portfolio_composition(
     if weights_df.empty:
         raise ValueError("weights_df está vacío.")
 
-    fig, ax = plt.subplots(figsize=_figsize(figsize, 0.5))
+    fig, ax = plt.subplots(figsize=_figsize(figsize, 0.75))
     cols = plt.cm.tab20(np.linspace(0.0, 1.0, len(weights_df.columns)))
     ax.stackplot(
         weights_df.index,
@@ -530,14 +530,14 @@ def plot_portfolio_composition(
     ax.set_xlim(weights_df.index[0], weights_df.index[-1])
     ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
 
+    # Leyenda bajo el eje: a ancho de texto no cabe una columna lateral.
     handles, labels = ax.get_legend_handles_labels()
-    ax.legend(
-        handles[::-1],
-        labels[::-1],
-        loc="upper left",
-        bbox_to_anchor=(1.02, 1),
+    fig.legend(
+        handles,
+        labels,
+        loc="outside lower center",
+        ncol=min(len(labels), 7),
         title="Activos",
-        frameon=True,
     )
     ax.grid(axis="x", linestyle="--", alpha=0.3)
 
@@ -550,7 +550,10 @@ def plot_portfolio_composition(
         d = pd.to_datetime(date)
         if weights_df.index[0] < d < weights_df.index[-1]:
             ax.axvline(d, color=color, linestyle="--", linewidth=1.5)
-            ax.text(d, 1.02, label, color=color, ha="center")
+            ax.text(
+                d, 0.98, f" {label}", color=color, ha="left", va="top",
+                rotation=90, transform=ax.get_xaxis_transform(),
+            )
 
     return fig
 
