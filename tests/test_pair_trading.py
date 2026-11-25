@@ -899,6 +899,13 @@ def test_ksg_mi_matrix_diagonal_nan(returns_synthetic) -> None:
     assert mi.loc["A", "B"] > mi.loc["A", "C"]
 
 
+def test_ksg_mi_matrix_no_depende_de_n_jobs(returns_synthetic) -> None:
+    """La paralelización no altera la matriz: cada par usa la misma semilla."""
+    serie = ksg_mi_matrix(returns_synthetic, k_neighbors=3, seed=42, n_jobs=1)
+    paralelo = ksg_mi_matrix(returns_synthetic, k_neighbors=3, seed=42, n_jobs=2)
+    pd.testing.assert_frame_equal(serie, paralelo)
+
+
 def test_ksg_mi_matrix_dataframe_vacio() -> None:
     """Un DataFrame vacío lanza ``ValueError``."""
     with pytest.raises(ValueError, match="vacío"):

@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 import requests
 import statsmodels.api as sm
+from joblib import Parallel, delayed
 from scipy.cluster.hierarchy import fcluster, leaves_list, linkage
 from scipy.spatial.distance import squareform
 from sklearn.feature_selection import mutual_info_regression
@@ -2475,8 +2476,33 @@ def gaussian_mi_matrix(returns: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(mi_arr, index=rho.index, columns=rho.columns)
 
 
+def _ksg_mi_row(
+    data: np.ndarray, i: int, k_neighbors: int, seed: int
+) -> list[tuple[int, float]]:
+    """MI KSG simetrizada entre la columna ``i`` y las columnas ``j > i``."""
+    x = data[:, i]
+    if np.std(x) == 0:
+        return []
+    out = []
+    for j in range(i + 1, data.shape[1]):
+        y = data[:, j]
+        if np.std(y) == 0:
+            continue
+        mi_xy = mutual_info_regression(
+            x.reshape(-1, 1), y, n_neighbors=k_neighbors, random_state=seed
+        )[0]
+        mi_yx = mutual_info_regression(
+            y.reshape(-1, 1), x, n_neighbors=k_neighbors, random_state=seed
+        )[0]
+        out.append((j, (mi_xy + mi_yx) / 2.0))
+    return out
+
+
 def ksg_mi_matrix(
-    returns: pd.DataFrame, k_neighbors: int = 3, seed: int = SEED
+    returns: pd.DataFrame,
+    k_neighbors: int = 3,
+    seed: int = SEED,
+    n_jobs: int = -1,
 ) -> pd.DataFrame:
     """Matriz de Información Mutua con el estimador KSG (k-NN).
 
@@ -2496,6 +2522,10 @@ def ksg_mi_matrix(
         varianza).
     seed : int
         Semilla aleatoria del estimador (afecta al jittering).
+    n_jobs : int
+        Procesos de joblib (``-1``: todos los núcleos).  Cada par usa
+        ``random_state=seed``, así que el resultado no depende de
+        ``n_jobs``; solo cambia el tiempo de cálculo.
     """
     if returns is None or returns.empty:
         raise ValueError("El DataFrame de retornos está vacío.")
@@ -2510,20 +2540,11 @@ def ksg_mi_matrix(
     mi = np.full((n, n), np.nan)
 
     print(f"Calculando matriz MI (KSG) para {n} activos...")
-    for i in range(n):
-        for j in range(i + 1, n):
-            x, y = data[:, i], data[:, j]
-            if np.std(x) == 0 or np.std(y) == 0:
-                continue
-            xi = x.reshape(-1, 1)
-            yi = y.reshape(-1, 1)
-            mi_xy = mutual_info_regression(
-                xi, y, n_neighbors=k_neighbors, random_state=seed
-            )[0]
-            mi_yx = mutual_info_regression(
-                yi, x, n_neighbors=k_neighbors, random_state=seed
-            )[0]
-            sym = (mi_xy + mi_yx) / 2.0
+    rows = Parallel(n_jobs=n_jobs)(
+        delayed(_ksg_mi_row)(data, i, k_neighbors, seed) for i in range(n)
+    )
+    for i, row in enumerate(rows):
+        for j, sym in row:
             mi[i, j] = sym
             mi[j, i] = sym
     return pd.DataFrame(mi, index=assets, columns=assets)
