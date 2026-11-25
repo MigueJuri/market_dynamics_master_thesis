@@ -148,10 +148,7 @@ CONFIG: dict[str, Any] = {
     # --- Bandas y grilla del fan chart (etapa 4) ---
     "band_levels": BAND_LEVELS,
     "n_price_bins": 200,
-    # --- Figuras ---
-    "figsize_fan": (10.0, 4.5),
-    "figsize_rolling": (11.0, 6.0),
-    "figsize_drift": (11.0, 4.2),
+    # --- Figuras (tamaño: ancho W del estilo de la tesis) ---
     "save_figures": True,
     "show_figure": True,
 }
@@ -267,7 +264,7 @@ density_masked = ma.masked_where(outside_95, density)
 cmap = mcolors.ListedColormap(plt.cm.Blues(np.linspace(0, 0.8, 256)))
 cmap.set_bad(alpha=0)
 
-fig_fan, ax = plt.subplots(figsize=CONFIG["figsize_fan"], dpi=300)
+fig_fan, ax = plt.subplots(figsize=(W, 0.45 * W))
 x_dates = mdates.date2num(test_price.index.to_numpy())
 mesh = ax.pcolormesh(
     x_dates,
@@ -315,14 +312,11 @@ ax.set_xlim(price.index[0], price.index[-1])
 ax.set_ylabel("Precio (USD, log)")
 ax.set_xlabel("Fecha")
 ax.legend(loc="upper left")
-fig_fan.tight_layout()
 
 if CONFIG["save_figures"]:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     fig_fan.savefig(
-        OUTPUT_DIR / "spy_gbm_fan_chart.png",
-        dpi=300,
-        bbox_inches="tight",
+        OUTPUT_DIR / "spy_gbm_fan_chart.pdf",
     )
 if CONFIG["show_figure"] and _INTERACTIVE:
     plt.show()
@@ -376,7 +370,7 @@ static_drift = float(log_ret.mean() * CONFIG["trading_days"] + 0.5 * static_sigm
 fig_roll, (ax_sigma, ax_drift) = plt.subplots(
     2,
     1,
-    figsize=CONFIG["figsize_rolling"],
+    figsize=(W, 0.55 * W),
     sharex=True,
 )
 
@@ -385,14 +379,14 @@ ax_sigma.plot(
     rolling_sigma.values,
     linewidth=0.8,
     color="#1f77b4",
-    label=f"σ local ({CONFIG['rolling_window']}d)",
+    label=rf"$\sigma$ local ({CONFIG['rolling_window']}d)",
 )
 ax_sigma.axhline(
     static_sigma,
     color="red",
     ls="--",
     lw=1.0,
-    label=f"σ estática ({static_sigma:.2f})",
+    label=rf"$\sigma$ estática ({static_sigma:.2f})",
 )
 ax_sigma.set_ylabel(r"Volatilidad anualizada $\sigma$")
 ax_sigma.set_title("Volatilidad local vs. estática")
@@ -403,14 +397,14 @@ ax_drift.plot(
     rolling_drift.values,
     linewidth=0.8,
     color="#2ca02c",
-    label=f"μ local ({CONFIG['rolling_window']}d)",
+    label=rf"$\mu$ local ({CONFIG['rolling_window']}d)",
 )
 ax_drift.axhline(
     static_drift,
     color="red",
     ls="--",
     lw=1.0,
-    label=f"μ estático ({static_drift:.2f})",
+    label=rf"$\mu$ estático ({static_drift:.2f})",
 )
 ax_drift.axhline(0, color="black", lw=0.5)
 ax_drift.set_ylabel(r"Drift anualizado $\mu$")
@@ -418,14 +412,11 @@ ax_drift.set_xlabel("Fecha")
 ax_drift.set_title("Drift local vs. estático")
 ax_drift.legend(loc="upper left")
 
-fig_roll.tight_layout()
 
 if CONFIG["save_figures"]:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     fig_roll.savefig(
-        OUTPUT_DIR / "spy_gbm_rolling_params.png",
-        dpi=300,
-        bbox_inches="tight",
+        OUTPUT_DIR / "spy_gbm_rolling_params.pdf",
     )
 if CONFIG["show_figure"] and _INTERACTIVE:
     plt.show()
@@ -465,7 +456,7 @@ slope, intercept = np.polyfit(drift_v, sigma_v, 1)
 fig_drift, (ax_time, ax_density) = plt.subplots(
     1,
     2,
-    figsize=CONFIG["figsize_drift"],
+    figsize=(W, 0.4 * W),
 )
 
 sc = ax_time.scatter(drift_v, sigma_v, c=dates_v, cmap="viridis", s=5, alpha=0.5)
@@ -494,14 +485,11 @@ fig_drift.suptitle(
     rf"$\mu$ vs. $\sigma$ locales — Pearson $r$={r:.2f}, p={p_value:.1e}",
     y=1.03,
 )
-fig_drift.tight_layout()
 
 if CONFIG["save_figures"]:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     fig_drift.savefig(
-        OUTPUT_DIR / "spy_gbm_drift_vs_sigma.png",
-        dpi=300,
-        bbox_inches="tight",
+        OUTPUT_DIR / "spy_gbm_drift_vs_sigma.pdf",
     )
 if CONFIG["show_figure"] and _INTERACTIVE:
     plt.show()

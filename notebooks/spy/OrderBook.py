@@ -89,6 +89,11 @@ from thesis.orderbook import (
 #: Directorio de figuras (anclado a la raíz del repositorio, no al CWD).
 OUTPUT_DIR = _ROOT / "outputs"
 
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
+
 # %% [markdown]
 # ## Configuración
 #
@@ -168,7 +173,7 @@ if __name__ == "__main__":
     print(f"Bins con volumen (bid): {len(bids_binned)}")
     print(f"Bins con volumen (ask): {len(asks_binned)}")
 
-    relative_fig, relative_ax = plt.subplots(figsize=(6, 3), dpi=300)
+    relative_fig, relative_ax = plt.subplots()
 
     bar_width = CONFIG["bin_width"] * 0.85
     relative_ax.bar(
@@ -197,14 +202,11 @@ if __name__ == "__main__":
     if CONFIG["relative_xlim"] is not None:
         relative_ax.set_xlim(*CONFIG["relative_xlim"])
     relative_ax.legend()
-    relative_fig.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         relative_fig.savefig(
-            OUTPUT_DIR / "spy_lob_relative_distribution.png",
-            dpi=300,
-            bbox_inches="tight",
+            OUTPUT_DIR / "spy_lob_relative_distribution.pdf",
         )
     if CONFIG["show_figure"]:
         plt.show()
@@ -239,7 +241,7 @@ if __name__ == "__main__":
         absolute_asks["BinMid"], absolute_asks["Volume"], CONFIG["absolute_bin_width"]
     )
 
-    absolute_fig, absolute_ax = plt.subplots(figsize=(6, 3), dpi=300)
+    absolute_fig, absolute_ax = plt.subplots()
 
     bar_width = CONFIG["absolute_bin_width"] * 0.85
     if not absolute_bids_agg.empty:
@@ -262,19 +264,16 @@ if __name__ == "__main__":
             edgecolor="black",
             label="Venta",
         )
-    absolute_ax.set_xlabel(f"Precio (USD) - Bins de ${CONFIG['absolute_bin_width']}")
+    absolute_ax.set_xlabel(rf"Precio (USD) -- bins de \${CONFIG['absolute_bin_width']}")
     absolute_ax.set_ylabel("Volumen pasivo promedio (Acciones)")
     if CONFIG["absolute_xlim"] is not None:
         absolute_ax.set_xlim(*CONFIG["absolute_xlim"])
     absolute_ax.legend()
-    absolute_fig.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         absolute_fig.savefig(
-            OUTPUT_DIR / "spy_lob_absolute_distribution.png",
-            dpi=300,
-            bbox_inches="tight",
+            OUTPUT_DIR / "spy_lob_absolute_distribution.pdf",
         )
     if CONFIG["show_figure"]:
         plt.show()
@@ -302,7 +301,7 @@ if __name__ == "__main__":
     print(f"t objetivo: {target_time:.1f} s -> t real: {actual_time:.1f} s")
     print(f"Niveles con precio válido: {len(snap_bids)} bid / {len(snap_asks)} ask")
 
-    snapshot_fig, snapshot_ax = plt.subplots(figsize=(6, 3), dpi=300)
+    snapshot_fig, snapshot_ax = plt.subplots()
 
     snapshot_bin_width = CONFIG["snapshot_bin_width"]
     snap_bids_agg = aggregate_volume_bins(
@@ -354,12 +353,11 @@ if __name__ == "__main__":
     snapshot_ax.set_xlabel("Precio (USD)")
     snapshot_ax.set_ylabel("Volumen Pasivo (Acciones)")
     snapshot_ax.legend()
-    snapshot_fig.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         snapshot_fig.savefig(
-            OUTPUT_DIR / "spy_lob_snapshot.png", dpi=300, bbox_inches="tight"
+            OUTPUT_DIR / "spy_lob_snapshot.pdf"
         )
     if CONFIG["show_figure"]:
         plt.show()
@@ -389,7 +387,7 @@ if __name__ == "__main__":
         f"{df_avg['MidPrice'].max():.4f} USD"
     )
 
-    mid_fig, mid_ax = plt.subplots(figsize=(6, 3), dpi=300)
+    mid_fig, mid_ax = plt.subplots()
 
     mid_ax.plot(
         df_avg["TimeBin"] - CONFIG["start_time"],
@@ -406,12 +404,11 @@ if __name__ == "__main__":
     if margin == 0:
         margin = 0.05
     mid_ax.set_ylim(p_min - margin, p_max + margin)
-    mid_fig.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         mid_fig.savefig(
-            OUTPUT_DIR / "spy_lob_mid_price.png", dpi=300, bbox_inches="tight"
+            OUTPUT_DIR / "spy_lob_mid_price.pdf"
         )
     if CONFIG["show_figure"]:
         plt.show()

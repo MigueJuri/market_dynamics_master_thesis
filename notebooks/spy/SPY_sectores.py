@@ -94,6 +94,11 @@ from thesis.sector_composition import (
 #: Directorio de figuras (anclado a la raíz del repositorio, no al CWD).
 OUTPUT_DIR = _ROOT / "outputs"
 
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
+
 # %% [markdown]
 # ## Configuración
 #
@@ -161,9 +166,6 @@ if __name__ == "__main__":
     labels = snapshot.index.tolist()
     sizes = snapshot.to_numpy(dtype=float)
 
-    # Tipografía: una sola escala para toda la figura.
-    FS_SUB, FS_LEGEND, FS_PCT, FS_CENTER = 10, 10.5, 9.5, 16
-
     # Paleta: colormap perceptual; "Otros" en gris neutro al final.
     n = len(labels)
     cmap = plt.get_cmap("viridis")
@@ -172,19 +174,17 @@ if __name__ == "__main__":
         if lab.strip().lower() in ("otros", "others"):
             colors[i] = "#B0B5BA"
 
-    donut_fig, donut_ax = plt.subplots(figsize=(8, 3.6), dpi=150)
+    donut_fig, donut_ax = plt.subplots(figsize=(W, 0.45 * W))
     wedges, _, autotexts = donut_ax.pie(
         sizes,
         colors=colors,
-        autopct=lambda p: f"{p:.1f}%" if p >= 4 else "",
+        autopct=lambda p: rf"{p:.1f}\%" if p >= 4 else "",
         startangle=90,
         counterclock=False,
         pctdistance=0.80,
         wedgeprops=dict(width=0.38, edgecolor="white", linewidth=2),
-        textprops={"fontsize": FS_PCT},
     )
     for text, wedge in zip(autotexts, wedges):
-        text.set_fontweight("bold")
         r, g, b, _ = wedge.get_facecolor()
         lum = 0.299 * r + 0.587 * g + 0.114 * b
         text.set_color("black" if lum > 0.55 else "white")
@@ -192,23 +192,20 @@ if __name__ == "__main__":
     # Texto central: ticker y subtítulo.
     donut_ax.text(
         0, 0.06, CONFIG["ticker"],
-        ha="center", va="center",
-        fontsize=FS_CENTER, fontweight="bold", color="#222222",
+        ha="center", va="center", color="#222222",
     )
     donut_ax.text(
         0, -0.12, "Pesos sectoriales",
-        ha="center", va="center",
-        fontsize=FS_SUB, color="#666666",
+        ha="center", va="center", color="#666666",
     )
 
     # Leyenda con el porcentaje de cada sector.
-    legend_labels = [f"{lab}  ·  {s:.1%}" for lab, s in zip(labels, sizes)]
+    legend_labels = [rf"{lab}  ·  {100 * s:.1f}\%" for lab, s in zip(labels, sizes)]
     donut_ax.legend(
         wedges,
         legend_labels,
         loc="center left",
         bbox_to_anchor=(1.02, 0.55),
-        fontsize=FS_LEGEND,
         frameon=False,
         handlelength=1.2,
         handleheight=1.2,
@@ -218,20 +215,17 @@ if __name__ == "__main__":
     # Nota sobre "Otros", a la derecha bajo la leyenda.
     donut_ax.text(
         1.02, 0.02,
-        f'"Otros": sectores < {CONFIG["minor_threshold"]:.0%}\nagrupados',
+        f"``Otros'': sectores $<$ {100 * CONFIG['minor_threshold']:.0f}\\%\nagrupados",
         transform=donut_ax.transAxes,
-        ha="left", va="bottom",
-        fontsize=FS_SUB, color="#666666", style="italic",
+        ha="left", va="bottom", color="#666666", style="italic",
     )
 
     donut_ax.axis("equal")
-    donut_fig.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         donut_fig.savefig(
-            OUTPUT_DIR / "spy_sector_weights.png",
-            dpi=200, bbox_inches="tight", facecolor="white",
+            OUTPUT_DIR / "spy_sector_weights.pdf", facecolor="white",
         )
     if CONFIG["show_figure"]:
         plt.show()
@@ -332,7 +326,7 @@ if __name__ == "__main__":
     order = sector_weights.mean().sort_values(ascending=False).index
     weights_ordered = sector_weights[order]
 
-    area_fig, area_ax = plt.subplots(figsize=(12, 6))
+    area_fig, area_ax = plt.subplots(figsize=(W, 0.5 * W))
     area_ax.stackplot(
         weights_ordered.index,
         weights_ordered.T.to_numpy(),
@@ -347,22 +341,19 @@ if __name__ == "__main__":
     for sector, y_pos, weight in zip(last_weights.index, midpoints, last_weights):
         if weight > 2.0:
             area_ax.text(
-                last_date, y_pos, f" {sector}", va="center", ha="left", fontsize=10
+                last_date, y_pos, f" {sector}", va="center", ha="left"
             )
 
     area_ax.set_xlim(weights_ordered.index[0], weights_ordered.index[-1])
     area_ax.set_xlabel("Fecha")
-    area_ax.set_ylabel("Proporción de la capitalización total del S&P 500 (%)")
+    area_ax.set_ylabel(r"Proporción de la capitalización total del S\&P 500 (\%)")
     area_ax.set_ylim(0, 100)
     area_ax.margins(x=0)
-    area_fig.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         area_fig.savefig(
-            OUTPUT_DIR / "sp500_sector_composition.png",
-            dpi=150,
-            bbox_inches="tight",
+            OUTPUT_DIR / "sp500_sector_composition.pdf",
         )
     if CONFIG["show_figure"]:
         plt.show()
@@ -381,7 +372,7 @@ if __name__ == "__main__":
     entropy = sector_entropy(sector_weights)
     max_entropy = np.log(len(sector_weights.columns))
 
-    entropy_fig, entropy_ax = plt.subplots(figsize=(10, 5))
+    entropy_fig, entropy_ax = plt.subplots(figsize=(W, 0.5 * W))
     entropy_ax.plot(entropy.index, entropy.to_numpy(), color="darkred", linewidth=1.5)
     entropy_ax.axhline(
         max_entropy,
@@ -395,7 +386,6 @@ if __name__ == "__main__":
     entropy_ax.legend(loc="lower left")
     entropy_ax.grid(True, alpha=0.3)
     entropy_ax.margins(x=0)
-    entropy_fig.tight_layout()
 
     print(f"Entropía media: {entropy.mean():.4f} nats")
     print(f"Entropía mínima: {entropy.min():.4f} ({entropy.idxmin():%Y-%m})")
@@ -404,7 +394,7 @@ if __name__ == "__main__":
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         entropy_fig.savefig(
-            OUTPUT_DIR / "sp500_sector_entropy.png", dpi=150, bbox_inches="tight"
+            OUTPUT_DIR / "sp500_sector_entropy.pdf"
         )
     if CONFIG["show_figure"]:
         plt.show()
@@ -442,13 +432,12 @@ if __name__ == "__main__":
     )
     print(top_10_weights.map(lambda weight: f"{weight:.2f}%").to_string())
 
-    hhi_fig, hhi_ax = plt.subplots(figsize=(10, 5))
+    hhi_fig, hhi_ax = plt.subplots(figsize=(W, 0.5 * W))
     hhi_ax.plot(hhi.index, hhi.to_numpy(), color="darkgreen", linewidth=1.5)
     hhi_ax.set_xlabel("Fecha")
-    hhi_ax.set_ylabel("HHI = Σ pesos de capitalización² (adimensional)")
+    hhi_ax.set_ylabel(r"HHI $= \sum w_i^2$ (adimensional)")
     hhi_ax.grid(True, alpha=0.3)
     hhi_ax.margins(x=0)
-    hhi_fig.tight_layout()
 
     print(f"HHI medio: {hhi.mean():.6f}")
     print(f"HHI mínimo: {hhi.min():.6f} ({hhi.idxmin():%Y-%m})")
@@ -457,7 +446,7 @@ if __name__ == "__main__":
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         hhi_fig.savefig(
-            OUTPUT_DIR / "sp500_company_hhi.png", dpi=150, bbox_inches="tight"
+            OUTPUT_DIR / "sp500_company_hhi.pdf"
         )
     if CONFIG["show_figure"]:
         plt.show()

@@ -158,11 +158,6 @@ CONFIG: dict[str, Any] = {
     # --- Volatilidad EWMA (convención RiskMetrics) ---
     "lambda_ewma": 0.94,
     "vol_quantile": 0.90,
-    # --- Figuras: tamaños ---
-    "figsize": (7.0, 3.5),
-    "figsize_hist_sq": (6.0, 6.0),
-    "figsize_vol": (11.0, 6.0),
-    "figsize_bands": (11.0, 4.0),
     # --- Figuras: bines, spans y escalas ---
     "smooth_window": 10,
     "return_ma_years": 5,
@@ -232,7 +227,7 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     price_smooth = price.rolling(CONFIG["smooth_window"]).mean()
 
-    fig_lin, ax_lin = plt.subplots(figsize=CONFIG["figsize"], dpi = 300)
+    fig_lin, ax_lin = plt.subplots()
 
     ax_lin.plot(
         price_smooth.index,
@@ -249,9 +244,8 @@ if __name__ == "__main__":
     #     f"(media móvil de {CONFIG['smooth_window']} ruedas) — escala lineal",
     #     y=1.02,
     # )
-    fig_lin.tight_layout()
 
-    fig_log, ax_log = plt.subplots(figsize=CONFIG["figsize"])
+    fig_log, ax_log = plt.subplots()
     ax_log.plot(
         price_smooth.index,
         price_smooth.values,
@@ -276,19 +270,14 @@ if __name__ == "__main__":
     #     f"(media móvil de {CONFIG['smooth_window']} ruedas) — escala logarítmica",
     #     y=1.02,
     # )
-    fig_log.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig_lin.savefig(
-            OUTPUT_DIR / "spy_price_trajectory_linear.png",
-            dpi=300,
-            bbox_inches="tight",
+            OUTPUT_DIR / "spy_price_trajectory_linear.pdf",
         )
         fig_log.savefig(
-            OUTPUT_DIR / "spy_price_trajectory_log.png",
-            dpi=300,
-            bbox_inches="tight",
+            OUTPUT_DIR / "spy_price_trajectory_log.pdf",
         )
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
@@ -336,7 +325,7 @@ if __name__ == "__main__":
     # Rejilla del panel logarítmico: ventana fija alrededor del cero.
     grid_log = np.linspace(-CONFIG["xlim_log"], CONFIG["xlim_log"], 500)
 
-    fig, (ax_lin, ax_log) = plt.subplots(1, 2, figsize=(9,3.5))
+    fig, (ax_lin, ax_log) = plt.subplots(1, 2, figsize=(W, 0.4 * W))
 
     # --- Panel izquierdo: escala lineal (cuerpo de la distribución) ---
     ax_lin.hist(
@@ -372,8 +361,6 @@ if __name__ == "__main__":
         transform=ax_lin.transAxes,
         va="top",
         ha="left",
-        fontsize=12,
-        fontweight="bold",
     )
     ax_lin.set_xlim(-xlim_lin, xlim_lin)
     ax_lin.xaxis.set_major_formatter(mticker.FormatStrFormatter("%.2f"))
@@ -416,8 +403,6 @@ if __name__ == "__main__":
         transform=ax_log.transAxes,
         va="top",
         ha="left",
-        fontsize=12,
-        fontweight="bold",
     )
     ax_log.set_yscale("log")
     ax_log.set_ylim(bottom=1e-3)
@@ -428,11 +413,10 @@ if __name__ == "__main__":
     # ax_log.set_title("Colas (densidad en escala log)")
     ax_log.legend(loc="best")
 
-    fig.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        fig.savefig(OUTPUT_DIR / "spy_return_density.png", dpi=300, bbox_inches="tight")
+        fig.savefig(OUTPUT_DIR / "spy_return_density.pdf")
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
     else:
@@ -558,7 +542,7 @@ if __name__ == "__main__":
     # Retornos al cuadrado: proxy de volatilidad.
     acf_sq = sample_acf(log_ret.values**2, max_lags)
 
-    fig_r, ax_r = plt.subplots(figsize=CONFIG["figsize"])
+    fig_r, ax_r = plt.subplots()
 
     markerline, *_ = ax_r.stem(np.arange(len(acf_r)), acf_r, basefmt=" ")
     plt.setp(markerline, markersize=3)
@@ -575,19 +559,18 @@ if __name__ == "__main__":
     ax_r.set_ylabel(r"$\rho_k$")
     ax_r.legend(loc="upper right")
 
-    fig_r.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig_r.savefig(
-            OUTPUT_DIR / "spy_acf_returns.png", dpi=300, bbox_inches="tight"
+            OUTPUT_DIR / "spy_acf_returns.pdf"
         )
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
     else:
         plt.close(fig_r)
 
-    fig_sq, ax_r2 = plt.subplots(figsize=CONFIG["figsize"])
+    fig_sq, ax_r2 = plt.subplots()
 
     markerline, *_ = ax_r2.stem(np.arange(len(acf_sq)), acf_sq, basefmt=" ")
     plt.setp(markerline, markersize=3)
@@ -604,12 +587,11 @@ if __name__ == "__main__":
     ax_r2.legend(loc="upper right")
     ax_r2.set_ylabel(r"$\rho_k$")
 
-    fig_sq.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig_sq.savefig(
-            OUTPUT_DIR / "spy_acf_squared_returns.png", dpi=300, bbox_inches="tight"
+            OUTPUT_DIR / "spy_acf_squared_returns.pdf"
         )
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
@@ -656,7 +638,7 @@ if __name__ == "__main__":
     r_2_grid = np.linspace(0.0, np.percentile(r_2, 99.5), 500)
     r_2_log_grid = np.linspace(r_2_log.min(), r_2_log.max(), 500)
 
-    fig, (ax_lin, ax_log) = plt.subplots(2, 1, figsize=(8,5))
+    fig, (ax_lin, ax_log) = plt.subplots(2, 1, figsize=(W, 0.62 * W))
 
     ax_lin.hist(
         r_2,
@@ -690,8 +672,6 @@ if __name__ == "__main__":
         transform=ax_lin.transAxes,
         va="top",
         ha="left",
-        fontsize=12,
-        fontweight="bold",
     )
 
     ax_log.hist(
@@ -724,18 +704,15 @@ if __name__ == "__main__":
         transform=ax_log.transAxes,
         va="top",
         ha="left",
-        fontsize=12,
-        fontweight="bold",
     )
     ax_lin.legend(loc="best")
     ax_log.legend(loc="best")
 
-    fig.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig.savefig(
-            OUTPUT_DIR / "spy_sq_returns_hist.png", dpi=300, bbox_inches="tight"
+            OUTPUT_DIR / "spy_sq_returns_hist.pdf"
         )
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
@@ -795,10 +772,9 @@ if __name__ == "__main__":
     fig, (ax_vol, ax_price) = plt.subplots(
         2,
         1,
-        figsize=(9,5),
+        figsize=(W, 0.55 * W),
         sharex=True,
-        gridspec_kw={"height_ratios": [1, 2]},
-        dpi=300
+        gridspec_kw={"height_ratios": [1, 2]}
     )
 
     ax_vol.plot(
@@ -848,11 +824,10 @@ if __name__ == "__main__":
     ax_price.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
     ax_price.yaxis.set_minor_locator(mticker.NullLocator())
 
-    fig.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        fig.savefig(OUTPUT_DIR / "spy_vol_regimes.png", dpi=300, bbox_inches="tight")
+        fig.savefig(OUTPUT_DIR / "spy_vol_regimes.pdf")
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
     else:
@@ -869,7 +844,7 @@ if __name__ == "__main__":
     fig_mu_vol, (ax_mean, ax_vol) = plt.subplots(
         2,
         1,
-        figsize=(9,4),
+        figsize=(W, 0.45 * W),
         sharex=True,
     )
 
@@ -886,8 +861,6 @@ if __name__ == "__main__":
         transform=ax_mean.transAxes,
         va="top",
         ha="left",
-        fontsize=12,
-        fontweight="bold",
     )
     ax_mean.axhline(0.0, color="black", linewidth=0.8, alpha=0.5)
     ax_mean.set_ylabel(r"$\mu$")
@@ -909,22 +882,17 @@ if __name__ == "__main__":
         transform=ax_vol.transAxes,
         va="top",
         ha="left",
-        fontsize=12,
-        fontweight="bold",
     )
     ax_vol.set_ylabel(r"$\sigma$")
     ax_vol.set_xlabel("Fecha")
     ax_vol.xaxis.set_major_locator(mdates.YearLocator(base=2))
     ax_vol.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
 
-    fig_mu_vol.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig_mu_vol.savefig(
-            OUTPUT_DIR / "spy_ewma_mean_volatility.png",
-            dpi=300,
-            bbox_inches="tight",
+            OUTPUT_DIR / "spy_ewma_mean_volatility.pdf",
         )
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
@@ -949,7 +917,7 @@ if __name__ == "__main__":
     mu = float(log_ret.mean())
     sigma = float(log_ret.std())
 
-    fig, ax = plt.subplots(figsize=CONFIG["figsize_bands"])
+    fig, ax = plt.subplots(figsize=(W, 0.4 * W))
     ax.plot(
         log_ret.index,
         log_ret.values,
@@ -983,11 +951,10 @@ if __name__ == "__main__":
         f"{CONFIG['ticker']}: retornos diarios y bandas de volatilidad incondicional"
     )
     ax.legend(loc="lower right", ncol=4)
-    fig.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        fig.savefig(OUTPUT_DIR / "spy_uncond_bands.png", dpi=300, bbox_inches="tight")
+        fig.savefig(OUTPUT_DIR / "spy_uncond_bands.pdf")
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
     else:
@@ -1014,7 +981,7 @@ if __name__ == "__main__":
     )
     historical_mean = float(log_ret.mean() * annualization_factor)
 
-    fig, ax = plt.subplots(figsize=(6,3), dpi = 300)
+    fig, ax = plt.subplots()
     ax.axhline(
         0.0,
         color="black",
@@ -1045,14 +1012,11 @@ if __name__ == "__main__":
     #     f"{CONFIG['return_ma_years']} años de retornos logarítmicos anualizados"
     # )
     ax.legend(loc="best")
-    fig.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig.savefig(
-            OUTPUT_DIR / "spy_log_return_5y_annualized_moving_average.png",
-            dpi=300,
-            bbox_inches="tight",
+            OUTPUT_DIR / "spy_log_return_5y_annualized_moving_average.pdf",
         )
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
