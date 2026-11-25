@@ -75,6 +75,12 @@ from thesis.btc import (
 )
 from thesis.config import DATA_DIR
 
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
+
+
 # %% [markdown]
 # ## Configuración
 #
@@ -322,7 +328,7 @@ if __name__ == "__main__":
     bottom_dates = [pd.Timestamp(str(d).strip()) for d in CONFIG["bottoms"]]
 
     # --- Figura 1: evolución temporal en escala lineal ---
-    linear_fig, ax0 = plt.subplots(figsize=(8, 4), dpi=300)
+    linear_fig, ax0 = plt.subplots(figsize=(W, 0.5 * W))
     ax0.plot(
         reg_df.index,
         reg_df["close"],
@@ -338,7 +344,7 @@ if __name__ == "__main__":
     ax0.grid(True, ls="--", alpha=0.4)
 
     # --- Figura 2: eje temporal logarítmico con anotaciones ---
-    temporal_fig, ax1 = plt.subplots(figsize=(8, 4), dpi=300)
+    temporal_fig, ax1 = plt.subplots(figsize=(W, 0.5 * W))
     ax1.plot(
         reg_df.index,
         reg_df["close"],
@@ -395,7 +401,7 @@ if __name__ == "__main__":
     ax1.grid(True, which="both", ls="--", alpha=0.4)
 
     # --- Figura 3: power-law log-log (días desde la génesis) ---
-    power_law_fig, ax2 = plt.subplots(figsize=(8, 4), dpi=300)
+    power_law_fig, ax2 = plt.subplots(figsize=(W, 0.5 * W))
     ax2.plot(
         reg_df["days"],
         reg_df["close"],
@@ -422,9 +428,6 @@ if __name__ == "__main__":
     ax2.legend()
     ax2.grid(True, which="both", ls="--", alpha=0.4)
 
-    linear_fig.tight_layout()
-    temporal_fig.tight_layout()
-    power_law_fig.tight_layout()
 
     figures = (linear_fig, temporal_fig, power_law_fig)
 
@@ -484,7 +487,7 @@ if __name__ == "__main__":
         future_prices[q] = 10 ** future_log_price
 
     # --- Figura 4: escala semilog con proyección futura ---
-    projection_fig, ax5 = plt.subplots(figsize=(12, 6))
+    projection_fig, ax5 = plt.subplots(figsize=(W, 0.5 * W))
     ax5.plot(
         hist.index,
         hist["close"],
@@ -535,7 +538,6 @@ if __name__ == "__main__":
     ax5.legend()
     ax5.grid(True, which="both", ls="--", alpha=0.4)
 
-    projection_fig.tight_layout()
 
     if CONFIG["show_figure"]:
         plt.show()
@@ -636,7 +638,7 @@ if __name__ == "__main__":
         )
 
     # --- Figura 4: precio log-log con banda q10 y precio suavizado con sus picos ---
-    cycle_fig, (ax3, ax4) = plt.subplots(2, 1, figsize=(13*0.6, 9*0.6), dpi=300)
+    cycle_fig, (ax3, ax4) = plt.subplots(2, 1, figsize=(W, 0.7 * W))
 
     # Panel A: precio en escala log-log con la banda q10 destacada.
     ax3.plot(
@@ -659,7 +661,7 @@ if __name__ == "__main__":
     # ax3.set_title("BTC en escala log-log con la banda del cuantil 10")
     ax3.set_xlabel("Días desde el primer bloque")
     ax3.set_ylabel("Precio (USD)")
-    ax3.text(0.02, 0.95, "a", transform=ax3.transAxes, fontsize=14, fontweight="bold", va="top")
+    ax3.text(0.02, 0.95, "a", transform=ax3.transAxes, va="top")
     ax3.legend()
     ax3.grid(True, which="both", ls="--", alpha=0.4)
 
@@ -721,10 +723,9 @@ if __name__ == "__main__":
     ax4.set_xlabel("Fecha")
     ax4.set_ylabel(r"log(BTC/$Q_{10}$)")
     ax4.legend()
-    ax4.text(0.02, 0.95, "b", transform=ax4.transAxes, fontsize=14, fontweight="bold", va="top")
+    ax4.text(0.02, 0.95, "b", transform=ax4.transAxes, va="top")
     ax4.grid(True, ls="--", alpha=0.4)
 
-    cycle_fig.tight_layout()
 
     if CONFIG["show_figure"]:
         plt.show()
