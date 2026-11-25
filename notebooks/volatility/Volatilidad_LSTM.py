@@ -814,36 +814,25 @@ if __name__ == "__main__":
 # %%
 # ### Estilo
 #
-# Fondo blanco, tipografía estándar de matplotlib y cuadrícula muy tenue.
-# Todos los ajustes de estilo viven en esta celda: cambiar aquí los aplica a
-# todas las figuras.
+# Estilo común de la tesis (``styles/thesis.mplstyle``): ancho de texto de
+# 155 mm, cuerpo a 12 pt y LaTeX.  Para cambiarlo se edita el ``.mplstyle`` y
+# se re-ejecuta esta celda; los ajustes puntuales se hacen in situ.
 
 if __name__ == "__main__":
-    plt.rcParams.update(
-        {
-            "figure.facecolor": "white",
-            "axes.facecolor": "white",
-            "savefig.facecolor": "white",
-            "axes.grid": True,
-            "grid.alpha": 0.3,
-            "grid.linestyle": "--",
-            "grid.linewidth": 0.5,
-            "axes.spines.top": False,
-            "axes.spines.right": False,
-            "font.size": 10,
-            "legend.frameon": False,
-        }
-    )
+    # Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+    STYLE = _ROOT / "styles" / "thesis.mplstyle"
+    plt.style.use(STYLE)
+    W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
-    # Nombres de los archivos PNG donde se guarda cada figura.
+    # Nombres de los archivos PDF donde se guarda cada figura.
     PLOT_PATHS = {
-        "loss": "lstm_vol_loss.png",
-        "predictions": "lstm_vol_predictions.png",
-        "timeseries": "lstm_vol_timeseries.png",
-        "adaptability": "lstm_vol_adaptability.png",
-        "backtest": "lstm_vol_backtest.png",
-        "ranks": "lstm_vol_ranks.png",
-        "april2025": "lstm_vol_april2025.png",
+        "loss": "lstm_vol_loss.pdf",
+        "predictions": "lstm_vol_predictions.pdf",
+        "timeseries": "lstm_vol_timeseries.pdf",
+        "adaptability": "lstm_vol_adaptability.pdf",
+        "backtest": "lstm_vol_backtest.pdf",
+        "ranks": "lstm_vol_ranks.pdf",
+        "april2025": "lstm_vol_april2025.pdf",
     }
 
 # %%
@@ -875,22 +864,21 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     history = trained["history"]
 
-    fig, ax = plt.subplots(figsize=(6, 3), dpi=300)
+    fig, ax = plt.subplots(figsize=(W, 0.5 * W))
     ax.plot(history["train_loss"], color="C0", lw=1.2, label="Entrenamiento")
     ax.plot(history["val_loss"], color="C1", lw=1.2, label="Validación")
     ax.set_xlabel("Época")
     ax.set_ylabel(r"$\ell_{\text{LINEX}}$")
     # ax.set_title("Pérdida de entrenamiento")
     ax.legend()
-    fig.tight_layout()
-    fig.savefig(PLOT_PATHS["loss"], dpi=150, bbox_inches="tight")
+    fig.savefig(PLOT_PATHS["loss"])
     plt.show()
 
 # %%
 # ### 2. Predicción frente a realidad
 
 if __name__ == "__main__":
-    fig, ax = plt.subplots(figsize=(5.5, 5.5))
+    fig, ax = plt.subplots(figsize=(W, 0.8 * W))
     ax.scatter(y_true, y_lstm, s=6, alpha=0.35, color="C0")
     lo = min(y_true.min(), y_lstm.min())
     hi = max(y_true.max(), y_lstm.max())
@@ -901,18 +889,17 @@ if __name__ == "__main__":
     ax.text(
         0.05,
         0.93,
-        f"R² = {r2_score(y_true, y_lstm):.4f}",
+        rf"$R^2 = {r2_score(y_true, y_lstm):.4f}$",
         transform=ax.transAxes,
     )
-    fig.tight_layout()
-    fig.savefig(PLOT_PATHS["predictions"], dpi=150, bbox_inches="tight")
+    fig.savefig(PLOT_PATHS["predictions"])
     plt.show()
 
 # %%
 # ### 3. Evolución de la volatilidad
 
 if __name__ == "__main__":
-    fig, ax = plt.subplots(figsize=(11*0.8, 4*0.8), dpi=300)
+    fig, ax = plt.subplots(figsize=(W, 0.35 * W))
 
     # Serie real como área sombreada de fondo + borde sutil
     ax.fill_between(dates, 0, y_true, color="#888888", alpha=0.1, zorder=1, label="Real")
@@ -929,8 +916,7 @@ if __name__ == "__main__":
     ax.legend(frameon=False)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     fig.autofmt_xdate()
-    fig.tight_layout()
-    fig.savefig(PLOT_PATHS["timeseries"], dpi=150, bbox_inches="tight")
+    fig.savefig(PLOT_PATHS["timeseries"])
     plt.show()
 
 # %%
@@ -946,7 +932,7 @@ if __name__ == "__main__":
     )
     k = np.arange(1, horizon + 1)
 
-    fig, ax = plt.subplots(figsize=(7, 4))
+    fig, ax = plt.subplots(figsize=(W, 0.55 * W))
     ax.plot(
         k,
         mae_lstm,
@@ -954,7 +940,7 @@ if __name__ == "__main__":
         marker="o",
         ms=4,
         lw=1.2,
-        label=f"LSTM (t½ = {hl_lstm:.1f} d)" if not np.isnan(hl_lstm) else "LSTM",
+        label=rf"LSTM ($t_{{1/2}} = {hl_lstm:.1f}$ d)" if not np.isnan(hl_lstm) else "LSTM",
     )
     ax.plot(
         k,
@@ -964,15 +950,14 @@ if __name__ == "__main__":
         ms=4,
         lw=1.2,
         ls="--",
-        label=f"HAR-RV (t½ = {hl_har:.1f} d)" if not np.isnan(hl_har) else "HAR-RV",
+        label=rf"HAR-RV ($t_{{1/2}} = {hl_har:.1f}$ d)" if not np.isnan(hl_har) else "HAR-RV",
     )
     ax.set_xlabel("Días hábiles post-shock (k)")
     ax.set_ylabel("Error medio absoluto (MAE)")
     ax.set_title("Adaptabilidad post-shock")
     ax.set_xticks(k[::2])
     ax.legend()
-    fig.tight_layout()
-    fig.savefig(PLOT_PATHS["adaptability"], dpi=150, bbox_inches="tight")
+    fig.savefig(PLOT_PATHS["adaptability"])
     plt.show()
 
 # %%
@@ -989,7 +974,7 @@ if __name__ == "__main__":
     equity_base = np.cumprod(1.0 + bt["ret_base"])
     equity_bh = np.cumprod(1.0 + bt["ret_bh"])
 
-    fig, ax = plt.subplots(figsize=(11, 4))
+    fig, ax = plt.subplots(figsize=(W, 0.35 * W))
     ax.plot(
         bt_dates,
         equity_vol,
@@ -1012,7 +997,7 @@ if __name__ == "__main__":
         color="black",
         lw=1.3,
         ls=":",
-        label=f"Buy & Hold (SR = {bt['sharpe_bh']:.2f})",
+        label=rf"Buy \& Hold (SR = {bt['sharpe_bh']:.2f})",
     )
     ax.set_xlabel("Fecha")
     ax.set_ylabel("Retorno acumulado")
@@ -1020,8 +1005,7 @@ if __name__ == "__main__":
     ax.legend()
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
     fig.autofmt_xdate()
-    fig.tight_layout()
-    fig.savefig(PLOT_PATHS["backtest"], dpi=150, bbox_inches="tight")
+    fig.savefig(PLOT_PATHS["backtest"])
     plt.show()
 
 # %%
@@ -1030,7 +1014,7 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     rank_true = stats.rankdata(y_true)
 
-    fig, ax = plt.subplots(figsize=(5.5, 5.5))
+    fig, ax = plt.subplots(figsize=(W, 0.8 * W))
     ax.scatter(
         rank_true,
         stats.rankdata(y_lstm),
@@ -1051,8 +1035,7 @@ if __name__ == "__main__":
     ax.set_ylabel("Rango: volatilidad predicha")
     ax.set_title("Correlación de rangos: LSTM vs HAR-RV")
     ax.legend()
-    fig.tight_layout()
-    fig.savefig(PLOT_PATHS["ranks"], dpi=150, bbox_inches="tight")
+    fig.savefig(PLOT_PATHS["ranks"])
     plt.show()
 
 # %%
@@ -1074,7 +1057,7 @@ if __name__ == "__main__":
         (pd.Timestamp("2025-04-09"), "9 abr: pausa de 90 días", "9 abr"),
     ]
 
-    fig, ax = plt.subplots(figsize=(11, 4))
+    fig, ax = plt.subplots(figsize=(W, 0.35 * W))
     ax.plot(
         dates[mask],
         y_true[mask],
@@ -1107,7 +1090,6 @@ if __name__ == "__main__":
             textcoords="offset points",
             va="top",
             ha="left",
-            fontsize=8,
             color="C3",
         )
 
@@ -1118,11 +1100,10 @@ if __name__ == "__main__":
     ax.set_xlabel("Fecha")
     ax.set_ylabel("Volatilidad anualizada")
     ax.set_title("Volatilidad realizada vs predicción LSTM — abril de 2025")
-    ax.legend(loc="upper right", fontsize=8)
+    ax.legend(loc="upper right")
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
     fig.autofmt_xdate()
-    fig.tight_layout()
-    fig.savefig(PLOT_PATHS["april2025"], dpi=150, bbox_inches="tight")
+    fig.savefig(PLOT_PATHS["april2025"])
     plt.show()
 
 

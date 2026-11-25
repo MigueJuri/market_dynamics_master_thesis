@@ -82,35 +82,24 @@ CONFIG: dict[str, Any] = {
     "acf_lags": 60,
     "acf_alpha": 0.05,
     # Salidas
-    "acf_squared_path": "vol_desc_acf_squared_returns.png",
-    "acf_returns_path": "vol_desc_acf_returns.png",
-    "prices_vol_path": "vol_desc_logprice_realized_vol.png",
-    "forward_vol_path": "vol_desc_forward_vol_5d.png",
+    "acf_squared_path": "vol_desc_acf_squared_returns.pdf",
+    "acf_returns_path": "vol_desc_acf_returns.pdf",
+    "prices_vol_path": "vol_desc_logprice_realized_vol.pdf",
+    "forward_vol_path": "vol_desc_forward_vol_5d.pdf",
 }
 
 # %%
 # ### Estilo
 #
-# Fondo blanco, tipografía estándar de matplotlib y cuadrícula muy tenue.
-# Todos los ajustes de estilo viven en esta celda: cambiar aquí los aplica a
-# todas las figuras.
+# Estilo común de la tesis (``styles/thesis.mplstyle``): ancho de texto de
+# 155 mm, cuerpo a 12 pt y LaTeX.  Para cambiarlo se edita el ``.mplstyle`` y
+# se re-ejecuta esta celda; los ajustes puntuales se hacen in situ.
 
 if __name__ == "__main__":
-    plt.rcParams.update(
-        {
-            "figure.facecolor": "white",
-            "axes.facecolor": "white",
-            "savefig.facecolor": "white",
-            "axes.grid": True,
-            "grid.alpha": 0.3,
-            "grid.linestyle": "--",
-            "grid.linewidth": 0.5,
-            "axes.spines.top": False,
-            "axes.spines.right": False,
-            "font.size": 10,
-            "legend.frameon": False,
-        }
-    )
+    # Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+    STYLE = _ROOT / "styles" / "thesis.mplstyle"
+    plt.style.use(STYLE)
+    W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
 # %%
 # ### Datos
@@ -174,7 +163,7 @@ if __name__ == "__main__":
     z = 1.959963985
     bound = z / np.sqrt(n_obs)
 
-    fig, ax = plt.subplots(figsize=(9, 4.5))
+    fig, ax = plt.subplots(figsize=(W, 0.5 * W))
     ax.bar(
         np.arange(1, len(acf_sq)),
         acf_sq[1:],
@@ -182,15 +171,14 @@ if __name__ == "__main__":
         width=0.8,
     )
     ax.axhline(0, color="black", lw=0.8)
-    ax.axhline(bound, color="gray", ls="--", lw=0.9, label="±1,96/√n (95 %)")
+    ax.axhline(bound, color="gray", ls="--", lw=0.9, label=r"$\pm 1{,}96/\sqrt{n}$ (95\,\%)")
     ax.axhline(-bound, color="gray", ls="--", lw=0.9)
     ax.set_xlabel("Retardo (sesiones)")
     ax.set_ylabel("Autocorrelación")
     ax.set_title("Autocorrelación de los retornos cuadrados")
     ax.set_xticks(np.arange(0, len(acf_sq), 5))
     ax.legend()
-    fig.tight_layout()
-    fig.savefig(CONFIG["acf_squared_path"], dpi=150, bbox_inches="tight")
+    fig.savefig(CONFIG["acf_squared_path"])
     plt.show()
 
 # %%
@@ -205,7 +193,7 @@ if __name__ == "__main__":
     z = 1.959963985
     bound = z / np.sqrt(n_obs)
 
-    fig, ax = plt.subplots(figsize=(9, 4.5))
+    fig, ax = plt.subplots(figsize=(W, 0.5 * W))
     ax.bar(
         np.arange(1, len(acf_ret)),
         acf_ret[1:],
@@ -213,15 +201,14 @@ if __name__ == "__main__":
         width=0.8,
     )
     ax.axhline(0, color="black", lw=0.8)
-    ax.axhline(bound, color="gray", ls="--", lw=0.9, label="±1,96/√n (95 %)")
+    ax.axhline(bound, color="gray", ls="--", lw=0.9, label=r"$\pm 1{,}96/\sqrt{n}$ (95\,\%)")
     ax.axhline(-bound, color="gray", ls="--", lw=0.9)
     ax.set_xlabel("Retardo (sesiones)")
     ax.set_ylabel("Autocorrelación")
     ax.set_title("Autocorrelación de los retornos logarítmicos")
     ax.set_xticks(np.arange(0, len(acf_ret), 5))
     ax.legend()
-    fig.tight_layout()
-    fig.savefig(CONFIG["acf_returns_path"], dpi=150, bbox_inches="tight")
+    fig.savefig(CONFIG["acf_returns_path"])
     plt.show()
 
 # %%
@@ -236,10 +223,9 @@ if __name__ == "__main__":
     fig, (ax_top, ax_bottom) = plt.subplots(
         2,
         1,
-        figsize=(7, 5),
+        figsize=(W, 0.7 * W),
         sharex=True,
-        gridspec_kw={"height_ratios": [1, 1], "hspace": 0.2},
-        dpi =300
+        gridspec_kw={"height_ratios": [1, 1], "hspace": 0.2}
     )
 
     ax_top.plot(log_price.index, log_price.to_numpy(), color="black", lw=0.7)
@@ -251,7 +237,6 @@ if __name__ == "__main__":
         transform=ax_top.transAxes,
         ha="left",
         va="top",
-        fontweight="bold",
     )
     ax_top.tick_params(labelbottom=False)
 
@@ -262,7 +247,7 @@ if __name__ == "__main__":
         lw=0.7,
         label=f"Media Móvil ({CONFIG['vol_window']} días)"
     )
-    ax_bottom.set_ylabel(r" $\sigma$ (% anual)")
+    ax_bottom.set_ylabel(r"$\sigma$ (\% anual)")
     ax_bottom.set_xlabel("Fecha")
     ax_bottom.text(
         0.02,
@@ -271,9 +256,8 @@ if __name__ == "__main__":
         transform=ax_bottom.transAxes,
         ha="left",
         va="top",
-        fontweight="bold",
     )
-    ax_bottom.legend(loc="upper left", fontsize=9)
+    ax_bottom.legend(loc="upper left")
 
     for ax in (ax_top, ax_bottom):
         ax.axvline(train_end, color="gray", ls="--", lw=1.0)
@@ -298,8 +282,7 @@ if __name__ == "__main__":
 
     ax_bottom.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     fig.autofmt_xdate()
-    fig.tight_layout()
-    fig.savefig(CONFIG["prices_vol_path"], dpi=150, bbox_inches="tight")
+    fig.savefig(CONFIG["prices_vol_path"])
     plt.show()
 
 # %%
@@ -335,7 +318,7 @@ if __name__ == "__main__":
     fig, (ax_top, ax_bottom) = plt.subplots(
         2,
         1,
-        figsize=(7, 7),
+        figsize=(W, 0.8 * W),
         sharex=True,
         sharey=True,
         gridspec_kw={"height_ratios": [1, 1], "hspace": 0.2},
@@ -348,9 +331,9 @@ if __name__ == "__main__":
         lw=1.0,
         label=f"Futura ({CONFIG['forward_horizon']} días) promediada a {CONFIG['smoothing_window']} días",
     )
-    ax_bottom.set_ylabel("Volatilidad anualizada (%)")
+    ax_bottom.set_ylabel(r"Volatilidad anualizada (\%)")
     ax_top.tick_params(labelbottom=False)
-    ax_bottom.legend(loc="upper left", fontsize=9)
+    ax_bottom.legend(loc="upper left")
 
     ax_top.plot(
         fwd_vol_ann.index,
@@ -359,17 +342,16 @@ if __name__ == "__main__":
         lw=1.0,
         label=f"Futura ({CONFIG['forward_horizon']} días)",
     )
-    ax_top.set_ylabel("Volatilidad anualizada (%)")
+    ax_top.set_ylabel(r"Volatilidad anualizada (\%)")
     ax_top.set_xlabel("Fecha")
 
     ax_top.set_title("a")
     ax_bottom.set_title("b")
-    ax_top.legend(loc="upper left", fontsize=9)
+    ax_top.legend(loc="upper left")
 
     ax_bottom.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     fig.autofmt_xdate()
-    fig.tight_layout()
-    fig.savefig(CONFIG["forward_vol_path"], dpi=150, bbox_inches="tight")
+    fig.savefig(CONFIG["forward_vol_path"])
     plt.show()
 
 # %%
