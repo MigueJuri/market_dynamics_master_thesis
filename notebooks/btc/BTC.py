@@ -43,6 +43,7 @@
 # %%
 from __future__ import annotations
 
+import itertools
 import sys
 from pathlib import Path
 from typing import Any
@@ -129,6 +130,15 @@ CONFIG: dict[str, Any] = {
         # Días desde el génesis para consultar los valores de los cuantiles.
         # None = no imprimir una consulta puntual.
         "query_days_since_genesis": 7318,
+        # Cuantiles que delimitan los sectores del gráfico arcoíris (de abajo
+        # arriba); cada par consecutivo define un sector.
+        "rainbow_quantiles": (0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95),
+        # Predicción del próximo máximo, tal como figura al final del
+        # capítulo de Bitcoin (sección "Predicción del próximo máximo"):
+        # fecha (día ``query_days_since_genesis``) y rango de precio en USD.
+        # Mínimo: piso Q10 en esa fecha; máximo: 2.8 veces el último pico.
+        "target_min_usd": 163_000,
+        "target_max_usd": 271_000,
     },
     # Figura
     "show_figure": True,
@@ -432,7 +442,6 @@ if __name__ == "__main__":
     ax2.legend()
     ax2.grid(True, which="both", ls="--", alpha=0.4)
 
-
     figures = (linear_fig, temporal_fig, power_law_fig)
     linear_fig.savefig(FIG_DIR / "btc_price_linear.pdf")
     temporal_fig.savefig(FIG_DIR / "btc_quantreg_temporal_log.pdf")
@@ -444,105 +453,136 @@ if __name__ == "__main__":
         plt.close("all")
 
 # %% [markdown]
-# ### Etapa 3b: proyección semilog a futuro
+# ### Etapa 3b: proyección a futuro (gráfico arcoíris)
 #
-# Figura **exploratoria**: los últimos `CONFIG["prediction"]["lookback_years"]`
-# años de BTC en escala **semilog** (eje Y logarítmico, eje X lineal en
-# fechas) junto con las rectas de la regresión cuantílica power-law
-# (`log10(price) = α + β·log10(days)`), extendiendo el eje
-# `CONFIG["prediction"]["horizon_days"]` días (~2 años) hacia delante.
+# Figura de los últimos `CONFIG["prediction"]["lookback_years"]` años de BTC
+# en escala **semilog** (eje Y logarítmico, eje X lineal en fechas) con un
+# **gráfico arcoíris**: los sectores entre rectas consecutivas de la
+# regresión cuantílica power-law (`log10(price) = α + β·log10(days)`,
+# cuantiles `CONFIG["prediction"]["rainbow_quantiles"]`) se pintan con una
+# escala de color progresiva, por debajo del precio y semitransparentes, de
+# modo que se lee en qué sector está el precio en cada momento.
 #
-# El tramo histórico va en **trazo continuo** y la extrapolación en **trazo
-# discontinuo**, separada de los datos por una línea vertical en la última
-# fecha con observaciones.  La proyección es una **extrapolación descriptiva
-# de una regresión fuera de muestra**: **no es una señal de trading** ni un
-# pronóstico riguroso (en escala semilog las rectas son casi planas, porque
-# `log10(días)` crece muy despacio).
+# Los sectores se extienden hasta pasada la fecha de la predicción del
+# capítulo (día `query_days_since_genesis`, enero de 2029), que se marca con
+# el rango sugerido en el texto (`target_min_usd`–`target_max_usd`).  Una
+# línea vertical separa los datos observados de la extrapolación, que es
+# **descriptiva**: **no es una señal de trading** ni un pronóstico riguroso.
 #
-# Depende de `reg_df` y `fit` (Etapa 2) y de los estilos de la Etapa 3, así
-# que puede re-ejecutarse **sólo** esta celda.
+# Depende de `reg_df` (Etapa 2); puede re-ejecutarse **sólo** esta celda.
 
 # %%
 if __name__ == "__main__":
     pred_cfg = CONFIG["prediction"]
     lookback_years = int(pred_cfg["lookback_years"])
-    horizon_days = int(pred_cfg["horizon_days"])
+    rainbow_q = tuple(sorted(pred_cfg["rainbow_quantiles"]))
 
     # --- Fechas y días de corte ---
     last_date = reg_df.index.max()
     last_days = int(reg_df["days"].max())
     cutoff = last_date - pd.DateOffset(years=lookback_years)
-
-    # Días y fechas futuras: desde el día siguiente al último dato hasta el
-    # horizonte configurado (paso entero, sin arange con paso flotante).
-    future_days = last_days + np.arange(1, horizon_days + 1)
-    future_dates = last_date + pd.to_timedelta(
-        np.arange(1, horizon_days + 1), unit="D"
+    target_date = pd.Timestamp(BTC_GENESIS) + pd.Timedelta(
+        days=int(pred_cfg["query_days_since_genesis"])
     )
+
+    # Eje temporal completo (histórico + futuro) en días enteros desde el
+    # génesis: el futuro llega al horizonte configurado o, si es mayor, hasta
+    # medio año después de la fecha de la predicción.
+    end_days = max(
+        last_days + int(pred_cfg["horizon_days"]),
+        int(pred_cfg["query_days_since_genesis"]) + 180,
+    )
+    start_days = int((cutoff - pd.Timestamp(BTC_GENESIS)).days)
+    grid_days = np.arange(start_days, end_days + 1)  # paso entero
+    grid_dates = pd.Timestamp(BTC_GENESIS) + pd.to_timedelta(grid_days, unit="D")
 
     # --- Ventana histórica (in-sample) ---
     hist = reg_df[reg_df.index >= cutoff]
 
-    # --- Proyección por cuantil a partir de los parámetros ajustados ---
-    # El ajuste vive en espacio log-log; aquí se evalúa la misma recta
-    # (α + β·log10(días)) en los días futuros.
-    future_prices: dict[float, np.ndarray] = {}
-    for q, res in fit.items():
-        params = res["params"]
-        intercept, beta = params["Intercept"], params["log_days"]
-        future_log_price = intercept + beta * np.log10(future_days)
-        future_prices[q] = 10 ** future_log_price
+    # --- Rectas de los cuantiles del arcoíris, evaluadas en todo el eje ---
+    # El ajuste es in-sample sobre toda la historia (figura descriptiva).
+    rainbow_fit = fit_power_law_quantiles(reg_df, quantiles=rainbow_q)
+    band_prices = {
+        q: 10
+        ** (
+            res["params"]["Intercept"] + res["params"]["log_days"] * np.log10(grid_days)
+        )
+        for q, res in rainbow_fit.items()
+    }
 
-    # --- Figura 4: escala semilog con proyección futura ---
-    projection_fig, ax5 = plt.subplots(figsize=(W, 0.5 * W))
+    # --- Figura 4: gráfico arcoíris con la predicción del capítulo ---
+    projection_fig, ax5 = plt.subplots(figsize=(W, 0.62 * W))
+    cmap = plt.get_cmap("turbo")
+    n_bands = len(rainbow_q) - 1
+    band_colors = cmap(np.linspace(0.08, 0.92, n_bands))
+    for k, (q_lo, q_hi) in enumerate(itertools.pairwise(rainbow_q)):
+        ax5.fill_between(
+            grid_dates,
+            band_prices[q_lo],
+            band_prices[q_hi],
+            color=band_colors[k],
+            alpha=0.35,
+            linewidth=0,
+            zorder=1,
+            label=rf"$Q_{{{int(q_lo * 100)}}}$--$Q_{{{int(q_hi * 100)}}}$",
+        )
+
+    # Precio por encima de los sectores.
     ax5.plot(
         hist.index,
         hist["close"],
         label="Cierre de BTC",
         color="black",
-        alpha=0.6,
         linewidth=1,
+        zorder=3,
     )
-
-    for i, (q, res) in enumerate(fit.items()):
-        color = quantile_colors.get(q, "gray")
-        # Tramo histórico: trazo continuo.
-        ax5.plot(
-            hist.index,
-            res["prediction"].reindex(hist.index),
-            label=rf"Reg. $p\cdot 100={int(q * 100)}$",
-            color=color,
-            linestyle="-",
-            linewidth=2,
-        )
-        # Tramo proyectado: trazo discontinuo.
-        ax5.plot(
-            future_dates,
-            future_prices[q],
-            label="Proyección power-law (no es una señal)" if i == 0 else None,
-            color=color,
-            linestyle=quantile_styles.get(q, "--"),
-            linewidth=2,
-        )
 
     # Separador entre datos observados y proyección.
-    ax5.axvline(
-        last_date,
-        color="gray",
-        linestyle=":",
-        linewidth=1.5,
-        label="Último día con datos",
-    )
+    ax5.axvline(last_date, color="gray", linestyle=":", linewidth=1.2, zorder=2)
 
-    # ax5.set_yscale("log")
-    ax5.set_xlim(cutoff, future_dates[-1])
-    ax5.set_title(
-        "BTC en escala semilog — power-law y proyección futura "
-        "(proyección descriptiva, no es una señal)"
+    # Predicción del próximo máximo (texto del capítulo): rango de precio.
+    t_min = float(pred_cfg["target_min_usd"])
+    t_max = float(pred_cfg["target_max_usd"])
+    ax5.vlines(target_date, t_min, t_max, color="black", linewidth=1.5, zorder=4)
+    ax5.scatter(
+        [target_date, target_date],
+        [t_min, t_max],
+        marker="_",
+        s=120,
+        color="black",
+        linewidths=1.5,
+        zorder=4,
+        label=f"Predicción ({target_date:%m-%Y})",
+    )
+    for value in (t_min, t_max):
+        ax5.annotate(
+            rf"${value / 1e3:.0f}$ mil",
+            xy=(target_date, value),
+            xytext=(-6, 0),
+            textcoords="offset points",
+            ha="right",
+            va="center",
+            zorder=5,
+        )
+
+    ax5.set_yscale("log")
+    ax5.set_xlim(cutoff, grid_dates[-1])
+    ax5.set_ylim(
+        band_prices[rainbow_q[0]][0] * 0.8, band_prices[rainbow_q[-1]][-1] * 1.2
     )
     ax5.set_xlabel("Fecha")
     ax5.set_ylabel("Precio (USD)")
-    ax5.legend()
+    # Sectores de arriba abajo, en el mismo orden que en el gráfico.
+    handles, labels = ax5.get_legend_handles_labels()
+    order = list(range(n_bands))[::-1] + list(range(n_bands, len(handles)))
+    with plt.rc_context({"legend.fontsize": "small"}):
+        ax5.legend(
+            [handles[i] for i in order],
+            [labels[i] for i in order],
+            loc="upper left",
+            ncols=2,
+            framealpha=0.9,
+        )
     ax5.grid(True, which="both", ls="--", alpha=0.4)
     projection_fig.savefig(FIG_DIR / "btc_quantreg_projection.pdf")
 
@@ -729,7 +769,7 @@ if __name__ == "__main__":
     # )
     ax4.set_xlabel("Fecha")
     ax4.set_ylabel(r"log(BTC/$Q_{10}$)")
-    ax4.legend()
+    ax4.legend(loc="upper right", fontsize=8, framealpha=0.9)
     ax4.text(0.02, 0.95, "b", transform=ax4.transAxes, va="top")
     ax4.grid(True, ls="--", alpha=0.4)
     cycle_fig.savefig(FIG_DIR / "btc_market_cycles.pdf")
@@ -775,9 +815,7 @@ if __name__ == "__main__":
         _btc_rows.append(
             {"model": f"resid_ma ({_label})", "value": float(_row["value"])}
         )
-        _btc_rows.append(
-            {"model": f"close ({_label})", "value": float(_row["close"])}
-        )
+        _btc_rows.append({"model": f"close ({_label})", "value": float(_row["close"])})
 
     metrics_df = pd.DataFrame(_btc_rows)
 
