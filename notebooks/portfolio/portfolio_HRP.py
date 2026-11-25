@@ -21,6 +21,8 @@
 # orquesta la descarga, el backtest y las figuras.
 
 # %%
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -39,7 +41,14 @@ from thesis.portfolio import (
 )
 from thesis.timeseries import log_returns
 
-plt.style.use("seaborn-v0_8-darkgrid")
+#: Raíz del repositorio (directorio que contiene ``styles/``).
+_HERE = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+_ROOT = next(p for p in (_HERE, *_HERE.parents) if (p / "styles").is_dir())
+
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
 
 # %% [markdown]
@@ -161,43 +170,43 @@ print(df_metrics.round(4).to_string())
 # %%
 # Curva de capital y drawdown (EWMA).
 fig = plot_equity_drawdown(port_rets_ewma, benchmark=spy_rets)
-fig.savefig("outputs/portfolio_ewma_equity_drawdown.pdf", bbox_inches="tight")
+fig.savefig("outputs/portfolio_ewma_equity_drawdown.pdf")
 plt.show()
 
 
 # %%
 # Curva de capital y drawdown (HAR-RV).
 fig = plot_equity_drawdown(port_rets_har, benchmark=spy_rets)
-fig.savefig("outputs/portfolio_har_rv_equity_drawdown.pdf", bbox_inches="tight")
+fig.savefig("outputs/portfolio_har_rv_equity_drawdown.pdf")
 plt.show()
 
 
 # %%
 # Evolución de pesos 1/σ² (EWMA).
 fig = plot_portfolio_composition(
-    weights_ewma["1/σ²"], title="Evolución de Pesos (1/σ², EWMA)"
+    weights_ewma["1/σ²"], title=r"Evolución de pesos (1/$\sigma^2$, EWMA)"
 )
-fig.savefig("outputs/portfolio_ewma_weights_1var.pdf", bbox_inches="tight")
+fig.savefig("outputs/portfolio_ewma_weights_1var.pdf")
 plt.show()
 
 
 # %%
 # Composición promedio (EWMA).
 fig = plot_avg_weights(weights_ewma)
-fig.savefig("outputs/portfolio_ewma_avg_weights.pdf", bbox_inches="tight")
+fig.savefig("outputs/portfolio_ewma_avg_weights.pdf")
 plt.show()
 
 
 # %%
 # Composición promedio (HAR-RV).
 fig = plot_avg_weights(weights_har)
-fig.savefig("outputs/portfolio_har_rv_avg_weights.pdf", bbox_inches="tight")
+fig.savefig("outputs/portfolio_har_rv_avg_weights.pdf")
 plt.show()
 
 
 # %%
 # Topología de mercado por régimen.
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7), sharey=True)
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(W, 0.45 * W), sharey=True)
 plot_market_topology(
     log_rets,
     start_date="2019-01-01",
@@ -212,8 +221,7 @@ plot_market_topology(
     ax=ax2,
     title="Régimen de Crisis (Q1 2020)",
 )
-fig.tight_layout()
-fig.savefig("outputs/portfolio_market_topology.pdf", bbox_inches="tight")
+fig.savefig("outputs/portfolio_market_topology.pdf")
 plt.show()
 
 
