@@ -92,6 +92,10 @@ STYLE = _ROOT / "styles" / "thesis.mplstyle"
 plt.style.use(STYLE)
 W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
+#: Figuras de este cuaderno: ``figures/Spread/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "Spread"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # %%
 # ## Selección del par y construcción del spread
@@ -169,24 +173,26 @@ prices = load_multiple_prices(
 # $\sigma_{eq} = \sqrt{\sigma^2 / (2\theta)}$.  Un spread fuera de
 # $\pm 2\sigma_{eq}$ es una señal teórica de entrada; dentro de
 # $\pm\sigma_{eq}$ sugiere cierre de posición.
-plot_spread(
+fig = plot_spread(
     spread_series,
     ou_params,
     title=rf"Spread {TICKER_A}--{TICKER_B} (hedge ratio $\beta = {hedge_ratio:.3f}$)",
 )
+fig.savefig(FIG_DIR / f"pairs_{TICKER_A}_{TICKER_B}_spread.pdf")
 
 # %%
 # ## 2. Precios del par
 #
 # Escala logarítmica para comparar activos con niveles de precio muy
 # distintos.
-plot_pair_prices(
+fig = plot_pair_prices(
     prices,
     TICKER_A,
     TICKER_B,
     title=f"Precios ajustados: {TICKER_A} vs {TICKER_B}",
     log_scale=True,
 )
+fig.savefig(FIG_DIR / f"pairs_{TICKER_A}_{TICKER_B}_prices.pdf")
 
 # %%
 # ## 3. Vista conjunta (subplots)
@@ -194,7 +200,7 @@ plot_pair_prices(
 # Precios arriba y spread abajo, compartiendo el eje temporal.  Permite
 # verificar visualmente que las divergencias de precio se compensan en
 # el spread gracias al hedge ratio.
-plot_pair_overview(
+fig = plot_pair_overview(
     prices,
     spread_series,
     TICKER_A,
@@ -202,6 +208,7 @@ plot_pair_overview(
     ou_params,
     figsize=(W, 0.65 * W)
 )
+fig.savefig(FIG_DIR / f"pairs_{TICKER_A}_{TICKER_B}_overview.pdf")
 
 # %%
 # ## Configuración del experimento

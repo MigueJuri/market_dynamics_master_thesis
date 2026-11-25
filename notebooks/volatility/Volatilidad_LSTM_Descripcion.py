@@ -81,7 +81,7 @@ CONFIG: dict[str, Any] = {
     # Autocorrelación
     "acf_lags": 60,
     "acf_alpha": 0.05,
-    # Salidas
+    # Salidas: nombres de archivo dentro de FIG_DIR (``figures/Volatilidad_LSTM_Descripcion/``)
     "acf_squared_path": "vol_desc_acf_squared_returns.pdf",
     "acf_returns_path": "vol_desc_acf_returns.pdf",
     "prices_vol_path": "vol_desc_logprice_realized_vol.pdf",
@@ -100,6 +100,10 @@ if __name__ == "__main__":
     STYLE = _ROOT / "styles" / "thesis.mplstyle"
     plt.style.use(STYLE)
     W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
+
+    #: Figuras de este cuaderno: ``figures/Volatilidad_LSTM_Descripcion/`` en la raíz del repositorio.
+    FIG_DIR = _ROOT / "figures" / "Volatilidad_LSTM_Descripcion"
+    FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 # %%
 # ### Datos
@@ -178,7 +182,7 @@ if __name__ == "__main__":
     ax.set_title("Autocorrelación de los retornos cuadrados")
     ax.set_xticks(np.arange(0, len(acf_sq), 5))
     ax.legend()
-    fig.savefig(CONFIG["acf_squared_path"])
+    fig.savefig(FIG_DIR / CONFIG["acf_squared_path"])
     plt.show()
 
 # %%
@@ -208,7 +212,7 @@ if __name__ == "__main__":
     ax.set_title("Autocorrelación de los retornos logarítmicos")
     ax.set_xticks(np.arange(0, len(acf_ret), 5))
     ax.legend()
-    fig.savefig(CONFIG["acf_returns_path"])
+    fig.savefig(FIG_DIR / CONFIG["acf_returns_path"])
     plt.show()
 
 # %%
@@ -282,7 +286,7 @@ if __name__ == "__main__":
 
     ax_bottom.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     fig.autofmt_xdate()
-    fig.savefig(CONFIG["prices_vol_path"])
+    fig.savefig(FIG_DIR / CONFIG["prices_vol_path"])
     plt.show()
 
 # %%
@@ -351,7 +355,7 @@ if __name__ == "__main__":
 
     ax_bottom.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     fig.autofmt_xdate()
-    fig.savefig(CONFIG["forward_vol_path"])
+    fig.savefig(FIG_DIR / CONFIG["forward_vol_path"])
     plt.show()
 
 # %%

@@ -39,6 +39,10 @@ STYLE = _ROOT / "styles" / "thesis.mplstyle"
 plt.style.use(STYLE)
 W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
+#: Figuras de este cuaderno: ``figures/Trend_Following_Strategy_v2/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "Trend_Following_Strategy_v2"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+
 from thesis.config import DATA_DIR, TICKER, TRADING_DAYS
 from thesis.market_data import load_single_price
 from thesis.timeseries import log_returns
@@ -102,6 +106,7 @@ ax.scatter(bear.index, close.loc[bear.index], marker='v', color='red',       s=3
 ax.set_ylabel('Price (USD, escala log)')
 ax.set_yscale('log')
 ax.legend(loc='upper left')
+fig.savefig(FIG_DIR / "trend_spy_ewma_crossovers.pdf")
 plt.show()
 
 
@@ -246,6 +251,7 @@ ax2.set_ylabel('Cumulative Return')
 ax2.set_yscale('log')
 ax2.legend(loc='upper left')
 
+fig.savefig(FIG_DIR / "trend_spy_triple_barrier.pdf")
 plt.show()
 
 
@@ -318,6 +324,7 @@ ax.axhline(1.0, color='black', lw=0.6, ls=':')
 ax.set_ylabel('Retorno acumulado')
 ax.set_yscale('log')
 ax.legend(loc='upper left')
+fig.savefig(FIG_DIR / "trend_spy_equity_curves.pdf")
 plt.show()
 
 
@@ -382,6 +389,7 @@ ax2.set_ylabel('log(wealth ratio)')
 ax2.set_xlabel('Date')
 ax2.legend(loc='lower left')
 
+fig.savefig(FIG_DIR / "trend_spy_wealth_difference.pdf")
 plt.show()
 
 

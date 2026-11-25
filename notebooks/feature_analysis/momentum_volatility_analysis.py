@@ -73,6 +73,10 @@ STYLE = _ROOT / "styles" / "thesis.mplstyle"
 plt.style.use(STYLE)
 W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
+#: Figuras de este cuaderno: ``figures/momentum_volatility_analysis/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "momentum_volatility_analysis"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # %%
 # ## Carga de datos y retornos
@@ -120,11 +124,12 @@ target_by_lag = {
     for l in ret_lags
 }
 
-plot_scatter_grid(
+fig = plot_scatter_grid(
     feature_by_lag, target_by_lag,
     feature_label=r"$\tau_p=$", target_label=r"$\tau_f= $",
     feature_format=lambda k: f"{k}d", target_format=lambda k: f"{k}d",
 )
+fig.savefig(FIG_DIR / "momentum_volatility_spy_scatter_grid.pdf")
 
 # %%
 # ## Análisis por cuantiles (ventana única)
@@ -141,6 +146,7 @@ pearson_corr = plot_feature_boxplots(
     feature_name="momentum / vol", target_name="future return / vol",
     feature_window=tau_p, target_window=tau_f,
 )
+plt.gcf().savefig(FIG_DIR / "momentum_volatility_spy_quantile_boxplot.pdf")
 print(f"Pearson Correlation: {pearson_corr:.3f}")
 
 # %%
@@ -161,13 +167,14 @@ sharpe_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
     target_window_type="fixed",
     correlation="pearson",
 )
-plot_correlation_matrix(
+fig = plot_correlation_matrix(
     sharpe_corr_matrix, lookbacks, lookaheads,
     title="Momentum/Volatility → Future Return/Volatility Correlation",
     xlabel=r"$\tau_p$",
     ylabel=r"$\tau_f$",
     cbar_label="Correlación de Pearson",
 )
+fig.savefig(FIG_DIR / "momentum_volatility_spy_corr_matrix.pdf")
 
 # %%
 # ## Análisis cross-sectional por sector
@@ -211,12 +218,13 @@ cross_corr, avg_corr = compute_cross_sectional_correlation(
     correlation="pearson", min_valid_n=50,
     overlap=True,
 )
-plot_cross_sectional_curves(
+fig = plot_cross_sectional_curves(
     cross_corr, avg_corr,
     asset_groups=sector_tickers, group_colors=sector_colors,
     avg_label="Promedio de sectores",
     tau_to_yf=lambda L: 2 * L / TRADING_DAYS,
 )
+fig.savefig(FIG_DIR / "momentum_volatility_spy_cross_sectional_corr.pdf")
 
 # %%
 # ## Configuración del experimento

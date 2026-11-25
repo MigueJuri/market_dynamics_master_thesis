@@ -91,8 +91,9 @@ from thesis.sector_composition import (
     sector_entropy,
 )
 
-#: Directorio de figuras (anclado a la raíz del repositorio, no al CWD).
-OUTPUT_DIR = _ROOT / "outputs"
+#: Figuras de este cuaderno: ``figures/SPY_sectores/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "SPY_sectores"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 #: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
 STYLE = _ROOT / "styles" / "thesis.mplstyle"
@@ -223,9 +224,8 @@ if __name__ == "__main__":
     donut_ax.axis("equal")
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         donut_fig.savefig(
-            OUTPUT_DIR / "spy_sector_weights.pdf", facecolor="white",
+            FIG_DIR / "spy_sector_weights.pdf", facecolor="white",
         )
     if CONFIG["show_figure"]:
         plt.show()
@@ -351,9 +351,8 @@ if __name__ == "__main__":
     area_ax.margins(x=0)
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         area_fig.savefig(
-            OUTPUT_DIR / "sp500_sector_composition.pdf",
+            FIG_DIR / "sp500_sector_composition.pdf",
         )
     if CONFIG["show_figure"]:
         plt.show()
@@ -392,9 +391,8 @@ if __name__ == "__main__":
     print(f"Entropía máxima: {entropy.max():.4f} ({entropy.idxmax():%Y-%m})")
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         entropy_fig.savefig(
-            OUTPUT_DIR / "sp500_sector_entropy.pdf"
+            FIG_DIR / "sp500_sector_entropy.pdf"
         )
     if CONFIG["show_figure"]:
         plt.show()
@@ -444,9 +442,8 @@ if __name__ == "__main__":
     print(f"HHI máximo: {hhi.max():.6f} ({hhi.idxmax():%Y-%m})")
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         hhi_fig.savefig(
-            OUTPUT_DIR / "sp500_company_hhi.pdf"
+            FIG_DIR / "sp500_company_hhi.pdf"
         )
     if CONFIG["show_figure"]:
         plt.show()

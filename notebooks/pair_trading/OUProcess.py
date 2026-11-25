@@ -83,6 +83,10 @@ STYLE = _ROOT / "styles" / "thesis.mplstyle"
 plt.style.use(STYLE)
 W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
+#: Figuras de este cuaderno: ``figures/OUProcess/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "OUProcess"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # %%
 # ## Parámetros de la simulación
@@ -148,6 +152,7 @@ for label, ax in zip(["(a)", "(b)"], (ax1, ax2)):
         ha="left",
     )
 
+fig.savefig(FIG_DIR / "ou_simulated_pair_spread.pdf")
 plt.show()
 
 # %%

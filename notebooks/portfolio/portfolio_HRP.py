@@ -50,6 +50,10 @@ STYLE = _ROOT / "styles" / "thesis.mplstyle"
 plt.style.use(STYLE)
 W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
+#: Figuras de este cuaderno: ``figures/portfolio_HRP/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "portfolio_HRP"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # %% [markdown]
 # ## Configuración
@@ -170,14 +174,14 @@ print(df_metrics.round(4).to_string())
 # %%
 # Curva de capital y drawdown (EWMA).
 fig = plot_equity_drawdown(port_rets_ewma, benchmark=spy_rets)
-fig.savefig("outputs/portfolio_ewma_equity_drawdown.pdf")
+fig.savefig(FIG_DIR / "portfolio_ewma_equity_drawdown.pdf")
 plt.show()
 
 
 # %%
 # Curva de capital y drawdown (HAR-RV).
 fig = plot_equity_drawdown(port_rets_har, benchmark=spy_rets)
-fig.savefig("outputs/portfolio_har_rv_equity_drawdown.pdf")
+fig.savefig(FIG_DIR / "portfolio_har_rv_equity_drawdown.pdf")
 plt.show()
 
 
@@ -186,21 +190,21 @@ plt.show()
 fig = plot_portfolio_composition(
     weights_ewma["1/σ²"], title=r"Evolución de pesos (1/$\sigma^2$, EWMA)"
 )
-fig.savefig("outputs/portfolio_ewma_weights_1var.pdf")
+fig.savefig(FIG_DIR / "portfolio_ewma_weights_1var.pdf")
 plt.show()
 
 
 # %%
 # Composición promedio (EWMA).
 fig = plot_avg_weights(weights_ewma)
-fig.savefig("outputs/portfolio_ewma_avg_weights.pdf")
+fig.savefig(FIG_DIR / "portfolio_ewma_avg_weights.pdf")
 plt.show()
 
 
 # %%
 # Composición promedio (HAR-RV).
 fig = plot_avg_weights(weights_har)
-fig.savefig("outputs/portfolio_har_rv_avg_weights.pdf")
+fig.savefig(FIG_DIR / "portfolio_har_rv_avg_weights.pdf")
 plt.show()
 
 
@@ -221,7 +225,7 @@ plot_market_topology(
     ax=ax2,
     title="Régimen de Crisis (Q1 2020)",
 )
-fig.savefig("outputs/portfolio_market_topology.pdf")
+fig.savefig(FIG_DIR / "portfolio_market_topology.pdf")
 plt.show()
 
 

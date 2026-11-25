@@ -11,6 +11,8 @@ estilizados de SPY. El texto de la tesis vive en otro repo; no lo leo ni edito.
 - `tests/` — suite con `pytest`; tests de integración con datos reales marcados.
 - `notebooks/` — orquestación y experimentos; `.ipynb` se ignora en Git.
 - `data/` y `outputs/` — datos y artefactos generados; **nunca** se versionan.
+- `figures/<cuaderno>/` — figuras PDF de cada notebook (una carpeta por
+  cuaderno, nombre = stem del `.py`); generadas, **nunca** se versionan.
 
 ## 2. Comandos habituales
 
@@ -40,13 +42,17 @@ python3 scripts/df_peek.py <ruta.csv|parquet>
 
 ## 5. Salidas
 
-- Nombres descriptivos y estables: `<estrategia>_<dataset>_<metrica>.pdf/png`.
+- Nombres descriptivos y estables: `<estrategia>_<dataset>_<metrica>.pdf`.
+- Toda figura se guarda en `FIG_DIR = _ROOT / "figures" / "<cuaderno>"`
+  (definido en la celda de setup); nunca en el CWD, `outputs/` ni junto al
+  notebook.  Los diagramas esquemáticos son scripts `esquema_*.py` en la
+  carpeta del notebook al que pertenecen.
 - Cada figura/tabla debe ser producida por un único script o celda.
 - **No** crear carpetas de exportación ni scripts de sincronización entre repos.
 - **Formato de figuras (obligatorio en toda figura nueva o modificada)**: la
   tesis usa `\textwidth` = 155 mm y cuerpo a 12 pt.
-  - En la celda de setup: `plt.style.use(_ROOT / "styles" / "thesis.mplstyle")`
-    y `W = plt.rcParams["figure.figsize"][0]`.
+  - En la celda de setup: `plt.style.use(_ROOT / "styles" / "thesis.mplstyle")`,
+    `W = plt.rcParams["figure.figsize"][0]` y `FIG_DIR`.
   - Tamaño: el por defecto del estilo o `figsize=(W, ratio * W)`; nunca un
     ancho distinto de `W` para figuras a ancho completo.
   - Sin `dpi=`, sin `bbox_inches="tight"`, sin `fontsize=`/`fontweight=`

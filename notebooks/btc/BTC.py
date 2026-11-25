@@ -80,6 +80,10 @@ STYLE = _ROOT / "styles" / "thesis.mplstyle"
 plt.style.use(STYLE)
 W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
+#: Figuras de este cuaderno: ``figures/BTC/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "BTC"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # %% [markdown]
 # ## Configuración
@@ -430,6 +434,9 @@ if __name__ == "__main__":
 
 
     figures = (linear_fig, temporal_fig, power_law_fig)
+    linear_fig.savefig(FIG_DIR / "btc_price_linear.pdf")
+    temporal_fig.savefig(FIG_DIR / "btc_quantreg_temporal_log.pdf")
+    power_law_fig.savefig(FIG_DIR / "btc_quantreg_power_law.pdf")
 
     if CONFIG["show_figure"]:
         plt.show()
@@ -537,7 +544,7 @@ if __name__ == "__main__":
     ax5.set_ylabel("Precio (USD)")
     ax5.legend()
     ax5.grid(True, which="both", ls="--", alpha=0.4)
-
+    projection_fig.savefig(FIG_DIR / "btc_quantreg_projection.pdf")
 
     if CONFIG["show_figure"]:
         plt.show()
@@ -725,7 +732,7 @@ if __name__ == "__main__":
     ax4.legend()
     ax4.text(0.02, 0.95, "b", transform=ax4.transAxes, va="top")
     ax4.grid(True, ls="--", alpha=0.4)
-
+    cycle_fig.savefig(FIG_DIR / "btc_market_cycles.pdf")
 
     if CONFIG["show_figure"]:
         plt.show()

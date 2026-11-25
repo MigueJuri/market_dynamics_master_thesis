@@ -54,6 +54,10 @@ STYLE = _ROOT / "styles" / "thesis.mplstyle"
 plt.style.use(STYLE)
 W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
+#: Figuras de este cuaderno: ``figures/volatility_analysis/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "volatility_analysis"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # %%
 # ## Carga de datos y construcción de la característica
@@ -80,11 +84,12 @@ vol_by_window = {w: realised_volatility(log_ret, w) for w in vol_windows}
 # Para el scatter usamos la suma de retornos futuros como objetivo.
 target_by_window = {w: log_ret.rolling(w).sum().shift(-w) for w in ret_windows}
 
-plot_scatter_grid(
+fig = plot_scatter_grid(
     vol_by_window, target_by_window,
     feature_label="Volatility", target_label="Forward return",
     feature_format=lambda k: f"{k}d", target_format=lambda k: f"{k}d",
 )
+fig.savefig(FIG_DIR / "volatility_spy_scatter_grid.pdf")
 
 # %%
 # ## Análisis por cuantiles de volatilidad (ventana única)
@@ -102,6 +107,7 @@ pearson_corr = plot_feature_boxplots(
     show_cumulative=True,
     feature_window=vol_window, target_window=target_window,
 )
+plt.gcf().savefig(FIG_DIR / "volatility_spy_quantile_boxplot.pdf")
 print(f"Pearson Correlation (vol → forward return): {pearson_corr:.3f}")
 
 # %%
@@ -112,11 +118,12 @@ vol_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
     steps=100, overlap=True,
     feature_op="std", target_op="sum", correlation="spearman",
 )
-plot_correlation_matrix(
+fig = plot_correlation_matrix(
     vol_corr_matrix, lookbacks, lookaheads,
     title="Volatility–Forward Spearman Correlation",
     cbar_label="Correlación de Spearman",
 )
+fig.savefig(FIG_DIR / "volatility_spy_corr_matrix.pdf")
 
 # %%
 # ## Análisis cross-sectional de volatilidad por sector
@@ -154,12 +161,13 @@ cross_corr, avg_corr = compute_cross_sectional_correlation(
     correlation="pearson", min_valid_n=50,
     overlap=True, shift_lookahead_by_lookback=True,
 )
-plot_cross_sectional_curves(
+fig = plot_cross_sectional_curves(
     cross_corr, avg_corr,
     asset_groups=sector_tickers, group_colors=sector_colors,
     avg_label="Promedio de sectores",
     tau_to_yf=lambda L: 2 * L / TRADING_DAYS,
 )
+fig.savefig(FIG_DIR / "volatility_spy_cross_sectional_corr.pdf")
 # %%
 # ## Configuración del experimento
 #

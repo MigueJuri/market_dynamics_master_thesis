@@ -824,15 +824,19 @@ if __name__ == "__main__":
     plt.style.use(STYLE)
     W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
-    # Nombres de los archivos PDF donde se guarda cada figura.
+    #: Figuras de este cuaderno: ``figures/Volatilidad_LSTM/`` en la raíz del repositorio.
+    FIG_DIR = _ROOT / "figures" / "Volatilidad_LSTM"
+    FIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Rutas de los archivos PDF donde se guarda cada figura.
     PLOT_PATHS = {
-        "loss": "lstm_vol_loss.pdf",
-        "predictions": "lstm_vol_predictions.pdf",
-        "timeseries": "lstm_vol_timeseries.pdf",
-        "adaptability": "lstm_vol_adaptability.pdf",
-        "backtest": "lstm_vol_backtest.pdf",
-        "ranks": "lstm_vol_ranks.pdf",
-        "april2025": "lstm_vol_april2025.pdf",
+        "loss": FIG_DIR / "lstm_vol_loss.pdf",
+        "predictions": FIG_DIR / "lstm_vol_predictions.pdf",
+        "timeseries": FIG_DIR / "lstm_vol_timeseries.pdf",
+        "adaptability": FIG_DIR / "lstm_vol_adaptability.pdf",
+        "backtest": FIG_DIR / "lstm_vol_backtest.pdf",
+        "ranks": FIG_DIR / "lstm_vol_ranks.pdf",
+        "april2025": FIG_DIR / "lstm_vol_april2025.pdf",
     }
 
 # %%

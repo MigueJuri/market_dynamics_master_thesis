@@ -132,8 +132,9 @@ from thesis.config import DATA_DIR
 from thesis.market_data import load_single_price
 from thesis.timeseries import log_returns, simple_returns
 
-#: Directorio de figuras (anclado a la raíz del repositorio, no al CWD).
-OUTPUT_DIR = _ROOT / "outputs"
+#: Figuras de este cuaderno: ``figures/SPY_caracterizacion/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "SPY_caracterizacion"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 #: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
 STYLE = _ROOT / "styles" / "thesis.mplstyle"
@@ -272,12 +273,11 @@ if __name__ == "__main__":
     # )
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig_lin.savefig(
-            OUTPUT_DIR / "spy_price_trajectory_linear.pdf",
+            FIG_DIR / "spy_price_trajectory_linear.pdf",
         )
         fig_log.savefig(
-            OUTPUT_DIR / "spy_price_trajectory_log.pdf",
+            FIG_DIR / "spy_price_trajectory_log.pdf",
         )
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
@@ -415,8 +415,7 @@ if __name__ == "__main__":
 
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        fig.savefig(OUTPUT_DIR / "spy_return_density.pdf")
+        fig.savefig(FIG_DIR / "spy_return_density.pdf")
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
     else:
@@ -561,9 +560,8 @@ if __name__ == "__main__":
 
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig_r.savefig(
-            OUTPUT_DIR / "spy_acf_returns.pdf"
+            FIG_DIR / "spy_acf_returns.pdf"
         )
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
@@ -589,9 +587,8 @@ if __name__ == "__main__":
 
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig_sq.savefig(
-            OUTPUT_DIR / "spy_acf_squared_returns.pdf"
+            FIG_DIR / "spy_acf_squared_returns.pdf"
         )
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
@@ -710,9 +707,8 @@ if __name__ == "__main__":
 
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig.savefig(
-            OUTPUT_DIR / "spy_sq_returns_hist.pdf"
+            FIG_DIR / "spy_sq_returns_hist.pdf"
         )
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
@@ -826,8 +822,7 @@ if __name__ == "__main__":
 
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        fig.savefig(OUTPUT_DIR / "spy_vol_regimes.pdf")
+        fig.savefig(FIG_DIR / "spy_vol_regimes.pdf")
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
     else:
@@ -890,9 +885,8 @@ if __name__ == "__main__":
 
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig_mu_vol.savefig(
-            OUTPUT_DIR / "spy_ewma_mean_volatility.pdf",
+            FIG_DIR / "spy_ewma_mean_volatility.pdf",
         )
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
@@ -953,8 +947,7 @@ if __name__ == "__main__":
     ax.legend(loc="lower right", ncol=4)
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        fig.savefig(OUTPUT_DIR / "spy_uncond_bands.pdf")
+        fig.savefig(FIG_DIR / "spy_uncond_bands.pdf")
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
     else:
@@ -1014,9 +1007,8 @@ if __name__ == "__main__":
     ax.legend(loc="best")
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig.savefig(
-            OUTPUT_DIR / "spy_log_return_5y_annualized_moving_average.pdf",
+            FIG_DIR / "spy_log_return_5y_annualized_moving_average.pdf",
         )
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()

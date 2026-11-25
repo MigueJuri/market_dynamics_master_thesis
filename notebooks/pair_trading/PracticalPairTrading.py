@@ -81,6 +81,10 @@ STYLE = _ROOT / "styles" / "thesis.mplstyle"
 plt.style.use(STYLE)
 W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
+#: Figuras de este cuaderno: ``figures/PracticalPairTrading/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "PracticalPairTrading"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # %% [markdown]
 # ## Selección del par y parámetros
@@ -501,12 +505,13 @@ else:
 # ### 4.1 Dashboard completo (6 paneles)
 
 # %%
-plot_backtest_dashboard(
+fig = plot_backtest_dashboard(
     bt.results,
     entry_z=ENTRY_Z,
     exit_z=EXIT_Z,
     in_sample_beta=hedge_full.beta,
 )
+fig.savefig(FIG_DIR / f"pairs_{TICKER_A}_{TICKER_B}_backtest_dashboard.pdf")
 
 # %% [markdown]
 # ### 4.2 Hedge ratio
@@ -516,25 +521,29 @@ plot_backtest_dashboard(
 # usa su propio hedge ratio.
 
 # %%
-plot_hedge_diagnostics(bt.results, in_sample_beta=hedge_full.beta)
+fig = plot_hedge_diagnostics(bt.results, in_sample_beta=hedge_full.beta)
+fig.savefig(FIG_DIR / f"pairs_{TICKER_A}_{TICKER_B}_hedge_diagnostics.pdf")
 
 # %% [markdown]
 # ### 4.3 Señales y ejecución
 
 # %%
-plot_signal_diagnostics(bt.results, entry_z=ENTRY_Z, exit_z=EXIT_Z)
+fig = plot_signal_diagnostics(bt.results, entry_z=ENTRY_Z, exit_z=EXIT_Z)
+fig.savefig(FIG_DIR / f"pairs_{TICKER_A}_{TICKER_B}_signal_diagnostics.pdf")
 
 # %% [markdown]
 # ### 4.4 Retorno, notional y costes
 
 # %%
-plot_return_diagnostics(bt.results)
+fig = plot_return_diagnostics(bt.results)
+fig.savefig(FIG_DIR / f"pairs_{TICKER_A}_{TICKER_B}_return_diagnostics.pdf")
 
 # %% [markdown]
 # ### 4.5 Equity, drawdown y estabilidad
 
 # %%
-plot_equity_diagnostics(bt.results)
+fig = plot_equity_diagnostics(bt.results)
+fig.savefig(FIG_DIR / f"pairs_{TICKER_A}_{TICKER_B}_equity_diagnostics.pdf")
 
 # %% [markdown]
 # ### 4.6 Estado actual del par: muestra completa vs última ventana
@@ -544,11 +553,12 @@ plot_equity_diagnostics(bt.results)
 # hedge ratio: walk-forward, muestra completa y ventana reciente.
 
 # %%
-plot_pair_window_summary(
+fig = plot_pair_window_summary(
     window_summary,
     full_spread=spread_full,
     beta_history=bt.results["beta"],
 )
+fig.savefig(FIG_DIR / f"pairs_{TICKER_A}_{TICKER_B}_window_summary.pdf")
 
 
 # %%
@@ -561,7 +571,7 @@ plot_pair_window_summary(
 # %%
 results = bt.results
 
-plt.figure()
+fig = plt.figure()
 
 equity = results["equity"]
 gross_equity = np.exp(results["gross_return"].cumsum())
@@ -599,6 +609,7 @@ plt.ylabel("Curvas de Capital (log scale)")
 plt.title("Curva de capital")
 plt.legend(loc="best")
 plt.grid(True, alpha=0.3)
+fig.savefig(FIG_DIR / f"pairs_{TICKER_A}_{TICKER_B}_equity.pdf")
 # %%
 # ## Configuración del experimento
 #

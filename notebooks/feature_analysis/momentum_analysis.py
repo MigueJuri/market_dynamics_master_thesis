@@ -54,6 +54,10 @@ STYLE = _ROOT / "styles" / "thesis.mplstyle"
 plt.style.use(STYLE)
 W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
+#: Figuras de este cuaderno: ``figures/momentum_analysis/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "momentum_analysis"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # %%
 # ## Carga de datos y retornos
@@ -90,12 +94,13 @@ target_by_lag = {r: forward_return(price, r) for r in ret_to_predict_lags}
 # %%
 # ## Grilla de scatter momentum × retorno futuro
 scale = 0.7
-plot_scatter_grid(
+fig = plot_scatter_grid(
     momentum_by_lag, target_by_lag,
     feature_label=r"$M_t$, ", target_label=r"$F_t$, ",
     feature_format=lambda k: rf"$\tau_p=${k/252:.2f} años", target_format=lambda k: rf"$\tau_f=${k/252:.2f} años",
     alpha = 0.2
 )
+fig.savefig(FIG_DIR / "momentum_spy_scatter_grid.pdf")
 
 # %%
 # ## Análisis por cuantiles de momentum (ventana única)
@@ -112,6 +117,7 @@ pearson_corr = plot_feature_boxplots(
     feature_name=r"$M_t$", target_name="$F_t$",
     feature_window=mom_k, target_window=ret_k, show_cumulative = False
 )
+plt.gcf().savefig(FIG_DIR / "momentum_spy_quantile_boxplot.pdf")
 print(f"Pearson Correlation: {pearson_corr:.3f}")
 
 # %%
@@ -122,11 +128,12 @@ mom_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
     steps=100, overlap=True ,
     feature_op="sum", target_op="sum", correlation="pearson",
 )
-plot_correlation_matrix(
+fig = plot_correlation_matrix(
     mom_corr_matrix, lookbacks, lookaheads,
     title="Momentum–Forward Pearson Correlation",
     cbar_label="Correlación de Pearson",
 )
+fig.savefig(FIG_DIR / "momentum_spy_corr_matrix.pdf")
 
 # %%
 # ## Correlación momentum–retorno futuro en $\tau$ simétrico con banda nula
@@ -204,12 +211,13 @@ cross_corr, avg_corr = compute_cross_sectional_correlation(
     correlation="pearson", min_valid_n=50,
     overlap=True, shift_lookahead_by_lookback=True,
 )
-plot_cross_sectional_curves(
+fig = plot_cross_sectional_curves(
     cross_corr, avg_corr,
     asset_groups=sector_tickers, group_colors=sector_colors,
     avg_label="Promedio de sectores",
     tau_to_yf=lambda L: 2 * L / TRADING_DAYS,
 )
+fig.savefig(FIG_DIR / "momentum_spy_cross_sectional_corr.pdf")
 # %%
 # ## Configuración del experimento
 #

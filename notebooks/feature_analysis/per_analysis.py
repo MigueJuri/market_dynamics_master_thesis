@@ -74,6 +74,10 @@ STYLE = _ROOT / "styles" / "thesis.mplstyle"
 plt.style.use(STYLE)
 W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
+#: Figuras de este cuaderno: ``figures/per_analysis/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "per_analysis"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # %%
 # ## Carga de datos: precios de SPY y PER mensual del S&P 500
@@ -285,6 +289,7 @@ axes[0].set_title(r"PER $\to$ retorno futuro: Pearson")
 axes[1].set_title(r"PER $\to$ retorno futuro: Spearman")
 # Leyenda común bajo los paneles: dentro de cada panel no cabe a 12 pt.
 fig.legend(*axes[0].get_legend_handles_labels(), loc="outside lower center", ncol=2)
+fig.savefig(FIG_DIR / "per_spy_corr_curves.pdf")
 plt.show()
 
 # %%
@@ -332,7 +337,7 @@ def plot_pe_scatter_grid(
     taus: list[int],
     ncols: int = 3,
     figsize: tuple[float, float] | None = None,
-) -> None:
+) -> plt.Figure:
     """Scatter PER (eje X) × retorno futuro (eje Y) coloreado por fecha."""
     nrows = int(np.ceil(len(taus) / ncols))
     fig, axes = plt.subplots(
@@ -372,10 +377,12 @@ def plot_pe_scatter_grid(
     cbar = fig.colorbar(scatter, ax=axes, fraction=0.025, pad=0.02)
     cbar.ax.yaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     cbar.set_label("Fecha")
-    plt.show()
+    return fig
 
 
-plot_pe_scatter_grid(log_pe_rel_shifted, fwd_by_tau, TAU_F)
+fig = plot_pe_scatter_grid(log_pe_rel_shifted, fwd_by_tau, TAU_F)
+fig.savefig(FIG_DIR / "per_spy_scatter_grid.pdf")
+plt.show()
 
 # %%
 # ## Boxplots del retorno futuro por bins del PER
@@ -394,6 +401,7 @@ for tau_f in (126, 504):
         target_name="Retorno futuro",
         target_window=tau_f,
     )
+    plt.gcf().savefig(FIG_DIR / f"per_spy_bins_boxplot_tau{tau_f}.pdf")
     print(f"Pearson (τ_f={tau_f} sesiones = {tau_f / TRADING_DAYS:.1f} años): "
           f"{pearson_corr:.3f}")
 

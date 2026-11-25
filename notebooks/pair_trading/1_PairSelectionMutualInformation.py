@@ -122,6 +122,10 @@ STYLE = _ROOT / "styles" / "thesis.mplstyle"
 plt.style.use(STYLE)
 W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
+#: Figuras de este cuaderno: ``figures/1_PairSelectionMutualInformation/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "1_PairSelectionMutualInformation"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # %%
 # ## Universo, ventana de análisis y retornos
@@ -651,17 +655,20 @@ print(report.per_cluster.to_string())
 # - **Composición apilada**: porcentaje del cluster ocupado por cada
 #   sector (útil para comparar clusters de distinto tamaño).
 # - **Resumen**: purity, entropía normalizada y HHI por cluster.
-plot_cluster_sector_heatmap(
+fig = plot_cluster_sector_heatmap(
     report.contingency,
     title=f"Sectores vs clusters (MI KSG, k = {n_clusters})",
 )
+fig.savefig(FIG_DIR / "mi_sp500_cluster_sector_heatmap.pdf")
 
-plot_cluster_sector_composition(
+fig = plot_cluster_sector_composition(
     report.contingency,
     title=f"Composición sectorial por cluster (MI KSG, k = {n_clusters})",
 )
+fig.savefig(FIG_DIR / "mi_sp500_cluster_sector_composition.pdf")
 
-plot_cluster_sector_summary(report.per_cluster)
+fig = plot_cluster_sector_summary(report.per_cluster)
+fig.savefig(FIG_DIR / "mi_sp500_cluster_sector_summary.pdf")
 
 # %%
 # ## Matriz MI ordenada por leaf order del dendrograma
@@ -687,7 +694,7 @@ plot_cluster_sector_summary(report.per_cluster)
 # ambos cuadernos es el patrón de los bloques, no la magnitud.
 CMAP_COMPARABLE = "viridis"
 
-plot_sector_reordered_matrix(
+fig = plot_sector_reordered_matrix(
     mi_matrix,
     order=list(labels_ordered),
     cmap=CMAP_COMPARABLE,
@@ -696,6 +703,7 @@ plot_sector_reordered_matrix(
     cluster_labels_visible=False,
     separator_color=None,
 )
+fig.savefig(FIG_DIR / "mi_sp500_leaf_order_matrix.pdf")
 
 # %%
 # ## Matriz promedio sector × sector
@@ -710,12 +718,13 @@ plot_sector_reordered_matrix(
 # y con las figuras del cuaderno de Pearson.
 sector_mi = sector_average_matrix(mi_matrix, available_sectors, operation="mean")
 
-plot_sector_average_heatmap(
+fig = plot_sector_average_heatmap(
     sector_mi,
     cmap=CMAP_COMPARABLE,
     title="MI KSG promedio entre sectores GICS",
     cbar_label="MI media (nats)",
 )
+fig.savefig(FIG_DIR / "mi_sp500_sector_average_heatmap.pdf")
 
 # %%
 # ## Símbolos finales del top de pares por MI

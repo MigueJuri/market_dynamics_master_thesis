@@ -122,8 +122,9 @@ from thesis.gbm import (
 from thesis.market_data import load_single_price
 from thesis.timeseries import log_returns
 
-#: Directorio de figuras (anclado a la raíz del repositorio, no al CWD).
-OUTPUT_DIR = _ROOT / "outputs"
+#: Figuras de este cuaderno: ``figures/GeometricBrownianMotion/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "GeometricBrownianMotion"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 #: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
 STYLE = _ROOT / "styles" / "thesis.mplstyle"
@@ -314,9 +315,8 @@ ax.set_xlabel("Fecha")
 ax.legend(loc="upper left")
 
 if CONFIG["save_figures"]:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     fig_fan.savefig(
-        OUTPUT_DIR / "spy_gbm_fan_chart.pdf",
+        FIG_DIR / "spy_gbm_fan_chart.pdf",
     )
 if CONFIG["show_figure"] and _INTERACTIVE:
     plt.show()
@@ -414,9 +414,8 @@ ax_drift.legend(loc="upper left")
 
 
 if CONFIG["save_figures"]:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     fig_roll.savefig(
-        OUTPUT_DIR / "spy_gbm_rolling_params.pdf",
+        FIG_DIR / "spy_gbm_rolling_params.pdf",
     )
 if CONFIG["show_figure"] and _INTERACTIVE:
     plt.show()
@@ -487,9 +486,8 @@ fig_drift.suptitle(
 )
 
 if CONFIG["save_figures"]:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     fig_drift.savefig(
-        OUTPUT_DIR / "spy_gbm_drift_vs_sigma.pdf",
+        FIG_DIR / "spy_gbm_drift_vs_sigma.pdf",
     )
 if CONFIG["show_figure"] and _INTERACTIVE:
     plt.show()

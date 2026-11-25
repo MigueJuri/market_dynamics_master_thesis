@@ -86,8 +86,9 @@ from thesis.orderbook import (
     lob_file_paths,
 )
 
-#: Directorio de figuras (anclado a la raíz del repositorio, no al CWD).
-OUTPUT_DIR = _ROOT / "outputs"
+#: Figuras de este cuaderno: ``figures/OrderBook/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "OrderBook"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 #: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
 STYLE = _ROOT / "styles" / "thesis.mplstyle"
@@ -204,9 +205,8 @@ if __name__ == "__main__":
     relative_ax.legend()
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         relative_fig.savefig(
-            OUTPUT_DIR / "spy_lob_relative_distribution.pdf",
+            FIG_DIR / "spy_lob_relative_distribution.pdf",
         )
     if CONFIG["show_figure"]:
         plt.show()
@@ -271,9 +271,8 @@ if __name__ == "__main__":
     absolute_ax.legend()
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         absolute_fig.savefig(
-            OUTPUT_DIR / "spy_lob_absolute_distribution.pdf",
+            FIG_DIR / "spy_lob_absolute_distribution.pdf",
         )
     if CONFIG["show_figure"]:
         plt.show()
@@ -355,9 +354,8 @@ if __name__ == "__main__":
     snapshot_ax.legend()
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         snapshot_fig.savefig(
-            OUTPUT_DIR / "spy_lob_snapshot.pdf"
+            FIG_DIR / "spy_lob_snapshot.pdf"
         )
     if CONFIG["show_figure"]:
         plt.show()
@@ -406,9 +404,8 @@ if __name__ == "__main__":
     mid_ax.set_ylim(p_min - margin, p_max + margin)
 
     if CONFIG["save_figures"]:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         mid_fig.savefig(
-            OUTPUT_DIR / "spy_lob_mid_price.pdf"
+            FIG_DIR / "spy_lob_mid_price.pdf"
         )
     if CONFIG["show_figure"]:
         plt.show()
