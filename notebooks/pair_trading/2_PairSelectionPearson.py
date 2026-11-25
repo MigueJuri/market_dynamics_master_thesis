@@ -100,6 +100,10 @@ STYLE = _ROOT / "styles" / "thesis.mplstyle"
 plt.style.use(STYLE)
 W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
 
+#: Figuras de este cuaderno: ``figures/2_PairSelectionPearson/`` en la raíz del repositorio.
+FIG_DIR = _ROOT / "figures" / "2_PairSelectionPearson"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # %%
 # ## Universo, ventana de análisis y retornos
@@ -580,17 +584,20 @@ print(report.per_cluster.to_string())
 # - **Composición apilada**: porcentaje del cluster ocupado por cada
 #   sector.
 # - **Resumen**: purity, entropía normalizada y HHI por cluster.
-plot_cluster_sector_heatmap(
+fig = plot_cluster_sector_heatmap(
     report.contingency,
     title=f"Sectores vs clusters (Pearson, k = {n_clusters})",
 )
+fig.savefig(FIG_DIR / "pearson_sp500_cluster_sector_heatmap.pdf")
 
-plot_cluster_sector_composition(
+fig = plot_cluster_sector_composition(
     report.contingency,
     title=f"Composición sectorial por cluster (Pearson, k = {n_clusters})",
 )
+fig.savefig(FIG_DIR / "pearson_sp500_cluster_sector_composition.pdf")
 
-plot_cluster_sector_summary(report.per_cluster)
+fig = plot_cluster_sector_summary(report.per_cluster)
+fig.savefig(FIG_DIR / "pearson_sp500_cluster_sector_summary.pdf")
 
 # %%
 # ## Matriz de correlación en el orden leaf order de MI
@@ -637,7 +644,7 @@ if missing:
 # matriz sector × sector, que debe seguir viendo el universo completo.
 corr_matrix_ordered = corr_matrix.reindex(index=order, columns=order)
 
-plot_sector_reordered_matrix(
+fig = plot_sector_reordered_matrix(
     corr_matrix_ordered,
     order=order,
     cmap=CMAP_COMPARABLE,
@@ -646,6 +653,7 @@ plot_sector_reordered_matrix(
     cluster_labels_visible = False,
     separator_color = None,
 )
+fig.savefig(FIG_DIR / "pearson_sp500_leaf_order_matrix.pdf")
 
 # %%
 # ## Matriz promedio sector × sector
@@ -659,12 +667,13 @@ plot_sector_reordered_matrix(
 # comparables entre sí y con las del cuaderno de información mutua.
 sector_corr = sector_average_matrix(corr_matrix, available_sectors, operation="mean")
 
-plot_sector_average_heatmap(
+fig = plot_sector_average_heatmap(
     sector_corr,
     cmap=CMAP_COMPARABLE,
     title="Correlación Pearson promedio entre sectores GICS",
     cbar_label="Correlación media",
 )
+fig.savefig(FIG_DIR / "pearson_sp500_sector_average_heatmap.pdf")
 
 # %%
 # ## Correlación rolling (animación) sobre el sub-manifold reducido
@@ -678,73 +687,85 @@ plot_sector_average_heatmap(
 #
 # El orden de los activos se fija con el clustering de la ventana
 # completa para que los bloques visuales no salten entre frames.
-surviving_nodes = sorted({t1 for t1, _, _ in top_20_pairs}
-                         | {t2 for _, t2, _ in top_20_pairs})
-print(f"\nSub-manifold para animación: {len(surviving_nodes)} activos")
-print(f"Tickers: {surviving_nodes}")
-
-# El sub-manifold se recorta del panel ya calculado: recargar los mismos
-# tickers volvería a alinear (y potencialmente a descargar) por duplicado.
-returns_rolling = returns_full[surviving_nodes]
-print(
-    f"Panel rolling: {len(returns_rolling)} sesiones "
-    f"({returns_rolling.index[0]:%Y-%m-%d} → "
-    f"{returns_rolling.index[-1]:%Y-%m-%d}), "
-    f"{returns_rolling.shape[1]} activos"
-)
-
-corr_static = returns_rolling.corr(method="pearson")
-distance_static = correlation_distance(corr_static, use_sqrt=True)
-_, static_order = hierarchical_clustering(distance_static, n_clusters=n_clusters)
-static_labels = corr_static.columns[static_order]
-
-WINDOW_SIZE = 126
-STEP_SIZE = 5
-
-n_frames = max(0, (len(returns_rolling) - WINDOW_SIZE) // STEP_SIZE)
-if n_frames == 0:
-    raise ValueError(
-        f"El panel tiene {len(returns_rolling)} sesiones, "
-        f"insuficientes para una ventana de {WINDOW_SIZE}. "
-        "Amplía la ventana de análisis o reduce WINDOW_SIZE."
-    )
-print(f"Fotogramas de la animación: {n_frames}")
-
-matrices, dates = [], []
-for i in range(0, len(returns_rolling) - WINDOW_SIZE, STEP_SIZE):
-    window = returns_rolling.iloc[i : i + WINDOW_SIZE]
-    rolling = window.corr(method="pearson").reindex(
-        index=static_labels, columns=static_labels,
-    )
-    matrices.append(rolling.values)
-    dates.append(window.index[-1].strftime("%Y-%m-%d"))
-
-fig, ax = plt.subplots(figsize=(W, 0.8 * W))
-cax = ax.imshow(matrices[0], cmap="coolwarm", interpolation="nearest",
-                vmin=-1, vmax=1)
-ax.set_xticks(range(len(static_labels)), static_labels, rotation=45)
-ax.set_yticks(range(len(static_labels)), static_labels)
-fig.colorbar(cax, label="Correlación de Pearson")
-title = ax.set_title(
-    f"Correlación rolling ({WINDOW_SIZE} días) — {dates[0]}"
-)
-
-
-def update(frame_idx):
-    cax.set_data(matrices[frame_idx])
-    title.set_text(
-        f"Correlación rolling ({WINDOW_SIZE} días) — {dates[frame_idx]}"
-    )
-    return [cax, title]
-
-
-ani = animation.FuncAnimation(
-    fig, update, frames=len(matrices), interval=30, blit=True,
-)
-
-OUTPUT_FILENAME = "rolling_correlation.gif"
-ani.save(OUTPUT_FILENAME, writer="pillow")
-print(f"GIF guardado en {OUTPUT_FILENAME}")
+#
+# **Celda desactivada**: generar el GIF (~1000 fotogramas) tarda más de
+# 20 minutos.  Para regenerarlo, descomentar el bloque siguiente.
+# surviving_nodes = sorted({t1 for t1, _, _ in top_20_pairs}
+#                          | {t2 for _, t2, _ in top_20_pairs})
+# print(f"\nSub-manifold para animación: {len(surviving_nodes)} activos")
+# print(f"Tickers: {surviving_nodes}")
+#
+# # El sub-manifold se recorta del panel ya calculado: recargar los mismos
+# # tickers volvería a alinear (y potencialmente a descargar) por duplicado.
+# returns_rolling = returns_full[surviving_nodes]
+# print(
+#     f"Panel rolling: {len(returns_rolling)} sesiones "
+#     f"({returns_rolling.index[0]:%Y-%m-%d} → "
+#     f"{returns_rolling.index[-1]:%Y-%m-%d}), "
+#     f"{returns_rolling.shape[1]} activos"
+# )
+#
+# corr_static = returns_rolling.corr(method="pearson")
+# distance_static = correlation_distance(corr_static, use_sqrt=True)
+# _, static_order = hierarchical_clustering(distance_static, n_clusters=n_clusters)
+# static_labels = corr_static.columns[static_order]
+#
+# WINDOW_SIZE = 126
+# STEP_SIZE = 5
+#
+# n_frames = max(0, (len(returns_rolling) - WINDOW_SIZE) // STEP_SIZE)
+# if n_frames == 0:
+#     raise ValueError(
+#         f"El panel tiene {len(returns_rolling)} sesiones, "
+#         f"insuficientes para una ventana de {WINDOW_SIZE}. "
+#         "Amplía la ventana de análisis o reduce WINDOW_SIZE."
+#     )
+# print(f"Fotogramas de la animación: {n_frames}")
+#
+# matrices, dates = [], []
+# for i in range(0, len(returns_rolling) - WINDOW_SIZE, STEP_SIZE):
+#     window = returns_rolling.iloc[i : i + WINDOW_SIZE]
+#     rolling = window.corr(method="pearson").reindex(
+#         index=static_labels, columns=static_labels,
+#     )
+#     matrices.append(rolling.values)
+#     dates.append(window.index[-1].strftime("%Y-%m-%d"))
+#
+# # El GIF no va a la tesis, así que se aparta del estilo para que sea barato:
+# # sin usetex (cada fotograma, con una fecha distinta en el título, compilaría
+# # un documento LaTeX), sin constrained_layout (se recalcularía en cada uno de
+# # los ~1000 fotogramas; basta un tight_layout inicial) y a 72 dpi.
+# with plt.rc_context({"text.usetex": False, "font.family": "serif",
+#                      "font.serif": ["DejaVu Serif"],
+#                      "figure.constrained_layout.use": False}):
+#     fig, ax = plt.subplots(figsize=(W, 0.8 * W))
+#     cax = ax.imshow(matrices[0], cmap="coolwarm", interpolation="nearest",
+#                     vmin=-1, vmax=1)
+#     ax.set_xticks(range(len(static_labels)), static_labels, rotation=45)
+#     ax.set_yticks(range(len(static_labels)), static_labels)
+#     fig.colorbar(cax, label="Correlación de Pearson")
+#     title = ax.set_title(
+#         f"Correlación rolling ({WINDOW_SIZE} días) — {dates[0]}"
+#     )
+#
+#
+#     def update(frame_idx):
+#         cax.set_data(matrices[frame_idx])
+#         title.set_text(
+#             f"Correlación rolling ({WINDOW_SIZE} días) — {dates[frame_idx]}"
+#         )
+#         return [cax, title]
+#
+#
+#     fig.tight_layout()
+#
+#     ani = animation.FuncAnimation(
+#         fig, update, frames=len(matrices), interval=30, blit=True,
+#     )
+#
+#     OUTPUT_FILENAME = FIG_DIR / "pearson_sp500_rolling_correlation.gif"
+#     ani.save(OUTPUT_FILENAME, writer="pillow", dpi=72)
+# print(f"GIF guardado en {OUTPUT_FILENAME}")
 
  # %%
 # ## Símbolos finales del top 20 Pearson
