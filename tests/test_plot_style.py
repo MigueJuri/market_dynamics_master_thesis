@@ -105,3 +105,33 @@ def test_src_plots_follow_style_width(thesis_style):
         w, _ = fig.get_size_inches()
         assert w == pytest.approx(TEXTWIDTH_IN, abs=1e-3)
         plt.close(fig)
+
+
+def test_correlation_matrices_are_square(thesis_style):
+    """Las matrices de correlación se dibujan cuadradas a ancho de texto."""
+    import numpy as np
+    import pandas as pd
+
+    from thesis.plotting import (
+        plot_correlation_matrix,
+        plot_sector_average_heatmap,
+        plot_sector_reordered_matrix,
+    )
+
+    rng = np.random.default_rng(0)
+    corr = np.corrcoef(rng.normal(size=(12, 40)))
+    tickers = [f"T{i}" for i in range(12)]
+    frame = pd.DataFrame(corr, index=tickers, columns=tickers)
+    lags = list(range(21, 21 * 13, 21))
+
+    with plt.rc_context({"text.usetex": False}):
+        figs = [
+            plot_correlation_matrix(corr, lags, lags),
+            plot_sector_average_heatmap(frame),
+            plot_sector_reordered_matrix(frame),
+        ]
+    for fig in figs:
+        fig.canvas.draw()
+        bbox = fig.axes[0].get_window_extent()
+        assert bbox.width == pytest.approx(bbox.height, rel=1e-2)
+        plt.close(fig)

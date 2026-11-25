@@ -79,6 +79,14 @@ def plot_correlation_matrix(
     sns.heatmap(
         corr_matrix, cmap=cmap, center=0, cbar_kws={"label": cbar_label}, ax=ax
     )
+    # La matriz se dibuja cuadrada (no la figura): sin esto el heatmap se
+    # estira hasta llenar el ancho de texto.
+    ax.set_box_aspect(1)
+    ax.grid(False)  # la rejilla del estilo se dibujaría sobre las celdas
+    # Solo la malla se rasteriza (a ``savefig.dpi``): como polígonos
+    # vectoriales, los visores dibujan costuras blancas entre celdas.  Ejes y
+    # texto siguen siendo vectoriales.
+    ax.collections[0].set_rasterized(True)
 
     xticks, xlabels = _year_ticks(lookbacks, trading_days, ticks_per_year)
     ax.set_xticks(xticks)
@@ -440,6 +448,7 @@ def plot_sector_average_heatmap(
     )
     ax.set_xticks(range(len(matrix.columns)), matrix.columns, rotation=45, ha="right")
     ax.set_yticks(range(len(matrix.index)), matrix.index)
+    ax.grid(False)  # la rejilla del estilo se dibujaría sobre las celdas
     ax.set_title(title)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
@@ -464,6 +473,7 @@ def plot_cluster_sector_heatmap(
     ).astype(int)
     fig, ax = plt.subplots(figsize=_figsize(figsize, 0.7))
     sns.heatmap(data, annot=True, fmt="d", cmap=cmap, cbar=True, ax=ax)
+    ax.grid(False)  # la rejilla del estilo se dibujaría sobre las celdas
     ax.set_title(title)
     ax.set_xlabel("Cluster")
     ax.set_ylabel("Sector GICS")
@@ -669,6 +679,7 @@ def plot_sector_reordered_matrix(
     fig.colorbar(im, ax=ax, label=cbar_label, shrink=0.9, pad=0.01)
     ax.set_xticks([])
     ax.set_yticks([])
+    ax.grid(False)
     return fig
 
 
