@@ -229,3 +229,5 @@ print(last_w.round(4).to_string())
 # %%
 if __name__ == "__main__":
     print("Ejecutado como script.")
+
+# %%

@@ -92,6 +92,7 @@ def plot_scatter_grid(
     color_by_date: bool = True,
     cmap: str = "viridis",
     date_format: str = "%Y",
+    alpha: float = 0.6,
 ) -> None:
     """Grilla de scatter feature × target para todas las combinaciones de ventanas.
 
@@ -146,6 +147,7 @@ def plot_scatter_grid(
     vmax = mdates.date2num(global_max)
 
     first_scatter = None
+    kwargs.setdefault("alpha", alpha)
     last_row = len(target_windows) - 1
     for i, tw in enumerate(target_windows):
         for j, fw in enumerate(feature_windows):
@@ -243,7 +245,7 @@ def plot_feature_boxplots(
             labels[0] = "Q1\n(Más bajo)"
             labels[-1] = f"Q{n_quantiles}\n(Más Alto)"
         data["quantile"] = pd.qcut(data[feature_name], q=n_quantiles, labels=labels)
-        x_label_suffix = f"{feature_name.capitalize()} cuantiles"
+        x_label_suffix = f"Cuantiles {feature_name}"
     else:
         f_min = float(data[feature_name].min())
         f_max = float(data[feature_name].max())
@@ -259,7 +261,7 @@ def plot_feature_boxplots(
         )
         x_label_suffix = f"{feature_name}"
 
-    fw_str = f"({feature_window/252:.2f} años) " if feature_window is not None else ""
+    fw_str = f"({feature_window/252:.2f} años)" if feature_window is not None else ""
     tw_str = f"({target_window/252:.2f} años) " if target_window is not None else ""
     y_label = f"{target_name}{tw_str}".strip()
     x_label_full = f"{x_label_suffix}{fw_str}".strip()
@@ -302,7 +304,7 @@ def plot_feature_boxplots(
     else:
         created_fig = ax is None
         if created_fig:
-            fig, ax = plt.subplots(figsize=(6, 3))
+            fig, ax = plt.subplots(figsize=(6, 3), dpi = 300)
 
         sns.boxplot(
             data=data,
@@ -833,13 +835,14 @@ def plot_pair_overview(
         1,
         figsize=figsize,
         sharex=True,
-        gridspec_kw={"height_ratios": [2, 1]},
+        gridspec_kw={"height_ratios": [1, 1]},
+        dpi = 300
     )
 
-    axes[0].plot(prices.index, prices[ticker_a], linewidth=1.5, label=ticker_a)
-    axes[0].plot(prices.index, prices[ticker_b], linewidth=1.5, label=ticker_b)
-    axes[0].set_ylabel("Precio (USD, escala log)" if log_scale else "Precio (USD)")
-    axes[0].set_title(f"{ticker_a} vs {ticker_b}", fontweight="bold")
+    axes[0].plot(prices.index, prices[ticker_a], linewidth=1, label=ticker_a)
+    axes[0].plot(prices.index, prices[ticker_b], linewidth=1, label=ticker_b)
+    axes[0].set_ylabel("Precio (USD, log)" if log_scale else "Precio (USD)")
+    # axes[0].set_title(f"{ticker_a} vs {ticker_b}", fontweight="bold")
     axes[0].legend(loc="best")
     axes[0].grid(True, alpha=0.3)
     if log_scale:
@@ -849,32 +852,37 @@ def plot_pair_overview(
         spread.index,
         spread.values,
         color="darkblue",
-        linewidth=1.3,
-        label="Spread (Z$_t$)",
+        linewidth=1,
+        label=r"$Z_t$",
     )
     if ou_params is not None:
         mu = ou_params.mu
         axes[1].axhline(
-            mu, color="black", linewidth=1.5, label=f"Equilibrio (μ = {mu:.4f})"
+            mu, color="black", linewidth=1, alpha = 0.5, label=f"Equilibrio (μ)"
         )
         for width, color, alpha in (
             (ou_params.sigma_eq, "green", 0.20),
             (2 * ou_params.sigma_eq, "orange", 0.15),
         ):
             axes[1].fill_between(
-                spread.index, mu - width, mu + width, color=color, alpha=alpha
+                spread.index,
+                mu - width,
+                mu + width,
+                color=color,
+                alpha=alpha,
+                label=f"±{width / ou_params.sigma_eq:.0f}σ",
             )
     else:
         axes[1].axhline(
             spread.mean(),
             color="black",
-            linewidth=1.5,
+            linewidth=1,
             linestyle="--",
             label="Media muestral",
         )
-    axes[1].set_ylabel("Dispersión")
+    axes[1].set_ylabel(r"$Z_t$")
     axes[1].set_xlabel("Fecha")
-    axes[1].legend()
+    axes[1].legend(loc="best")
     axes[1].grid(True, alpha=0.3)
 
     # fig.suptitle("Par y spread", fontweight="bold")

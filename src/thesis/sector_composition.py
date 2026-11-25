@@ -44,7 +44,7 @@ GICS_SECTOR_ES: dict[str, str] = {
     "consumer_cyclical": "Consumo Cíclico",
     "industrials": "Industriales",
     "communication_services": "Servicios de Comunicación",
-    "consumer_defensive": "Consumo Defensivo",
+    "consumer_defensive": "Consumo Básico",
     "energy": "Energía",
     "realestate": "Bienes Raíces",
     "utilities": "Servicios Públicos",
@@ -57,7 +57,7 @@ SP500_WIKI_URL: str = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies
 #: Peso (en fracción, no en %) por debajo del cual un sector se agrupa en
 #: "Otros".  El valor original del cuaderno-era 0,08 en el código y "9%" en
 #: el comentario: aquí se unifica en 0,08.
-MINOR_SECTOR_THRESHOLD: float = 0.08
+MINOR_SECTOR_THRESHOLD: float = 0.02
 
 #: Nombre del CSV de caché con los pesos sectoriales históricos.
 SECTOR_COMPOSITION_CACHE_FILENAME: str = "sp500_sector_composition.csv"

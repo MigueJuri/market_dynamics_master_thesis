@@ -105,7 +105,7 @@ CONFIG: dict[str, Any] = {
     # Activo del snapshot actual
     "ticker": "SPY",
     # Umbral (fracción) por debajo del cual un sector se agrupa en "Otros"
-    "minor_threshold": MINOR_SECTOR_THRESHOLD,
+    "minor_threshold": 0.05,#MINOR_SECTOR_THRESHOLD,
     # Traducción de los sectores GICS al español
     "translation": GICS_SECTOR_ES,
     # Ventana de la reconstrucción histórica
@@ -161,42 +161,77 @@ if __name__ == "__main__":
     labels = snapshot.index.tolist()
     sizes = snapshot.to_numpy(dtype=float)
 
-    donut_fig, donut_ax = plt.subplots(figsize=(6, 4), dpi=150)
+    # Tipografía: una sola escala para toda la figura.
+    FS_SUB, FS_LEGEND, FS_PCT, FS_CENTER = 10, 10.5, 9.5, 16
+
+    # Paleta: colormap perceptual; "Otros" en gris neutro al final.
+    n = len(labels)
+    cmap = plt.get_cmap("viridis")
+    colors = [cmap(v) for v in np.linspace(0.05, 0.92, n)]
+    for i, lab in enumerate(labels):
+        if lab.strip().lower() in ("otros", "others"):
+            colors[i] = "#B0B5BA"
+
+    donut_fig, donut_ax = plt.subplots(figsize=(8, 3.6), dpi=150)
     wedges, _, autotexts = donut_ax.pie(
         sizes,
-        autopct="%1.1f%%",
-        startangle=140,
-        pctdistance=0.75,
-        textprops={"fontsize": 10},
+        colors=colors,
+        autopct=lambda p: f"{p:.1f}%" if p >= 4 else "",
+        startangle=90,
+        counterclock=False,
+        pctdistance=0.80,
+        wedgeprops=dict(width=0.38, edgecolor="white", linewidth=2),
+        textprops={"fontsize": FS_PCT},
     )
-    for text in autotexts:
+    for text, wedge in zip(autotexts, wedges):
         text.set_fontweight("bold")
+        r, g, b, _ = wedge.get_facecolor()
+        lum = 0.299 * r + 0.587 * g + 0.114 * b
+        text.set_color("black" if lum > 0.55 else "white")
 
-    # Centro blanco: convierte el gráfico de torta en un anillo.
-    donut_ax.add_artist(plt.Circle((0, 0), 0.55, fc="white"))
+    # Texto central: ticker y subtítulo.
+    donut_ax.text(
+        0, 0.06, CONFIG["ticker"],
+        ha="center", va="center",
+        fontsize=FS_CENTER, fontweight="bold", color="#222222",
+    )
+    donut_ax.text(
+        0, -0.12, "Pesos sectoriales",
+        ha="center", va="center",
+        fontsize=FS_SUB, color="#666666",
+    )
 
+    # Leyenda con el porcentaje de cada sector.
+    legend_labels = [f"{lab}  ·  {s:.1%}" for lab, s in zip(labels, sizes)]
     donut_ax.legend(
         wedges,
-        labels,
-        title="Sectores",
+        legend_labels,
         loc="center left",
-        bbox_to_anchor=(1, 0.5),
-        fontsize=11,
-        title_fontsize=13,
+        bbox_to_anchor=(1.02, 0.55),
+        fontsize=FS_LEGEND,
+        frameon=False,
+        handlelength=1.2,
+        handleheight=1.2,
+        labelspacing=0.6,
     )
-    donut_ax.set_title(
-        f"Composición sectorial de {CONFIG['ticker']}\n"
-        f'(sectores < {CONFIG["minor_threshold"]:.0%} agrupados en "Otros")',
-        fontsize=13,
-        fontweight="bold",
+
+    # Nota sobre "Otros", a la derecha bajo la leyenda.
+    donut_ax.text(
+        1.02, 0.02,
+        f'"Otros": sectores < {CONFIG["minor_threshold"]:.0%}\nagrupados',
+        transform=donut_ax.transAxes,
+        ha="left", va="bottom",
+        fontsize=FS_SUB, color="#666666", style="italic",
     )
+
     donut_ax.axis("equal")
     donut_fig.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         donut_fig.savefig(
-            OUTPUT_DIR / "spy_sector_weights.png", dpi=150, bbox_inches="tight"
+            OUTPUT_DIR / "spy_sector_weights.png",
+            dpi=200, bbox_inches="tight", facecolor="white",
         )
     if CONFIG["show_figure"]:
         plt.show()

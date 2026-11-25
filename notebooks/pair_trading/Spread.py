@@ -68,7 +68,6 @@
 import sys
 from pathlib import Path
 from typing import Any
-
 import pandas as pd
 
 _HERE = Path(__file__).resolve().parent
@@ -92,7 +91,7 @@ from thesis.plotting import plot_pair_overview, plot_pair_prices, plot_spread
 # ``extract_and_construct_spread`` descarga ambos activos con la
 # caché CSV de ``market_data``, aplica log-precios, ajusta la OLS,
 # construye el spread y aplica el test ADF, imprimiendo un resumen.
-TICKER_A = "UDR"
+TICKER_A = "ESS"
 TICKER_B = "VMRK"
 START_DATE = "2006-01-01"
 END_DATE = "2025-12-31"
@@ -193,6 +192,7 @@ plot_pair_overview(
     TICKER_A,
     TICKER_B,
     ou_params,
+    figsize=(6, 4)
 )
 
 # %%

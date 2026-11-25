@@ -73,7 +73,7 @@ CONFIG: dict[str, Any] = {
     "train_end": "2017-01-01",
     "val_end": "2022-01-01",
     # Ventana (en sesiones) de la volatilidad realizada histórica.
-    "vol_window": 20,
+    "vol_window": 63,
     # Horizonte (en sesiones) de la volatilidad hacia adelante: coincide con
     # ``forecast_horizon`` de ``Volatilidad_LSTM.py``.
     "forward_horizon": 5,
@@ -236,26 +236,43 @@ if __name__ == "__main__":
     fig, (ax_top, ax_bottom) = plt.subplots(
         2,
         1,
-        figsize=(7, 7),
+        figsize=(7, 5),
         sharex=True,
         gridspec_kw={"height_ratios": [1, 1], "hspace": 0.2},
+        dpi =300
     )
 
-    ax_top.plot(log_price.index, log_price.to_numpy(), color="black", lw=1.0)
-    ax_top.set_ylabel("Precio Log")
-    ax_top.set_title("a")
+    ax_top.plot(log_price.index, log_price.to_numpy(), color="black", lw=0.7)
+    ax_top.set_ylabel(r"ln($S_t$)")
+    ax_top.text(
+        0.02,
+        0.85,
+        "a",
+        transform=ax_top.transAxes,
+        ha="left",
+        va="top",
+        fontweight="bold",
+    )
     ax_top.tick_params(labelbottom=False)
 
     ax_bottom.plot(
         realized_vol.index,
         realized_vol.to_numpy(),
         color="C0",
-        lw=1.0,
+        lw=0.7,
         label=f"Media Móvil ({CONFIG['vol_window']} días)"
     )
-    ax_bottom.set_ylabel("Volatilidad anualizada (%)")
+    ax_bottom.set_ylabel(r" $\sigma$ (% anual)")
     ax_bottom.set_xlabel("Fecha")
-    ax_bottom.set_title("b")
+    ax_bottom.text(
+        0.02,
+        0.85,
+        "b",
+        transform=ax_bottom.transAxes,
+        ha="left",
+        va="top",
+        fontweight="bold",
+    )
     ax_bottom.legend(loc="upper left", fontsize=9)
 
     for ax in (ax_top, ax_bottom):
@@ -271,7 +288,7 @@ if __name__ == "__main__":
     ):
         ax_top.text(
             izquierda + (derecha - izquierda) / 2,
-            0.94,
+            0.99,
             etiqueta,
             transform=ax_top.get_xaxis_transform(),
             ha="center",

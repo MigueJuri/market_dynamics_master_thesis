@@ -92,7 +92,7 @@ from thesis.volatility_models import (
 CONFIG: dict[str, Any] = {
     # Datos
     "ticker": "SPY",
-    "start_date": "1995-01-01",
+    "start_date": "1993-01-01",
     # Divisiones temporales
     "train_end": "2017-01-01",
     "val_end": "2022-01-01",
@@ -264,11 +264,14 @@ def prepare_data(config: dict[str, Any] | None = None) -> dict[str, Any]:
     X_te_t = torch.from_numpy(Xte_seq)
 
     # --- Baseline HAR-RV ---
-    har_X_tr = align_har_features_with_sequences(train_df[fcols], ytr_seq, LB)
-    har_X_te = align_har_features_with_sequences(test_df[fcols], yte_seq, LB)
+    # Predictores HAR-RV de la ec. de la tesis: ln σ_t^(k), k = 1, 5, 22
+    # (ventanas anidadas; columnas ``har_d``, ``har_w``, ``har_m``).
+    har_cols = ["har_d", "har_w", "har_m"]
+    har_X_tr = align_har_features_with_sequences(train_df[har_cols], ytr_seq, LB)
+    har_X_te = align_har_features_with_sequences(test_df[har_cols], yte_seq, LB)
     y_tr_raw_aligned = y_tr[LB : LB + len(ytr_seq)]
 
-    har = HARRVModel()
+    har = HARRVModel(feature_cols=har_cols)
     har.fit(har_X_tr, y_tr_raw_aligned)
     print(har.summary())
 
@@ -872,12 +875,12 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     history = trained["history"]
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(history["train_loss"], color="C0", lw=1.2, label="Train")
+    fig, ax = plt.subplots(figsize=(6, 3), dpi=300)
+    ax.plot(history["train_loss"], color="C0", lw=1.2, label="Entrenamiento")
     ax.plot(history["val_loss"], color="C1", lw=1.2, label="Validación")
     ax.set_xlabel("Época")
-    ax.set_ylabel("Pérdida LINEX")
-    ax.set_title("Pérdida de entrenamiento")
+    ax.set_ylabel(r"$\ell_{\text{LINEX}}$")
+    # ax.set_title("Pérdida de entrenamiento")
     ax.legend()
     fig.tight_layout()
     fig.savefig(PLOT_PATHS["loss"], dpi=150, bbox_inches="tight")
@@ -909,15 +912,22 @@ if __name__ == "__main__":
 # ### 3. Evolución de la volatilidad
 
 if __name__ == "__main__":
-    fig, ax = plt.subplots(figsize=(11, 4))
-    ax.plot(dates, y_true, color="black", lw=1.2, label="Real")
-    ax.plot(dates, y_lstm, color="C0", lw=1.0, label="LSTM")
-    ax.plot(dates, y_har, color="C1", lw=1.0, ls="--", label="HAR-RV")
+    fig, ax = plt.subplots(figsize=(11*0.8, 4*0.8), dpi=300)
+
+    # Serie real como área sombreada de fondo + borde sutil
+    ax.fill_between(dates, 0, y_true, color="#888888", alpha=0.1, zorder=1, label="Real")
+    ax.plot(dates, y_true, color="#666666", lw=0.5, alpha=0.45, zorder=1)
+
+    # LSTM en primer plano (zorder=3) y HAR-RV detrás con trazo discontinuo (zorder=2)
+    ax.plot(dates, y_lstm, color="#0056B3", lw=0.9, alpha=0.95, zorder=3, label="LSTM")
+    ax.plot(dates, y_har, color="#D95F02", lw=0.9, alpha=0.95, zorder=2, label="HAR-RV")
+
     ax.set_xlabel("Fecha")
-    ax.set_ylabel("Volatilidad anualizada")
-    ax.set_title("Volatilidad realizada forward — test")
-    ax.legend()
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+    ax.set_ylabel(r"$\sigma_{t+5}^{(5)}$ anual")
+    ax.set_ylim(bottom=0)
+    # ax.set_title("Volatilidad realizada forward — test")
+    ax.legend(frameon=False)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     fig.autofmt_xdate()
     fig.tight_layout()
     fig.savefig(PLOT_PATHS["timeseries"], dpi=150, bbox_inches="tight")

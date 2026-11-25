@@ -152,6 +152,13 @@ def compute_volatility_features(df: pd.DataFrame) -> pd.DataFrame:
     feat["rv_weekly"] = rv_sq.rolling(5, min_periods=5).mean()
     feat["rv_monthly"] = rv_sq.rolling(22, min_periods=22).mean()
 
+    # Predictores del HAR-RV tal como los define la tesis (ec. HAR-RV):
+    # ln σ_t^(k) para k = 1, 5 y 22 días (ventanas anidadas, como en Corsi),
+    # con σ sin anualizar.  No forman parte de LOG_COLS (ya están en log).
+    for name, k in (("har_d", 1), ("har_w", 5), ("har_m", 22)):
+        var_k = rv_sq.rolling(k, min_periods=k).mean()
+        feat[name] = 0.5 * np.log(var_k.clip(lower=1e-12))
+
     feat["vol_20"] = log_ret.rolling(20, min_periods=20).std() * np.sqrt(TRADING_DAYS)
     feat["vol_ratio"] = feat["rv_daily"] / (feat["rv_weekly"] + 1e-10)
 

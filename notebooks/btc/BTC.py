@@ -322,23 +322,23 @@ if __name__ == "__main__":
     bottom_dates = [pd.Timestamp(str(d).strip()) for d in CONFIG["bottoms"]]
 
     # --- Figura 1: evolución temporal en escala lineal ---
-    linear_fig, ax0 = plt.subplots(figsize=(12, 5))
+    linear_fig, ax0 = plt.subplots(figsize=(8, 4), dpi=300)
     ax0.plot(
         reg_df.index,
         reg_df["close"],
-        label="Cierre de BTC",
+        # label="Cierre de BTC",
         color="black",
         alpha=0.7,
-        linewidth=1,
+        linewidth=0.8,
     )
-    ax0.set_title("Evolución del precio de Bitcoin")
+    # ax0.set_title("Evolución del precio de Bitcoin")
     ax0.set_xlabel("Fecha")
     ax0.set_ylabel("Precio (USD)")
     ax0.legend()
     ax0.grid(True, ls="--", alpha=0.4)
 
     # --- Figura 2: eje temporal logarítmico con anotaciones ---
-    temporal_fig, ax1 = plt.subplots(figsize=(12, 5))
+    temporal_fig, ax1 = plt.subplots(figsize=(8, 4), dpi=300)
     ax1.plot(
         reg_df.index,
         reg_df["close"],
@@ -351,7 +351,7 @@ if __name__ == "__main__":
         ax1.plot(
             reg_df.index,
             res["prediction"],
-            label=f"Reg. percentil {int(q * 100)}",
+            label=rf"Reg. $p\cdot 100={int(q * 100)}$",
             color=quantile_colors.get(q, "gray"),
             linestyle=quantile_styles.get(q, "--"),
             linewidth=2,
@@ -388,36 +388,36 @@ if __name__ == "__main__":
         )
 
     ax1.set_yscale("log")
-    ax1.set_title("Dinámica del precio de BTC — regresión cuantílica power-law")
+    # ax1.set_title("Dinámica del precio de BTC — regresión cuantílica power-law")
     ax1.set_xlabel("Días desde la génesis")
     ax1.set_ylabel("Precio (USD)")
     ax1.legend()
     ax1.grid(True, which="both", ls="--", alpha=0.4)
 
     # --- Figura 3: power-law log-log (días desde la génesis) ---
-    power_law_fig, ax2 = plt.subplots(figsize=(12, 5))
+    power_law_fig, ax2 = plt.subplots(figsize=(8, 4), dpi=300)
     ax2.plot(
         reg_df["days"],
         reg_df["close"],
         label="BTC",
         color="black",
-        alpha=0.6,
+        alpha=0.7,
         linewidth=1,
     )
     for q, res in fit.items():
         ax2.plot(
             reg_df["days"],
             res["prediction"],
-            label=f"Reg. percentil {int(q * 100)}",
+            label=rf"Reg. $p\cdot 100={int(q * 100)}$",
             color=quantile_colors.get(q, "gray"),
             linestyle=quantile_styles.get(q, "--"),
-            linewidth=2,
+            linewidth=1,
         )
 
     ax2.set_xscale("log")
     ax2.set_yscale("log")
     # ax2.set_title("Dinámica del precio de BTC — regresión cuantílica power-law")
-    ax2.set_xlabel("Días desde la génesis")
+    ax2.set_xlabel("Días desde el primer bloque")
     ax2.set_ylabel("Precio (USD)")
     ax2.legend()
     ax2.grid(True, which="both", ls="--", alpha=0.4)
@@ -500,7 +500,7 @@ if __name__ == "__main__":
         ax5.plot(
             hist.index,
             res["prediction"].reindex(hist.index),
-            label=f"Reg. percentil {int(q * 100)}",
+            label=rf"Reg. $p\cdot 100={int(q * 100)}$",
             color=color,
             linestyle="-",
             linewidth=2,
@@ -636,7 +636,7 @@ if __name__ == "__main__":
         )
 
     # --- Figura 4: precio log-log con banda q10 y precio suavizado con sus picos ---
-    cycle_fig, (ax3, ax4) = plt.subplots(2, 1, figsize=(13*0.6, 9*0.6))
+    cycle_fig, (ax3, ax4) = plt.subplots(2, 1, figsize=(13*0.6, 9*0.6), dpi=300)
 
     # Panel A: precio en escala log-log con la banda q10 destacada.
     ax3.plot(
@@ -657,7 +657,7 @@ if __name__ == "__main__":
     ax3.set_xscale("log")
     ax3.set_yscale("log")
     # ax3.set_title("BTC en escala log-log con la banda del cuantil 10")
-    ax3.set_xlabel("Días desde la génesis")
+    ax3.set_xlabel("Días desde el primer bloque")
     ax3.set_ylabel("Precio (USD)")
     ax3.text(0.02, 0.95, "a", transform=ax3.transAxes, fontsize=14, fontweight="bold", va="top")
     ax3.legend()
@@ -719,7 +719,7 @@ if __name__ == "__main__":
     #     "con los picos detectados"
     # )
     ax4.set_xlabel("Fecha")
-    ax4.set_ylabel(r"Log(Precio/$Q_{10}$)")
+    ax4.set_ylabel(r"log(BTC/$Q_{10}$)")
     ax4.legend()
     ax4.text(0.02, 0.95, "b", transform=ax4.transAxes, fontsize=14, fontweight="bold", va="top")
     ax4.grid(True, ls="--", alpha=0.4)

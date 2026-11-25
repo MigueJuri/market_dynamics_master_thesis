@@ -116,7 +116,6 @@ if str(_SRC) not in sys.path:
 from thesis.characterization import (
     annualized_stats,
     block_bootstrap_ci,
-    bootstrap_acf,
     build_summary_table,
     compute_ewma_volatility,
     describe_returns,
@@ -125,6 +124,8 @@ from thesis.characterization import (
     fit_squared_return_distributions,
     freedman_diaconis_bins,
     high_volatility_mask,
+    ljung_box_pvalues,
+    sample_acf,
     unconditional_band_excursions,
 )
 from thesis.config import DATA_DIR, PLOT_RC
@@ -140,17 +141,17 @@ CONFIG: dict[str, Any] = {
     # --- Datos ---
     "ticker": "SPY",
     "start": "1993-01-01",
-    "end": "2026-01-01",
+    "end": "2026-11-22",
     "trading_days": 252,
     "seed": 42,
-    # --- Bootstrap ---
-    # Moving block para los momentos (celda 5); i.i.d. para las bandas de la
-    # ACF (celda 6).
-    "block_size": 21,
+    # --- Bootstrap (celda 5) ---
+    # Moving block bootstrap para los momentos (celda 5).
+    "block_size": 5,
     "n_boot": 1_000,
     "alpha": 0.05,
     # --- Autocorrelación ---
     "max_lags": 50,
+    "lb_lags": (10, 20, 50),  # lags de Ljung-Box / McLeod-Li
     # --- Volatilidad EWMA (convención RiskMetrics) ---
     "lambda_ewma": 0.94,
     "vol_quantile": 0.90,
@@ -228,7 +229,7 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     price_smooth = price.rolling(CONFIG["smooth_window"]).mean()
 
-    fig, (ax_lin, ax_log) = plt.subplots(1, 2, figsize=CONFIG["figsize"])
+    fig_lin, ax_lin = plt.subplots(figsize=CONFIG["figsize"], dpi = 300)
 
     ax_lin.plot(
         price_smooth.index,
@@ -236,10 +237,18 @@ if __name__ == "__main__":
         linewidth=1.2,
         color=CONFIG["color_price"],
     )
-    ax_lin.set_title("Escala lineal")
+    # ax_lin.set_title("Escala lineal")
     ax_lin.set_xlabel("Fecha")
-    ax_lin.set_ylabel("Precio ajustado (USD)")
+    ax_lin.set_ylabel("Precio (USD)")
 
+    # fig_lin.suptitle(
+    #     f"{CONFIG['ticker']}: precio de cierre ajustado "
+    #     f"(media móvil de {CONFIG['smooth_window']} ruedas) — escala lineal",
+    #     y=1.02,
+    # )
+    fig_lin.tight_layout()
+
+    fig_log, ax_log = plt.subplots(figsize=CONFIG["figsize"])
     ax_log.plot(
         price_smooth.index,
         price_smooth.values,
@@ -247,9 +256,9 @@ if __name__ == "__main__":
         color=CONFIG["color_price"],
     )
     ax_log.set_yscale("log")
-    ax_log.set_title("Escala logarítmica")
+    # ax_log.set_title("Escala logarítmica")
     ax_log.set_xlabel("Fecha")
-    ax_log.set_ylabel("Precio ajustado (USD)")
+    ax_log.set_ylabel("Precio (USD, log)")
 
     # Ticks explícitos: en escala log el formato por defecto es notación
     # científica y el eje menor satura de etiquetas.
@@ -259,17 +268,24 @@ if __name__ == "__main__":
     ax_log.yaxis.set_major_formatter(formatter)
     ax_log.yaxis.set_minor_locator(mticker.NullLocator())
 
-    fig.suptitle(
-        f"{CONFIG['ticker']}: precio de cierre ajustado "
-        f"(media móvil de {CONFIG['smooth_window']} ruedas)",
-        y=1.02,
-    )
-    fig.tight_layout()
+    # fig_log.suptitle(
+    #     f"{CONFIG['ticker']}: precio de cierre ajustado "
+    #     f"(media móvil de {CONFIG['smooth_window']} ruedas) — escala logarítmica",
+    #     y=1.02,
+    # )
+    fig_log.tight_layout()
 
     if CONFIG["save_figures"]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        fig.savefig(
-            OUTPUT_DIR / "spy_price_trajectory.png", dpi=300, bbox_inches="tight"
+        fig_lin.savefig(
+            OUTPUT_DIR / "spy_price_trajectory_linear.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+        fig_log.savefig(
+            OUTPUT_DIR / "spy_price_trajectory_log.png",
+            dpi=300,
+            bbox_inches="tight",
         )
     if CONFIG["show_figure"] and _INTERACTIVE:
         plt.show()
@@ -462,10 +478,9 @@ if __name__ == "__main__":
 # réplicas.  La semilla es **explícita**: el bootstrap es reproducible sin
 # tocar el estado global de numpy.
 #
-# En la celda 6, en cambio, las bandas de la ACF se calculan con el bootstrap
-# i.i.d. simple: el contraste que interesa allí es contra la hipótesis nula
-# de independencia, y no contra la varianza muestral de un estimador de
-# momento con fuerte dependencia.
+# En la celda 6, en cambio, las bandas de la ACF usan errores estándar
+# asintóticos robustos (Diebold; HAC de Newey-West), que no requieren elegir
+# un tamaño de bloque.
 
 # %%
 if __name__ == "__main__":
@@ -516,56 +531,29 @@ if __name__ == "__main__":
 #
 # Es decir: los retornos son *no correlacionados* pero no *independientes*.
 #
-# **Sobre las bandas de confianza.**  Las bandas estándar $\pm z/\sqrt{T}$
-# (ruido blanco de Bartlett) suponen independencia y homocedasticidad: bajo
-# heterocedasticidad condicional —exactamente lo que caracteriza a esta
-# serie— subestiman la varianza de $\hat\rho_k$ y producen rechazos
-# espurios.  Las bandas de esta celda se calculan por **bootstrap i.i.d.**
-# (remuestreo con reemplazo de observaciones individuales): la ACF se
-# recalcula sobre cada réplica y la banda percentil $[\alpha/2, 1-\alpha/2]$
-# mide su dispersión.
+# **Sobre las bandas de confianza.**  Las bandas son las de Bartlett,
+# $\pm z_{1-\alpha/2}/\sqrt{T}$: la distribución asintótica de $\hat\rho_k$
+# bajo la hipótesis nula de independencia.  Con heterocedasticidad condicional
+# —y más aún en $x_t^2$— subestiman la varianza real de $\hat\rho_k$, de modo
+# que el conteo de lags fuera de la banda debe leerse como evidencia **contra
+# la independencia**, no como medida de la magnitud de la persistencia.
 #
-# El punto clave del remuestreo i.i.d. es que **destruye la dependencia
-# temporal**: cada réplica es una permutación de las observaciones, de modo
-# que su autocorrelación es nula por construcción.  La banda resultante es
-# entonces la distribución *nula* del estimador (el equivalente empírico de
-# la banda de Bartlett, pero calculado por simulación sobre la distribución
-# empírica de la serie), y el contraste $\lvert\hat\rho_k\rvert > h_k$ es un
-# test contra la hipótesis nula de independencia.
-#
-# El precio de esta simplicidad es que la banda **subestima la incertidumbre
-# real** del estimador en el panel de $x_t^2$: la autocorrelación verdadera
-# de los cuadrados es persistente y su varianza muestral es más ancha que la
-# nula.  En ese panel el conteo de lags "significativos" debe leerse como
-# evidencia *contra la independencia*, no como una medida de la magnitud de
-# la persistencia.  (Para los momentos de la celda 5, en cambio, el bootstrap
-# por bloques sí es el adecuado, porque ahí el estimador sí depende de la
-# estructura temporal de la muestra.)
-#
-# La banda es **simétrica** ($\pm h_k$) alrededor de cero y el lag 0 no lleva
-# banda (su autocorrelación vale 1 por definición).
+# Además se reportan los tests conjuntos de **Ljung-Box** (sobre $x_t$) y de
+# **McLeod-Li** (Ljung-Box sobre $x_t^2$).  El lag 0 no lleva banda.
 
 # %%
 if __name__ == "__main__":
     max_lags = CONFIG["max_lags"]
     alpha = CONFIG["alpha"]
 
-    # Retornos: ACF con bandas por bootstrap i.i.d.
-    acf_r, ci_r = bootstrap_acf(
-        log_ret.values,
-        max_lags=max_lags,
-        reps=CONFIG["n_boot"],
-        alpha=alpha,
-        seed=CONFIG["seed"],
-    )
-    # Retornos al cuadrado: proxy de volatilidad (misma banda bootstrap).
-    acf_sq, ci_sq = bootstrap_acf(
-        log_ret.values**2,
-        max_lags=max_lags,
-        reps=CONFIG["n_boot"],
-        alpha=alpha,
-        seed=CONFIG["seed"],
-    )
+    # Banda de Bartlett: ±z / sqrt(T); el lag 0 no lleva banda.
+    bartlett = stats.norm.ppf(1.0 - alpha / 2.0) / np.sqrt(len(log_ret))
+    ci_r = np.full(max_lags + 1, bartlett)
+    ci_r[0] = 0.0
+    ci_sq = ci_r.copy()
+    acf_r = sample_acf(log_ret.values, max_lags)
+    # Retornos al cuadrado: proxy de volatilidad.
+    acf_sq = sample_acf(log_ret.values**2, max_lags)
 
     fig_r, ax_r = plt.subplots(figsize=CONFIG["figsize"])
 
@@ -577,9 +565,9 @@ if __name__ == "__main__":
         ci_r,
         color=CONFIG["color_band"],
         alpha=0.7,
-        label=f"IC {1 - alpha:.0%} (bootstrap i.i.d.)",
+        label=f"IC {1 - alpha:.0%}",
     )
-    ax_r.set_title(r"Retornos $x_t$")
+    # ax_r.set_title(r"Retornos $x_t$")
     ax_r.set_xlabel("Lag $k$ (días)")
     ax_r.set_ylabel(r"$\rho_k$")
     ax_r.legend(loc="upper right")
@@ -606,7 +594,7 @@ if __name__ == "__main__":
         ci_sq,
         color=CONFIG["color_band"],
         alpha=0.7,
-        label=f"IC {1 - alpha:.0%} (bootstrap i.i.d.)",
+        label=f"IC {1 - alpha:.0%}",
     )
     # ax_r2.set_title(r"Retornos al cuadrado $x_t^2$")
     ax_r2.set_xlabel("Lag $k$ (días)")
@@ -626,13 +614,17 @@ if __name__ == "__main__":
         plt.close(fig_sq)
 
     print(
-        f"Lags 1-{max_lags} fuera de la banda bootstrap — retornos  : "
+        f"Lags 1-{max_lags} fuera de la banda — retornos  : "
         f"{np.sum(np.abs(acf_r[1:]) > ci_r[1:])}/{max_lags}"
     )
     print(
-        f"Lags 1-{max_lags} fuera de la banda bootstrap — retornos² : "
+        f"Lags 1-{max_lags} fuera de la banda — retornos² : "
         f"{np.sum(np.abs(acf_sq[1:]) > ci_sq[1:])}/{max_lags}"
     )
+    print("Ljung-Box (retornos) p-valores:")
+    print(ljung_box_pvalues(log_ret.values, CONFIG["lb_lags"]).to_string())
+    print("McLeod-Li (retornos²) p-valores:")
+    print(ljung_box_pvalues(log_ret.values**2, CONFIG["lb_lags"]).to_string())
 
 # %% [markdown]
 # ## Celda 7 — histograma de los retornos al cuadrado
@@ -800,9 +792,10 @@ if __name__ == "__main__":
     fig, (ax_vol, ax_price) = plt.subplots(
         2,
         1,
-        figsize=CONFIG["figsize_vol"],
+        figsize=(9,5),
         sharex=True,
         gridspec_kw={"height_ratios": [1, 2]},
+        dpi=300
     )
 
     ax_vol.plot(
@@ -841,7 +834,7 @@ if __name__ == "__main__":
         interpolate=True,
         label=rf"$\sigma_t$ > percentil {CONFIG['vol_quantile']:.0%}",
     )
-    ax_price.set_ylabel("Precio (USD, escala log)")
+    ax_price.set_ylabel("Precio (USD, log)")
     ax_price.set_xlabel("Fecha")
     ax_price.legend(loc="upper left")
     ax_price.xaxis.set_major_locator(mdates.YearLocator(base=2))

@@ -88,6 +88,7 @@ plot_scatter_grid(
     momentum_by_lag, target_by_lag,
     feature_label=r"$M_t$, ", target_label=r"$F_t$, ",
     feature_format=lambda k: rf"$\tau_p=${k/252:.2f} años", target_format=lambda k: rf"$\tau_f=${k/252:.2f} años",
+    alpha = 0.2
 )
 
 # %%
@@ -101,9 +102,9 @@ future_return = forward_return(price, ret_k)
 pearson_corr = plot_feature_boxplots(
     avg_momentum, future_return,
     n_quantiles= 10,
-    x_axis = "bins",
+    x_axis = "quantiles",
     feature_name=r"$M_t$", target_name="$F_t$",
-    feature_window=mom_k, target_window=ret_k, show_cumulative = True
+    feature_window=mom_k, target_window=ret_k, show_cumulative = False
 )
 print(f"Pearson Correlation: {pearson_corr:.3f}")
 

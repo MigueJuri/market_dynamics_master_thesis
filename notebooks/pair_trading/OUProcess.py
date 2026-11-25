@@ -128,7 +128,7 @@ ax1.legend()
 ax1.grid(True, alpha=0.3)
 
 ax2.plot(time_axis, spread, label="Proceso OU", color="teal")
-ax2.axhline(mu_ou, linestyle="--", label=r"$\mu$", color="black", alpha=0.5)
+ax2.axhline(mu_ou, linestyle="--", label=r"$\mu_{\mathrm{OU}}$", color="black", alpha=0.5)
 ax2.set_xlabel("Tiempo")
 ax2.set_ylabel("Spread")
 ax2.legend()
