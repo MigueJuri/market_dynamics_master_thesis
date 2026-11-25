@@ -69,6 +69,12 @@ from thesis.market_data import load_single_price
 from thesis.plotting import plot_feature_boxplots
 from thesis.timeseries import log_returns
 
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
+
+
 # %%
 # ## Carga de datos: precios de SPY y PER mensual del S&P 500
 #
@@ -257,7 +263,7 @@ STYLES = {
     "PER (lag 1 mes)": {"color": "C5", "ls": ":"},
 }
 
-fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.0), sharex=True, constrained_layout=True)
+fig, axes = plt.subplots(1, 2, figsize=(W, 0.7 * W), sharex=True)
 for name, style in STYLES.items():
     sub = corr_table[corr_table["variante"] == name].sort_values("tau_f")
     for ax, method in zip(axes, ["pearson", "spearman"]):
@@ -275,9 +281,10 @@ for ax, ylabel in zip(axes, ["Correlación de Pearson", "Correlación de Spearma
     ticks = [t for t in TAU_F if t > 42]
     ax.set_xticks([t / TRADING_DAYS for t in ticks])
     ax.set_xticklabels([f"{t / TRADING_DAYS:.2f}".rstrip("0").rstrip(".") for t in ticks])
-    ax.legend(fontsize=7, ncol=2)
-axes[0].set_title("PER → retorno futuro: Pearson")
-axes[1].set_title("PER → retorno futuro: Spearman")
+axes[0].set_title(r"PER $\to$ retorno futuro: Pearson")
+axes[1].set_title(r"PER $\to$ retorno futuro: Spearman")
+# Leyenda común bajo los paneles: dentro de cada panel no cabe a 12 pt.
+fig.legend(*axes[0].get_legend_handles_labels(), loc="outside lower center", ncol=2)
 plt.show()
 
 # %%
@@ -324,12 +331,12 @@ def plot_pe_scatter_grid(
     fwd_by_tau: dict[int, pd.Series],
     taus: list[int],
     ncols: int = 3,
-    figsize: tuple[float, float] = (11.0, 7.0),
+    figsize: tuple[float, float] | None = None,
 ) -> None:
     """Scatter PER (eje X) × retorno futuro (eje Y) coloreado por fecha."""
     nrows = int(np.ceil(len(taus) / ncols))
     fig, axes = plt.subplots(
-        nrows, ncols, figsize=figsize, constrained_layout=True, squeeze=False,
+        nrows, ncols, figsize=figsize or (W, 0.65 * W), squeeze=False,
     )
     flat = axes.ravel()
 

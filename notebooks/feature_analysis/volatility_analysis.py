@@ -49,6 +49,12 @@ from thesis.correlation import (
 )
 from thesis.timeseries import log_returns
 
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
+
+
 # %%
 # ## Carga de datos y construcción de la característica
 price = load_single_price(TICKER, START, END, DATA_DIR)

@@ -63,6 +63,12 @@ from thesis.correlation import (
 from thesis.features import future_distance_to_moving_average
 from thesis.timeseries import apply_window, log_returns, rolling_forward_window
 
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
+
+
 # %%
 # ## Parámetro del análisis
 #

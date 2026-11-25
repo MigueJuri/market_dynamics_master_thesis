@@ -49,6 +49,12 @@ from thesis.correlation import (
 )
 from thesis.timeseries import log_returns, simple_returns
 
+#: Estilo de la tesis (155 mm, 12 pt, usetex); re-ejecutar tras editarlo.
+STYLE = _ROOT / "styles" / "thesis.mplstyle"
+plt.style.use(STYLE)
+W = plt.rcParams["figure.figsize"][0]  # \textwidth en pulgadas
+
+
 # %%
 # ## Carga de datos y retornos
 price = load_single_price(TICKER, START, END, DATA_DIR)
@@ -146,7 +152,7 @@ point, median, ci_low, ci_high = bootstrap_momentum_forward_correlation(
     log_ret, half_windows, n_bootstrap=5000, seed=SEED, alpha=0.50, 
 )
 
-fig, ax = plt.subplots(figsize=(7.0, 3.5))
+fig, ax = plt.subplots(figsize=(W, 0.5 * W))
 ax.plot(tau_years, point, color="tab:blue", label="Observado")
 ax.plot(tau_years, median, color="tab:orange", ls="--", label="Mediana bootstrap")
 ax.fill_between(
@@ -160,7 +166,6 @@ ax.set_ylabel("Correlación de Pearson")
 #     "Momentum–retorno futuro: correlación en $\\tau$ con banda nula i.i.d."
 # )
 ax.legend()
-plt.tight_layout()
 plt.show()
 
  # %%
