@@ -280,6 +280,10 @@ for rank, (t1, t2, val) in enumerate(top_20_pairs, 1):
 # alta pueden tener un spread no estacionario.
 SIGNIFICANCIO_ADF = 0.05
 
+#: Inicio de la ventana del ADF: el mismo 2006-2026 que el panel y que
+#: ``Spread.py``.  Con ``START`` (1993) el ADF usaría historia previa.
+START_ADF = "2006-01-01"
+
 #: Un ADF sobre menos de un año de sesiones no es interpretable.
 MIN_SESIONES_ADF = 252
 
@@ -300,7 +304,7 @@ def adf_para_par(ticker_a, ticker_b):
     cuánta evidencia respalda cada estadístico.
     """
     try:
-        log_precios = load_log_prices([ticker_a, ticker_b], START, END, DATA_DIR)
+        log_precios = load_log_prices([ticker_a, ticker_b], START_ADF, END, DATA_DIR)
     except ValueError:
         return np.nan, np.nan, 0
 

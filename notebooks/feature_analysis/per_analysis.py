@@ -171,7 +171,7 @@ print(f"pe_daily_lag1m    : {int(pe_daily_lag1m.notna().sum()):,} valores "
 # queda dominado por el ruido (riesgo 2 del plan).
 
 MIN_HORIZON_SESSIONS = 21
-TAU_F = [42, 63, 126, 252, 504, 756]  # sesiones: 2, 3, 6, 12, 24 y 36 meses
+TAU_F = np.linspace(42, 4*252, 15).astype(int)  # sesiones: 2, 3, 6, 12, 24 y 36 meses
 assert all(tau > MIN_HORIZON_SESSIONS for tau in TAU_F), "τ_f debe superar 21 sesiones"
 
 

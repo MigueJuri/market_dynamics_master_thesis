@@ -121,24 +121,26 @@ CONFIG: dict[str, Any] = {
         # Vacío = no se marca ningún pico.
         "selected_peaks": ["P1", "P2", "P3", "P4"],
     },
-    # Proyección futura (Etapa 3b): escala semilog con extrapolación.
+    # Proyección futura (Etapa 6): escala semilog con extrapolación.
     "prediction": {
-        # Ventana hacia atrás (últimos 6 años) mostrada en la figura.
-        "lookback_years": 6,
+        # Fecha de inicio de la ventana histórica mostrada en la figura.
+        "start_date": "2018-01-01",
         # Horizonte de la proyección (~2 años hacia delante).
         "horizon_days": 730,
-        # Días desde el génesis para consultar los valores de los cuantiles.
-        # None = no imprimir una consulta puntual.
-        "query_days_since_genesis": 7318,
+        # Días desde el génesis para imprimir los valores de los cuantiles
+        # en la Etapa 2. None = no imprimir (la predicción de la Etapa 6 se
+        # calcula sola a partir de los picos).
+        "query_days_since_genesis": None,
         # Cuantiles que delimitan los sectores del gráfico arcoíris (de abajo
         # arriba); cada par consecutivo define un sector.
         "rainbow_quantiles": (0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95),
-        # Predicción del próximo máximo, tal como figura al final del
-        # capítulo de Bitcoin (sección "Predicción del próximo máximo"):
-        # fecha (día ``query_days_since_genesis``) y rango de precio en USD.
-        # Mínimo: piso Q10 en esa fecha; máximo: 2.8 veces el último pico.
-        "target_min_usd": 163_000,
-        "target_max_usd": 271_000,
+    },
+    # Regresión sobre la tendencia reciente (Etapa 7): mismas regresiones
+    # cuantílicas, ajustadas sólo con los datos desde esta fecha.
+    "recent_fit": {
+        "start_date": "2018-01-01",
+        # Cuantiles cuyas pendientes se comparan con las del ajuste completo.
+        "quantiles": (0.10, 0.50, 0.90),
     },
     # Figura
     "show_figure": True,
@@ -342,7 +344,7 @@ if __name__ == "__main__":
     bottom_dates = [pd.Timestamp(str(d).strip()) for d in CONFIG["bottoms"]]
 
     # --- Figura 1: evolución temporal en escala lineal ---
-    linear_fig, ax0 = plt.subplots(figsize=(W, 0.5 * W))
+    linear_fig, ax0 = plt.subplots()
     ax0.plot(
         reg_df.index,
         reg_df["close"],
@@ -358,7 +360,7 @@ if __name__ == "__main__":
     ax0.grid(True, ls="--", alpha=0.4)
 
     # --- Figura 2: eje temporal logarítmico con anotaciones ---
-    temporal_fig, ax1 = plt.subplots(figsize=(W, 0.5 * W))
+    temporal_fig, ax1 = plt.subplots()
     ax1.plot(
         reg_df.index,
         reg_df["close"],
@@ -415,7 +417,7 @@ if __name__ == "__main__":
     ax1.grid(True, which="both", ls="--", alpha=0.4)
 
     # --- Figura 3: power-law log-log (días desde la génesis) ---
-    power_law_fig, ax2 = plt.subplots(figsize=(W, 0.5 * W))
+    power_law_fig, ax2 = plt.subplots()
     ax2.plot(
         reg_df["days"],
         reg_df["close"],
@@ -446,145 +448,6 @@ if __name__ == "__main__":
     linear_fig.savefig(FIG_DIR / "btc_price_linear.pdf")
     temporal_fig.savefig(FIG_DIR / "btc_quantreg_temporal_log.pdf")
     power_law_fig.savefig(FIG_DIR / "btc_quantreg_power_law.pdf")
-
-    if CONFIG["show_figure"]:
-        plt.show()
-    else:
-        plt.close("all")
-
-# %% [markdown]
-# ### Etapa 3b: proyección a futuro (gráfico arcoíris)
-#
-# Figura de los últimos `CONFIG["prediction"]["lookback_years"]` años de BTC
-# en escala **semilog** (eje Y logarítmico, eje X lineal en fechas) con un
-# **gráfico arcoíris**: los sectores entre rectas consecutivas de la
-# regresión cuantílica power-law (`log10(price) = α + β·log10(days)`,
-# cuantiles `CONFIG["prediction"]["rainbow_quantiles"]`) se pintan con una
-# escala de color progresiva, por debajo del precio y semitransparentes, de
-# modo que se lee en qué sector está el precio en cada momento.
-#
-# Los sectores se extienden hasta pasada la fecha de la predicción del
-# capítulo (día `query_days_since_genesis`, enero de 2029), que se marca con
-# el rango sugerido en el texto (`target_min_usd`–`target_max_usd`).  Una
-# línea vertical separa los datos observados de la extrapolación, que es
-# **descriptiva**: **no es una señal de trading** ni un pronóstico riguroso.
-#
-# Depende de `reg_df` (Etapa 2); puede re-ejecutarse **sólo** esta celda.
-
-# %%
-if __name__ == "__main__":
-    pred_cfg = CONFIG["prediction"]
-    lookback_years = int(pred_cfg["lookback_years"])
-    rainbow_q = tuple(sorted(pred_cfg["rainbow_quantiles"]))
-
-    # --- Fechas y días de corte ---
-    last_date = reg_df.index.max()
-    last_days = int(reg_df["days"].max())
-    cutoff = last_date - pd.DateOffset(years=lookback_years)
-    target_date = pd.Timestamp(BTC_GENESIS) + pd.Timedelta(
-        days=int(pred_cfg["query_days_since_genesis"])
-    )
-
-    # Eje temporal completo (histórico + futuro) en días enteros desde el
-    # génesis: el futuro llega al horizonte configurado o, si es mayor, hasta
-    # medio año después de la fecha de la predicción.
-    end_days = max(
-        last_days + int(pred_cfg["horizon_days"]),
-        int(pred_cfg["query_days_since_genesis"]) + 180,
-    )
-    start_days = int((cutoff - pd.Timestamp(BTC_GENESIS)).days)
-    grid_days = np.arange(start_days, end_days + 1)  # paso entero
-    grid_dates = pd.Timestamp(BTC_GENESIS) + pd.to_timedelta(grid_days, unit="D")
-
-    # --- Ventana histórica (in-sample) ---
-    hist = reg_df[reg_df.index >= cutoff]
-
-    # --- Rectas de los cuantiles del arcoíris, evaluadas en todo el eje ---
-    # El ajuste es in-sample sobre toda la historia (figura descriptiva).
-    rainbow_fit = fit_power_law_quantiles(reg_df, quantiles=rainbow_q)
-    band_prices = {
-        q: 10
-        ** (
-            res["params"]["Intercept"] + res["params"]["log_days"] * np.log10(grid_days)
-        )
-        for q, res in rainbow_fit.items()
-    }
-
-    # --- Figura 4: gráfico arcoíris con la predicción del capítulo ---
-    projection_fig, ax5 = plt.subplots(figsize=(W, 0.62 * W))
-    cmap = plt.get_cmap("turbo")
-    n_bands = len(rainbow_q) - 1
-    band_colors = cmap(np.linspace(0.08, 0.92, n_bands))
-    for k, (q_lo, q_hi) in enumerate(itertools.pairwise(rainbow_q)):
-        ax5.fill_between(
-            grid_dates,
-            band_prices[q_lo],
-            band_prices[q_hi],
-            color=band_colors[k],
-            alpha=0.35,
-            linewidth=0,
-            zorder=1,
-            label=rf"$Q_{{{int(q_lo * 100)}}}$--$Q_{{{int(q_hi * 100)}}}$",
-        )
-
-    # Precio por encima de los sectores.
-    ax5.plot(
-        hist.index,
-        hist["close"],
-        label="Cierre de BTC",
-        color="black",
-        linewidth=1,
-        zorder=3,
-    )
-
-    # Separador entre datos observados y proyección.
-    ax5.axvline(last_date, color="gray", linestyle=":", linewidth=1.2, zorder=2)
-
-    # Predicción del próximo máximo (texto del capítulo): rango de precio.
-    t_min = float(pred_cfg["target_min_usd"])
-    t_max = float(pred_cfg["target_max_usd"])
-    ax5.vlines(target_date, t_min, t_max, color="black", linewidth=1.5, zorder=4)
-    ax5.scatter(
-        [target_date, target_date],
-        [t_min, t_max],
-        marker="_",
-        s=120,
-        color="black",
-        linewidths=1.5,
-        zorder=4,
-        label=f"Predicción ({target_date:%m-%Y})",
-    )
-    for value in (t_min, t_max):
-        ax5.annotate(
-            rf"${value / 1e3:.0f}$ mil",
-            xy=(target_date, value),
-            xytext=(-6, 0),
-            textcoords="offset points",
-            ha="right",
-            va="center",
-            zorder=5,
-        )
-
-    ax5.set_yscale("log")
-    ax5.set_xlim(cutoff, grid_dates[-1])
-    ax5.set_ylim(
-        band_prices[rainbow_q[0]][0] * 0.8, band_prices[rainbow_q[-1]][-1] * 1.2
-    )
-    ax5.set_xlabel("Fecha")
-    ax5.set_ylabel("Precio (USD)")
-    # Sectores de arriba abajo, en el mismo orden que en el gráfico.
-    handles, labels = ax5.get_legend_handles_labels()
-    order = list(range(n_bands))[::-1] + list(range(n_bands, len(handles)))
-    with plt.rc_context({"legend.fontsize": "small"}):
-        ax5.legend(
-            [handles[i] for i in order],
-            [labels[i] for i in order],
-            loc="upper left",
-            ncols=2,
-            framealpha=0.9,
-        )
-    ax5.grid(True, which="both", ls="--", alpha=0.4)
-    projection_fig.savefig(FIG_DIR / "btc_quantreg_projection.pdf")
 
     if CONFIG["show_figure"]:
         plt.show()
@@ -685,7 +548,9 @@ if __name__ == "__main__":
         )
 
     # --- Figura 4: precio log-log con banda q10 y precio suavizado con sus picos ---
-    cycle_fig, (ax3, ax4) = plt.subplots(2, 1, figsize=(W, 0.7 * W))
+    cycle_fig, (ax3, ax4) = plt.subplots(
+        2, 1, figsize=(W, 0.8 * W), gridspec_kw={"height_ratios": [1, 1.5]}
+    )
 
     # Panel A: precio en escala log-log con la banda q10 destacada.
     ax3.plot(
@@ -729,16 +594,6 @@ if __name__ == "__main__":
         alpha=0.9,
         linewidth=1.6,
     )
-    # El marker se ancla en el valor real de la curva suavizada.
-    ax4.scatter(
-        peak_sel.index,
-        peak_sel["value"],
-        s=70,
-        color="green",
-        marker="^",
-        label="Máximos",
-        zorder=5,
-    )
     for i, halving_date in enumerate(halving_dates):
         ax4.axvline(
             halving_date,
@@ -751,7 +606,7 @@ if __name__ == "__main__":
     ax4.axhline(0.0, color="gray", linestyle=":", linewidth=1)
 
     # # Etiquetas de los picos, en el valor real de la curva suavizada.
-    
+
     # for stamp, value in peak_sel["value"].items():
     #     ax4.annotate(
     #         stamp.strftime("%Y-%m"),
@@ -779,6 +634,210 @@ if __name__ == "__main__":
     else:
         plt.close("all")
 
+
+# %% [markdown]
+# ### Etapa 6: proyección a futuro (gráfico arcoíris)
+#
+# Figura de BTC desde `CONFIG["prediction"]["start_date"]`
+# en escala **semilog** (eje Y logarítmico, eje X lineal en fechas) con un
+# **gráfico arcoíris**: los sectores entre rectas consecutivas de la
+# regresión cuantílica power-law (`log10(price) = α + β·log10(days)`,
+# cuantiles `CONFIG["prediction"]["rainbow_quantiles"]`) se pintan con una
+# escala de color progresiva, por debajo del precio y semitransparentes, de
+# modo que se lee en qué sector está el precio en cada momento.
+#
+# Los sectores se extienden hasta pasada la fecha de la predicción del
+# capítulo, que se marca con el rango de precio previsto.  Todo se calcula a
+# partir de los picos destacados en la Etapa 5: la fecha es el último pico más
+# el promedio de las tres últimas distancias entre picos; el extremo inferior
+# es el valor de `Q10` (piso) en esa fecha; el superior, el último pico
+# multiplicado por su aumento respecto del pico anterior (el aumento de
+# pico a pico se desacelera, así que el próximo sería menor).  Una
+# línea vertical separa los datos observados de la extrapolación, que es
+# **descriptiva**: **no es una señal de trading** ni un pronóstico riguroso.
+#
+# Depende de `reg_df` (Etapa 2) y `peak_sel` (Etapa 5); puede re-ejecutarse **sólo** esta celda.
+
+# %%
+if __name__ == "__main__":
+    pred_cfg = CONFIG["prediction"]
+    rainbow_q = tuple(sorted(pred_cfg["rainbow_quantiles"]))
+
+    # --- Fechas y días de corte ---
+    last_date = reg_df.index.max()
+    last_days = int(reg_df["days"].max())
+    cutoff = pd.Timestamp(pred_cfg["start_date"])
+    # --- Predicción del próximo máximo, calculada a partir de los picos ---
+    peak_dates_sel = peak_sel.index
+    peak_closes = peak_sel["close"].to_numpy(dtype=float)
+    mean_gap = float(np.mean(np.diff(peak_dates_sel[-4:]).astype("timedelta64[D]").astype(int)))
+    target_date = peak_dates_sel[-1] + pd.Timedelta(days=round(mean_gap))
+    target_days = int((target_date - pd.Timestamp(BTC_GENESIS)).days)
+    last_ratio = peak_closes[-1] / peak_closes[-2]
+    p10 = fit[0.10]["params"]
+    t_min = float(10 ** (p10["Intercept"] + p10["log_days"] * np.log10(target_days)))
+    t_max = float(last_ratio * peak_closes[-1])
+    print(
+        f"\nPredicción del próximo máximo: {target_date:%Y-%m-%d} "
+        f"(día {target_days}; distancia media {mean_gap:.0f} días)\n"
+        f"  mínimo (Q10 en esa fecha): {t_min:,.0f} USD\n"
+        f"  máximo (último pico x{last_ratio:.2f}): {t_max:,.0f} USD"
+    )
+
+    # Eje temporal completo (histórico + futuro) en días enteros desde el
+    # génesis: el futuro llega al horizonte configurado o, si es mayor, hasta
+    # medio año después de la fecha de la predicción.
+    end_days = max(
+        last_days + int(pred_cfg["horizon_days"]),
+        target_days + 180,
+    )
+    start_days = int((cutoff - pd.Timestamp(BTC_GENESIS)).days)
+    grid_days = np.arange(start_days, end_days + 1)  # paso entero
+    grid_dates = pd.Timestamp(BTC_GENESIS) + pd.to_timedelta(grid_days, unit="D")
+
+    # --- Ventana histórica (in-sample) ---
+    hist = reg_df[reg_df.index >= cutoff]
+
+    # --- Rectas de los cuantiles del arcoíris, evaluadas en todo el eje ---
+    # El ajuste es in-sample sobre toda la historia (figura descriptiva).
+    rainbow_fit = fit_power_law_quantiles(reg_df, quantiles=rainbow_q)
+    band_prices = {
+        q: 10
+        ** (
+            res["params"]["Intercept"] + res["params"]["log_days"] * np.log10(grid_days)
+        )
+        for q, res in rainbow_fit.items()
+    }
+
+    # --- Figura 4: gráfico arcoíris con la predicción del capítulo ---
+    projection_fig, ax5 = plt.subplots(figsize=(W, 0.62 * W))
+    cmap = plt.get_cmap("turbo")
+    n_bands = len(rainbow_q) - 1
+    band_colors = cmap(np.linspace(0.08, 0.92, n_bands))
+    for k, (q_lo, q_hi) in enumerate(itertools.pairwise(rainbow_q)):
+        ax5.fill_between(
+            grid_dates,
+            band_prices[q_lo],
+            band_prices[q_hi],
+            color=band_colors[k],
+            alpha=0.35,
+            linewidth=0,
+            zorder=1,
+            label=rf"$Q_{{{int(q_lo * 100)}}}$--$Q_{{{int(q_hi * 100)}}}$",
+        )
+
+    # Precio por encima de los sectores.
+    ax5.plot(
+        hist.index,
+        hist["close"],
+        label="BTC",
+        color="black",
+        linewidth=1,
+        zorder=3,
+    )
+
+    # Separador entre datos observados y proyección.
+    ax5.axvline(last_date, color="gray", linestyle=":", linewidth=1.2, zorder=2)
+
+    # Predicción del próximo máximo (texto del capítulo): rango de precio.
+    ax5.vlines(target_date, t_min, t_max, color="black", linewidth=1.5, zorder=4)
+    ax5.scatter(
+        [target_date, target_date],
+        [t_min, t_max],
+        marker="_",
+        s=120,
+        color="black",
+        linewidths=1.5,
+        zorder=4,
+        label=f"Predicción ({target_date:%m-%Y})",
+    )
+    for value in (t_min, t_max):
+        ax5.annotate(
+            rf"${value / 1e3:.0f}$ mil",
+            xy=(target_date, value),
+            xytext=(-6, 0),
+            textcoords="offset points",
+            ha="right",
+            va="center",
+            zorder=5,
+        )
+
+    ax5.set_yscale("log")
+    ax5.set_xlim(cutoff, grid_dates[-1])
+    ax5.set_ylim(
+        band_prices[rainbow_q[0]][0] * 0.8, band_prices[rainbow_q[-1]][-1] * 1.2
+    )
+    # Una marca por año (enero), con etiqueta del año.
+    year_ticks = pd.date_range(cutoff, grid_dates[-1], freq="YS")
+    ax5.set_xticks(year_ticks)
+    ax5.set_xticklabels([f"{d.year}" for d in year_ticks])
+    ax5.set_xlabel("Fecha")
+    ax5.set_ylabel("Precio (USD)")
+    # Sectores de arriba abajo, en el mismo orden que en el gráfico.
+    handles, labels = ax5.get_legend_handles_labels()
+    order = list(range(n_bands))[::-1] + list(range(n_bands, len(handles)))
+    with plt.rc_context({"legend.fontsize": "small"}):
+        ax5.legend(
+            [handles[i] for i in order],
+            [labels[i] for i in order],
+            loc="upper left",
+            ncols=2,
+            framealpha=0.9,
+        )
+    ax5.grid(True, which="both", ls="--", alpha=0.4)
+    projection_fig.savefig(FIG_DIR / "btc_quantreg_projection.pdf")
+
+    if CONFIG["show_figure"]:
+        plt.show()
+    else:
+        plt.close("all")
+
+# %% [markdown]
+# ### Etapa 7: pendientes desde otra fecha y piso alternativo
+#
+# Repite la regresión cuantílica `log10(price) ~ log10(days)` usando sólo los
+# datos desde `CONFIG["recent_fit"]["start_date"]` (los días siguen contados
+# desde el génesis, así que los parámetros son comparables con los del ajuste
+# completo).  Se imprimen las pendientes de ambos ajustes y el piso (`Q10`
+# reciente) en la fecha de la predicción de la Etapa 6, junto al piso del
+# ajuste completo.  Si la pendiente reciente es menor, el piso alternativo
+# queda por debajo del de la Etapa 6.  Es descriptivo, como el resto del
+# cuaderno: con pocos años de datos el ajuste es poco robusto.
+#
+# Depende de `reg_df`, `fit` (Etapa 2) y `target_days`, `target_date`, `t_min`
+# (Etapa 6).
+
+# %%
+if __name__ == "__main__":
+    recent_cfg = CONFIG["recent_fit"]
+    recent_start = pd.Timestamp(recent_cfg["start_date"])
+    recent_df = reg_df[reg_df.index >= recent_start]
+    recent_fit = fit_power_law_quantiles(
+        recent_df, quantiles=tuple(recent_cfg["quantiles"])
+    )
+
+    print(
+        f"\nPendientes desde {recent_start:%Y-%m-%d} "
+        f"({len(recent_df)} días) frente al ajuste completo:"
+    )
+    for q, res in recent_fit.items():
+        beta_rec = float(res["params"]["log_days"])
+        beta_full = float(fit[q]["params"]["log_days"]) if q in fit else float("nan")
+        print(
+            f"q={q:.2f} | Beta reciente: {beta_rec:.4f} | "
+            f"Beta completa: {beta_full:.4f}"
+        )
+
+    p10_rec = recent_fit[0.10]["params"]
+    t_min_recent = float(
+        10 ** (p10_rec["Intercept"] + p10_rec["log_days"] * np.log10(target_days))
+    )
+    print(
+        f"\nPiso alternativo para {target_date:%Y-%m-%d} (día {target_days}):\n"
+        f"  Q10 ajuste completo : {t_min:,.0f} USD\n"
+        f"  Q10 desde {recent_start:%Y-%m-%d}: {t_min_recent:,.0f} USD "
+        f"({t_min_recent / t_min:.2f} veces el piso completo)"
+    )
 
 # %%
 # ## Métricas del experimento
@@ -816,6 +875,18 @@ if __name__ == "__main__":
             {"model": f"resid_ma ({_label})", "value": float(_row["value"])}
         )
         _btc_rows.append({"model": f"close ({_label})", "value": float(_row["close"])})
+
+    for _q, _res in recent_fit.items():
+        _btc_rows.append(
+            {
+                "model": f"beta desde {recent_start:%Y} (q={_q:.2f})",
+                "value": float(_res["params"]["log_days"]),
+            }
+        )
+    _btc_rows.append({"model": "piso Q10 completo (USD)", "value": t_min})
+    _btc_rows.append(
+        {"model": f"piso Q10 desde {recent_start:%Y} (USD)", "value": t_min_recent}
+    )
 
     metrics_df = pd.DataFrame(_btc_rows)
 

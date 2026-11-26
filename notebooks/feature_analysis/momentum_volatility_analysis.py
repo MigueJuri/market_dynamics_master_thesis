@@ -177,56 +177,6 @@ fig = plot_correlation_matrix(
 fig.savefig(FIG_DIR / "momentum_volatility_spy_corr_matrix.pdf")
 
 # %%
-# ## Análisis cross-sectional por sector
-sector_tickers = {
-    "Tecnología": ["XLK"],
-    "Comunicaciones": ["XLC"],
-    "Financieros": ["XLF"],
-    "Consumo Discrecional": ["XLY"],
-    "Salud": ["XLV"],
-    "Industriales": ["XLI"],
-    "SPY": ["SPY"],
-}
-sector_colors = {
-    "Tecnología": "tab:blue",
-    "Financieros": "tab:green",
-    "Industriales": "tab:orange",
-    "Comunicaciones": "tab:cyan",
-    "Salud": "tab:red",
-    "Consumo Discrecional": "tab:purple",
-    "SPY": "black",
-}
-
-all_tickers = [t for tickers in sector_tickers.values() for t in tickers]
-raw = load_multiple_prices(all_tickers)
-log_ret_df = np.log(raw / raw.shift(1)).dropna(how="all")
-
-trading_days_per_year = 252
-max_lag = int(1.5 * trading_days_per_year)
-step = max_lag // 150
-lags = np.arange(step, max_lag + step, step)
-
-# ``feature_df`` se desplaza para excluir el retorno del día ``t``;
-# ``target_df`` se deja sin desplazar porque ``target_transform``
-# maneja la parte futura internamente.
-cross_corr, avg_corr = compute_cross_sectional_correlation(
-    log_ret_df, lags,
-    feature_df=log_ret_df.shift(1),
-    feature_op=scaled_return_op,
-    target_transform=future_return_over_past_volatility,
-    target_window_type="fixed",
-    correlation="pearson", min_valid_n=50,
-    overlap=True,
-)
-fig = plot_cross_sectional_curves(
-    cross_corr, avg_corr,
-    asset_groups=sector_tickers, group_colors=sector_colors,
-    avg_label="Promedio de sectores",
-    tau_to_yf=lambda L: 2 * L / TRADING_DAYS,
-)
-fig.savefig(FIG_DIR / "momentum_volatility_spy_cross_sectional_corr.pdf")
-
-# %%
 # ## Configuración del experimento
 #
 # ``CONFIG`` reúne los parámetros que definen el análisis.

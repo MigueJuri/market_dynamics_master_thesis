@@ -92,7 +92,7 @@ slow_log = log_close.ewm(span=SLOW_SPAN, adjust=False).mean()
 fast_price = np.exp(fast_log)
 slow_price = np.exp(slow_log)
 
-fig, ax = plt.subplots(figsize=(W, 0.6 * W))
+fig, ax = plt.subplots()
 ax.plot(close.index, close, label='Precio', color='steelblue', lw=0.8, alpha=0.7)
 ax.plot(fast_price.index, fast_price, label=f'EWMA corta ({FAST_SPAN})', color='orange', lw=1)
 ax.plot(slow_price.index, slow_price, label=f'EWMA larga ({SLOW_SPAN})', color='green', lw=1.2, alpha=0.9)
@@ -312,7 +312,7 @@ print(f"{'Max drawdown':<28}{max_dd_strat:>14.2%}{max_dd_bh:>14.2%}")
 print(f"{'Number of position changes':<28}{int(n_trades):>14d}{'-':>14s}")
 
 # ── Annualized equity curves plot ─────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(W, 0.6 * W))
+fig, ax = plt.subplots()
 ax.plot(cum_strat.index, cum_strat,
         label=rf'Estrategia (SR: {sharpe_strat:.2f}, CAGR: {100 * ann_strat:.2f}\%)',
         lw=1.2, color='darkorange')

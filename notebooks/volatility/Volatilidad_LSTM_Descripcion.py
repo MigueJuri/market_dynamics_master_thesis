@@ -72,12 +72,11 @@ CONFIG: dict[str, Any] = {
     # Divisiones temporales: deben coincidir con las de ``Volatilidad_LSTM.py``.
     "train_end": "2017-01-01",
     "val_end": "2022-01-01",
-    # Ventana (en sesiones) de la volatilidad realizada histórica.
+    # Span (en sesiones) de la media exponencial de la volatilidad realizada histórica.
     "vol_window": 63,
     # Horizonte (en sesiones) de la volatilidad hacia adelante: coincide con
     # ``forecast_horizon`` de ``Volatilidad_LSTM.py``.
     "forward_horizon": 5,
-    "smoothing_window": 15,  # Ventana de suavizado de la volatilidad forward
     # Autocorrelación
     "acf_lags": 60,
     "acf_alpha": 0.05,
@@ -120,9 +119,13 @@ if __name__ == "__main__":
     log_ret = log_returns(raw["Close"])
     sq_ret = log_ret**2
 
+    # Media exponencial (span = ``vol_window``) de los retornos cuadrados,
+    # con media nula como en la definición de la tesis; causal, sin look-ahead.
     realized_vol = (
-        log_ret.rolling(CONFIG["vol_window"], min_periods=CONFIG["vol_window"]).std()
-        * np.sqrt(TRADING_DAYS)
+        np.sqrt(
+            sq_ret.ewm(span=CONFIG["vol_window"], min_periods=CONFIG["vol_window"]).mean()
+            * TRADING_DAYS
+        )
         * 100.0
     )
 
@@ -232,60 +235,40 @@ if __name__ == "__main__":
         gridspec_kw={"height_ratios": [1, 1], "hspace": 0.2}
     )
 
-    ax_top.plot(log_price.index, log_price.to_numpy(), color="black", lw=0.7)
-    ax_top.set_ylabel(r"ln($S_t$)")
-    ax_top.text(
-        0.02,
-        0.85,
-        "a",
-        transform=ax_top.transAxes,
-        ha="left",
-        va="top",
+    # Cada partición se dibuja con su propio color; los nombres van en la leyenda.
+    inicio = log_price.index[0]
+    particiones = (
+        ("Entrenamiento", "C0", log_price.index < train_end),
+        ("Validación", "C1", (log_price.index >= train_end) & (log_price.index < val_end)),
+        ("Prueba", "C2", log_price.index >= val_end),
     )
-    ax_top.tick_params(labelbottom=False)
+    for etiqueta, color, mask in particiones:
+        ax_top.plot(
+            log_price.index[mask], log_price.to_numpy()[mask], color=color, lw=0.9, label=etiqueta
+        )
+        idx_v = realized_vol.index
+        mask_v = (
+            (idx_v < train_end)
+            if color == "C0"
+            else ((idx_v >= train_end) & (idx_v < val_end))
+            if color == "C1"
+            else (idx_v >= val_end)
+        )
+        ax_bottom.plot(idx_v[mask_v], realized_vol.to_numpy()[mask_v], color=color, lw=0.9)
 
-    ax_bottom.plot(
-        realized_vol.index,
-        realized_vol.to_numpy(),
-        color="C0",
-        lw=0.7,
-        label=f"Media Móvil ({CONFIG['vol_window']} días)"
-    )
+    ax_top.set_ylabel(r"ln($S_t$)")
+    ax_top.text(0.02, 0.85, "a", transform=ax_top.transAxes, ha="left", va="top")
+    ax_top.tick_params(labelbottom=False)
+    ax_top.legend(loc="upper left", bbox_to_anchor=(0.08, 1.0))
+
     ax_bottom.set_ylabel(r"$\sigma$ (\% anual)")
     ax_bottom.set_xlabel("Fecha")
-    ax_bottom.text(
-        0.02,
-        0.85,
-        "b",
-        transform=ax_bottom.transAxes,
-        ha="left",
-        va="top",
-    )
-    ax_bottom.legend(loc="upper left")
+    ax_bottom.text(0.02, 0.85, "b", transform=ax_bottom.transAxes, ha="left", va="top")
 
     for ax in (ax_top, ax_bottom):
         ax.axvline(train_end, color="gray", ls="--", lw=1.0)
         ax.axvline(val_end, color="gray", ls="--", lw=1.0)
 
-    # Etiquetas de cada partición, en el panel superior.
-    inicio = log_price.index[0]
-    for izquierda, derecha, etiqueta in (
-        (inicio, train_end, "Entrenamiento"),
-        (train_end, val_end, "Validación"),
-        (val_end, log_price.index[-1], "Test"),
-    ):
-        ax_top.text(
-            izquierda + (derecha - izquierda) / 2,
-            0.99,
-            etiqueta,
-            transform=ax_top.get_xaxis_transform(),
-            ha="center",
-            va="top",
-            color="black",
-        )
-
-    ax_bottom.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-    fig.autofmt_xdate()
     fig.savefig(FIG_DIR / CONFIG["prices_vol_path"])
     plt.show()
 
@@ -312,49 +295,16 @@ if __name__ == "__main__":
 # existe futuro para ellas.
 
 if __name__ == "__main__":
-    # Volatilidad futura promediada a 5 sesiones 
-
-    vol_fwd_prom = np.exp(np.log(fwd_vol_ann).rolling(
-    CONFIG["smoothing_window"],
-    min_periods=CONFIG["smoothing_window"],
-).mean())
-    
-    fig, (ax_top, ax_bottom) = plt.subplots(
-        2,
-        1,
-        figsize=(W, 0.8 * W),
-        sharex=True,
-        sharey=True,
-        gridspec_kw={"height_ratios": [1, 1], "hspace": 0.2},
-    )
-
-    ax_bottom.plot(
-        vol_fwd_prom.index,
-        vol_fwd_prom,
-        color="0.45",
-        lw=1.0,
-        label=f"Futura ({CONFIG['forward_horizon']} días) promediada a {CONFIG['smoothing_window']} días",
-    )
-    ax_bottom.set_ylabel(r"Volatilidad anualizada (\%)")
-    ax_top.tick_params(labelbottom=False)
-    ax_bottom.legend(loc="upper left")
-
-    ax_top.plot(
+    fig, ax = plt.subplots(figsize=(W, 0.5 * W))
+    ax.plot(
         fwd_vol_ann.index,
         fwd_vol_ann.to_numpy(),
         color="C0",
-        lw=1.0,
-        label=f"Futura ({CONFIG['forward_horizon']} días)",
+        lw=0.8,
     )
-    ax_top.set_ylabel(r"Volatilidad anualizada (\%)")
-    ax_top.set_xlabel("Fecha")
+    ax.set_ylabel(r"Volatilidad anualizada (\%)")
+    ax.set_xlabel("Fecha")
 
-    ax_top.set_title("a")
-    ax_bottom.set_title("b")
-    ax_top.legend(loc="upper left")
-
-    ax_bottom.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-    fig.autofmt_xdate()
     fig.savefig(FIG_DIR / CONFIG["forward_vol_path"])
     plt.show()
 

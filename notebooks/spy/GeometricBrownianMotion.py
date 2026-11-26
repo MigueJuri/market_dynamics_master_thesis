@@ -231,8 +231,8 @@ for name, val, lo, hi in zip(names, point, ci[0], ci[1]):
 #
 # Se grafica la densidad de esa distribución en cada instante como un mapa de calor (*fan chart* o
 # río de probabilidad), enmascarando fuera del intervalo central del 95 %, contra la trayectoria
-# realmente observada.  La densidad es **relativa**: cada nivel de precio se normaliza por su
-# máximo a lo largo del tiempo, de modo que el color indica *cuándo* fue plausible cada precio.
+# realmente observada.  La densidad es **relativa**: en cada fecha se normaliza por su máximo, de
+# modo que el color muestra la forma de la distribución (más oscuro = más probable).
 
 # %%
 dt = 1.0 / CONFIG["trading_days"]
@@ -254,6 +254,7 @@ log_grid, density = gbm_density_grid(
     sigma_est,
     t_grid,
     n_bins=CONFIG["n_price_bins"],
+    normalize="time",
 )
 
 # Enmascara fuera de la banda central del 95 % (densidad: n_bins precios x n_t instantes).
@@ -265,7 +266,7 @@ density_masked = ma.masked_where(outside_95, density)
 cmap = mcolors.ListedColormap(plt.cm.Blues(np.linspace(0, 0.8, 256)))
 cmap.set_bad(alpha=0)
 
-fig_fan, ax = plt.subplots(figsize=(W, 0.45 * W))
+fig_fan, ax = plt.subplots()
 x_dates = mdates.date2num(test_price.index.to_numpy())
 mesh = ax.pcolormesh(
     x_dates,
@@ -275,7 +276,7 @@ mesh = ax.pcolormesh(
     shading="gouraud",
     zorder=1,
 )
-fig_fan.colorbar(mesh, ax=ax, label="Densidad de probabilidad relativa")
+fig_fan.colorbar(mesh, ax=ax, label="Densidad relativa al máximo de cada fecha")
 
 ax.plot(
     test_price.index,
@@ -307,8 +308,6 @@ ax.set_yticks([25, 50, 100, 200, 400, 800])
 formatter = mticker.ScalarFormatter()
 formatter.set_scientific(False)
 ax.yaxis.set_major_formatter(formatter)
-ax.xaxis.set_major_locator(mdates.YearLocator(base=4))
-ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
 ax.set_xlim(price.index[0], price.index[-1])
 ax.set_ylabel("Precio (USD, log)")
 ax.set_xlabel("Fecha")
@@ -370,7 +369,7 @@ static_drift = float(log_ret.mean() * CONFIG["trading_days"] + 0.5 * static_sigm
 fig_roll, (ax_sigma, ax_drift) = plt.subplots(
     2,
     1,
-    figsize=(W, 0.55 * W),
+    figsize=(W, 0.75 * W),
     sharex=True,
 )
 

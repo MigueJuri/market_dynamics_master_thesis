@@ -103,13 +103,31 @@ fig = plot_scatter_grid(
 fig.savefig(FIG_DIR / "momentum_spy_scatter_grid.pdf")
 
 # %%
-# ## Análisis por cuantiles de momentum (ventana única)
+# ## Boxplots de retorno futuro por intervalos y cuantiles de momentum
+#
+# Ambas variables se anualizan como en la tesis: $M_t(\tau_p)$ y
+# $F_t(\tau_f)$ son retornos logarítmicos medios multiplicados por 252.
 mom_k = 180
 ret_k = 100
 
 avg_momentum = (momentum_feature(price, mom_k) / mom_k) * TRADING_DAYS
-future_return = forward_return(price, ret_k)
+future_return = (forward_return(price, ret_k) / ret_k) * TRADING_DAYS
 
+# Intervalos de igual ancho en $M_t$ (a) y densidad KDE de $M_t$ (b).
+plot_feature_boxplots(
+    avg_momentum, future_return,
+    n_quantiles=10,
+    x_axis="bins",
+    feature_name=r"$M_t$", target_name=r"$F_t$",
+    feature_window=mom_k, target_window=ret_k,
+    show_density=True, return_correlation=False,
+)
+_fig = plt.gcf()
+_fig.axes[0].text(-0.1, 1.0, "(a)", transform=_fig.axes[0].transAxes, va="top", ha="right")
+_fig.axes[1].text(-0.1, 1.0, "(b)", transform=_fig.axes[1].transAxes, va="top", ha="right")
+_fig.savefig(FIG_DIR / "momentum_spy_bins_boxplot_density.pdf")
+
+# Cuantiles de $M_t$ (misma cantidad de datos por grupo).
 pearson_corr = plot_feature_boxplots(
     avg_momentum, future_return,
     n_quantiles= 10,
@@ -135,89 +153,47 @@ fig = plot_correlation_matrix(
 )
 fig.savefig(FIG_DIR / "momentum_spy_corr_matrix.pdf")
 
-# %%
-# ## Correlación momentum–retorno futuro en $\tau$ simétrico con banda nula
-#
-# Para cada media ventana ``h`` (la ventana simétrica es ``τ = 2h``) se
-# correlaciona el momentum pasado (``t-h..t-1``) con el retorno futuro
-# (``t+1..t+h``).  Las dos ventanas son disjuntas y excluyen el día ``t``,
-# así que no hay look-ahead.
-#
-# La banda del 95 % se obtiene con un bootstrap **i.i.d.** sobre los
-# log-retornos: cada réplica remuestrea observaciones individuales con
-# reemplazo, lo que **destruye la dependencia temporal** de la serie.  Por eso
-# la banda es la distribución **nula** del estimador (centrada en ≈ 0) y no un
-# intervalo de incertidumbre del estimador bajo dependencia real: en series
-# heterocedásticas la banda subestima el ancho verdadero.  Es la misma
-# motivación que las bandas i.i.d. de la ACF en
-# ``notebooks/spy/SPY_caracterizacion.py``.
+# # %%
+# # ## Correlación momentum–retorno futuro en $\tau$ simétrico con banda nula
+# #
+# # Para cada media ventana ``h`` (la ventana simétrica es ``τ = 2h``) se
+# # correlaciona el momentum pasado (``t-h..t-1``) con el retorno futuro
+# # (``t+1..t+h``).  Las dos ventanas son disjuntas y excluyen el día ``t``,
+# # así que no hay look-ahead.
+# #
+# # La banda del 95 % se obtiene con un bootstrap **i.i.d.** sobre los
+# # log-retornos: cada réplica remuestrea observaciones individuales con
+# # reemplazo, lo que **destruye la dependencia temporal** de la serie.  Por eso
+# # la banda es la distribución **nula** del estimador (centrada en ≈ 0) y no un
+# # intervalo de incertidumbre del estimador bajo dependencia real: en series
+# # heterocedásticas la banda subestima el ancho verdadero.  Es la misma
+# # motivación que las bandas i.i.d. de la ACF en
+# # ``notebooks/spy/SPY_caracterizacion.py``.
 
-half_windows = np.arange(5, 4*TRADING_DAYS + 1, 5)
-tau_years = 2 * half_windows / TRADING_DAYS
+# half_windows = np.arange(5, 4*TRADING_DAYS + 1, 5)
+# tau_years = 2 * half_windows / TRADING_DAYS
 
-point, median, ci_low, ci_high = bootstrap_momentum_forward_correlation(
-    log_ret, half_windows, n_bootstrap=5000, seed=SEED, alpha=0.50, 
-)
-
-fig, ax = plt.subplots(figsize=(W, 0.5 * W))
-ax.plot(tau_years, point, color="tab:blue", label="Observado")
-ax.plot(tau_years, median, color="tab:orange", ls="--", label="Mediana bootstrap")
-ax.fill_between(
-    tau_years, ci_low, ci_high, color="tab:blue", alpha=0.3,
-    label="IC 50 % (bootstrap i.i.d.)",
-)
-ax.axhline(0, color="gray", lw=0.8, ls="--")
-ax.set_xlabel(r"$\tau$ (años)")
-ax.set_ylabel("Correlación de Pearson")
-# ax.set_title(
-#     "Momentum–retorno futuro: correlación en $\\tau$ con banda nula i.i.d."
+# point, median, ci_low, ci_high = bootstrap_momentum_forward_correlation(
+#     log_ret, half_windows, n_bootstrap=5000, seed=SEED, alpha=0.50, 
 # )
-ax.legend()
-plt.show()
 
- # %%
-# ## Análisis cross-sectional de momentum por sector
-sector_tickers = {
-    "Tecnología": ["XLK"],
-    "Comunicaciones": ["XLC"],
-    "Financieros": ["XLF"],
-    "Consumo Discrecional": ["XLY"],
-    "Salud": ["XLV"],
-    "Industriales": ["XLI"],
-    "SPY": ["SPY"],
-}
-sector_colors = {
-    "Tecnología": "tab:blue",
-    "Financieros": "tab:green",
-    "Industriales": "tab:orange",
-    "Comunicaciones": "tab:cyan",
-    "Salud": "tab:red",
-    "Consumo Discrecional": "tab:purple",
-    "SPY": "black",
-}
+# fig, ax = plt.subplots(figsize=(W, 0.5 * W))
+# ax.plot(tau_years, point, color="tab:blue", label="Observado")
+# ax.plot(tau_years, median, color="tab:orange", ls="--", label="Mediana bootstrap")
+# ax.fill_between(
+#     tau_years, ci_low, ci_high, color="tab:blue", alpha=0.3,
+#     label="IC 50 % (bootstrap i.i.d.)",
+# )
+# ax.axhline(0, color="gray", lw=0.8, ls="--")
+# ax.set_xlabel(r"$\tau$ (años)")
+# ax.set_ylabel("Correlación de Pearson")
+# # ax.set_title(
+# #     "Momentum–retorno futuro: correlación en $\\tau$ con banda nula i.i.d."
+# # )
+# ax.legend()
+# plt.show()
 
-all_tickers = [t for tickers in sector_tickers.values() for t in tickers]
-raw = load_multiple_prices(all_tickers)
-log_ret_df = np.log(raw / raw.shift(1)).dropna(how="all")
 
-trading_days_per_year = 252
-max_lag = int(1.5 * trading_days_per_year)   # keep below N/3 per earlier discussion
-step = max_lag // 150  # Adjust step size for better resolution
-lags = np.arange(step, max_lag + step, step)
-
-cross_corr, avg_corr = compute_cross_sectional_correlation(
-    log_ret_df, lags,
-    feature_op="sum", target_op="sum",
-    correlation="pearson", min_valid_n=50,
-    overlap=True, shift_lookahead_by_lookback=True,
-)
-fig = plot_cross_sectional_curves(
-    cross_corr, avg_corr,
-    asset_groups=sector_tickers, group_colors=sector_colors,
-    avg_label="Promedio de sectores",
-    tau_to_yf=lambda L: 2 * L / TRADING_DAYS,
-)
-fig.savefig(FIG_DIR / "momentum_spy_cross_sectional_corr.pdf")
 # %%
 # ## Configuración del experimento
 #

@@ -150,7 +150,7 @@ CONFIG: dict[str, Any] = {
     "seed": 42,
     # --- Bootstrap (celda 5) ---
     # Moving block bootstrap para los momentos (celda 5).
-    "block_size": 5,
+    "block_size": 21,
     "n_boot": 1_000,
     "alpha": 0.05,
     # --- Autocorrelación ---
@@ -325,7 +325,7 @@ if __name__ == "__main__":
     # Rejilla del panel logarítmico: ventana fija alrededor del cero.
     grid_log = np.linspace(-CONFIG["xlim_log"], CONFIG["xlim_log"], 500)
 
-    fig, (ax_lin, ax_log) = plt.subplots(1, 2, figsize=(W, 0.4 * W))
+    fig, (ax_lin, ax_log) = plt.subplots(1, 2, figsize=(W, 0.45 * W))
 
     # --- Panel izquierdo: escala lineal (cuerpo de la distribución) ---
     ax_lin.hist(
@@ -367,7 +367,6 @@ if __name__ == "__main__":
     ax_lin.set_xlabel("Retorno logarítmico")
     ax_lin.set_ylabel("Densidad")
     # ax_lin.set_title("Cuerpo de la distribución")
-    ax_lin.legend(loc="best")
 
     # --- Panel derecho: escala logarítmica (colas) ---
     ax_log.hist(
@@ -411,8 +410,10 @@ if __name__ == "__main__":
     ax_log.set_xlabel("Retorno logarítmico")
     ax_log.set_ylabel("Densidad")
     # ax_log.set_title("Colas (densidad en escala log)")
-    ax_log.legend(loc="best")
 
+    # Leyenda única sobre los paneles: dentro del eje tapaba la distribución.
+    handles, labels = ax_lin.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="outside upper center", ncol=3)
 
     if CONFIG["save_figures"]:
         fig.savefig(FIG_DIR / "spy_return_density.pdf")
@@ -702,8 +703,9 @@ if __name__ == "__main__":
         va="top",
         ha="left",
     )
-    ax_lin.legend(loc="best")
-    ax_log.legend(loc="best")
+    # Esquinas donde no hay histograma (cola derecha / cola izquierda).
+    ax_lin.legend(loc="upper right")
+    ax_log.legend(loc="center left")
 
 
     if CONFIG["save_figures"]:
@@ -768,7 +770,7 @@ if __name__ == "__main__":
     fig, (ax_vol, ax_price) = plt.subplots(
         2,
         1,
-        figsize=(W, 0.55 * W),
+        figsize=(W, 0.75 * W),
         sharex=True,
         gridspec_kw={"height_ratios": [1, 2]}
     )
@@ -812,8 +814,6 @@ if __name__ == "__main__":
     ax_price.set_ylabel("Precio (USD, log)")
     ax_price.set_xlabel("Fecha")
     ax_price.legend(loc="upper left")
-    ax_price.xaxis.set_major_locator(mdates.YearLocator(base=2))
-    ax_price.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
 
     price_ticks = [25, 50, 100, 200, 500]
     ax_price.set_yticks(price_ticks)
@@ -839,7 +839,7 @@ if __name__ == "__main__":
     fig_mu_vol, (ax_mean, ax_vol) = plt.subplots(
         2,
         1,
-        figsize=(W, 0.45 * W),
+        figsize=(W, 0.75 * W),
         sharex=True,
     )
 
@@ -880,8 +880,6 @@ if __name__ == "__main__":
     )
     ax_vol.set_ylabel(r"$\sigma$")
     ax_vol.set_xlabel("Fecha")
-    ax_vol.xaxis.set_major_locator(mdates.YearLocator(base=2))
-    ax_vol.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
 
 
     if CONFIG["save_figures"]:
@@ -911,7 +909,7 @@ if __name__ == "__main__":
     mu = float(log_ret.mean())
     sigma = float(log_ret.std())
 
-    fig, ax = plt.subplots(figsize=(W, 0.4 * W))
+    fig, ax = plt.subplots()
     ax.plot(
         log_ret.index,
         log_ret.values,
