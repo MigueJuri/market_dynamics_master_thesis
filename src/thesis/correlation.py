@@ -537,6 +537,92 @@ def _bootstrap_correlation(
     return point, (lo, hi)
 
 
+def fixed_cell_correlation(
+    feature_series: pd.Series,
+    target_series: pd.Series,
+    tau_p: int,
+    tau_f: int,
+    feature_op: RollingOp = "sum",
+    feature_window_type: str = "fixed",
+    target_transform: Optional[Callable[..., pd.Series]] = None,
+    target_window_type: str = "fixed",
+    target_ewm_adjust: bool = False,
+    correlation: str = "pearson",
+    ewm_adjust: bool = False,
+    block_length: Optional[int] = None,
+    n_bootstrap: int = 1000,
+    alpha: float = 0.05,
+    seed: Optional[int] = None,
+) -> Dict[str, float]:
+    """Correlación de una celda fija ``(tau_p, tau_f)`` con IC por bloques.
+
+    El predictor y el objetivo se construyen igual que en
+    :func:`compute_correlation_matrix`.  Los pares predictor--objetivo de
+    días consecutivos comparten retornos (se solapan) mientras estén a menos
+    de ``tau_p + tau_f`` días, así que el intervalo se estima con un
+    *moving block bootstrap*: cada réplica concatena bloques contiguos de
+    ``block_length`` pares (por defecto ``tau_p + tau_f``) elegidos al azar
+    y recalcula la correlación.  Punto e intervalo salen de la misma
+    muestra (todos los pares válidos, con solapamiento).
+
+    Returns
+    -------
+    dict
+        ``rho`` (muestra completa), ``rho_median`` (mediana bootstrap),
+        ``ci_low``, ``ci_high``, ``n`` (pares), ``block_length`` y
+        ``n_blocks`` (bloques independientes aproximados, ``n / L``).
+    """
+    tau_p, tau_f = int(tau_p), int(tau_f)
+    feature = apply_window(
+        feature_series, float(tau_p), feature_op,
+        window_type=feature_window_type, ewm_adjust=ewm_adjust,
+    )
+    if target_transform is None:
+        fut = target_series.rolling(tau_f).sum().shift(-tau_f)
+    else:
+        fut = target_transform(
+            target_series, tau_p, tau_f,
+            window_type=target_window_type, ewm_adjust=target_ewm_adjust,
+        )
+    valid = ~(feature.isna() | fut.isna())
+    x = feature.values[valid.values].astype(float)
+    y = fut.values[valid.values].astype(float)
+    n = len(x)
+
+    if correlation == "spearman":
+        def corr(a: np.ndarray, b: np.ndarray) -> float:
+            return float(np.corrcoef(stats.rankdata(a), stats.rankdata(b))[0, 1])
+    elif correlation == "pearson":
+        def corr(a: np.ndarray, b: np.ndarray) -> float:
+            return float(np.corrcoef(a, b)[0, 1])
+    else:
+        raise ValueError(
+            f"Correlación desconocida '{correlation}'. Usa 'spearman' o 'pearson'."
+        )
+
+    L = int(block_length) if block_length is not None else tau_p + tau_f
+    L = max(1, min(L, n))
+    k = int(np.ceil(n / L))
+    rng = np.random.default_rng(SEED if seed is None else seed)
+    boot = np.empty(n_bootstrap)
+    offsets = np.arange(L)
+    for b in range(n_bootstrap):
+        starts = rng.integers(0, n - L + 1, size=k)
+        idx = (starts[:, None] + offsets[None, :]).ravel()[:n]
+        boot[b] = corr(x[idx], y[idx])
+    boot = boot[np.isfinite(boot)]
+
+    return {
+        "rho": corr(x, y),
+        "rho_median": float(np.median(boot)),
+        "ci_low": float(np.percentile(boot, 100 * alpha / 2)),
+        "ci_high": float(np.percentile(boot, 100 * (1 - alpha / 2))),
+        "n": n,
+        "block_length": L,
+        "n_blocks": n / L,
+    }
+
+
 def _print_max_correlation_diagnostic(
     corr_matrix: np.ndarray,
     lookbacks: np.ndarray,

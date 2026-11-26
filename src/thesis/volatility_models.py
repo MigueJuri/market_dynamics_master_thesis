@@ -92,6 +92,38 @@ class HARRVModel:
         return str(self.ols_res_.summary())
 
 
+class LinearLagModel:
+    """Regresión lineal sobre los mismos predictores y rezagos que la LSTM.
+
+    Control de la comparación LSTM vs HAR-RV: usa la misma entrada que la red
+    (``lookback`` rezagos de cada predictor, aplanados en un vector de
+    ``lookback * n_features`` variables ya estandarizadas) y el mismo
+    objetivo (log-volatilidad estandarizada), pero sin no linealidad ni
+    pérdida asimétrica: MCO con constante.
+    """
+
+    def __init__(self) -> None:
+        self.coef_: np.ndarray | None = None
+
+    @staticmethod
+    def _design(X_seq: np.ndarray) -> np.ndarray:
+        flat = np.asarray(X_seq, dtype=float).reshape(len(X_seq), -1)
+        return np.column_stack([np.ones(len(flat)), flat])
+
+    def fit(self, X_seq: np.ndarray, y: np.ndarray) -> LinearLagModel:
+        """Ajusta por MCO. ``X_seq`` tiene forma ``(N, lookback, n_features)``."""
+        self.coef_, *_ = np.linalg.lstsq(
+            self._design(X_seq), np.asarray(y, dtype=float), rcond=None
+        )
+        return self
+
+    def predict(self, X_seq: np.ndarray) -> np.ndarray:
+        """Predice el objetivo estandarizado para cada secuencia."""
+        if self.coef_ is None:
+            raise RuntimeError("El modelo no está ajustado.")
+        return self._design(X_seq) @ self.coef_
+
+
 class VolatilityLSTM(nn.Module):
     """Red LSTM de capacidad reducida para predicción de volatilidad.
 

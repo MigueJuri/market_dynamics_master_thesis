@@ -57,7 +57,7 @@ except ImportError:  # pragma: no cover - ejecución como script
         print(obj)
 
 from thesis.backtest_diagnostics import compute_pair_backtest_diagnostics
-from thesis.config import DATA_DIR, END, START
+from thesis.config import DATA_DIR, END, RISK_FREE_RATE, START
 from thesis.market_data import load_multiple_prices
 from thesis.pair_trading import (
     adf_test,
@@ -225,6 +225,7 @@ bt = pair_trading_backtest(
     exit_z=EXIT_Z,
     cost=COST,
     rebalance_hedge="daily",
+    rf_annual=RISK_FREE_RATE,
 )
 
 print("=== Backtest walk-forward ===")
@@ -267,14 +268,11 @@ print(f"Operaciones:     {bt.trades}")
 # con la misma convención que usa el propio backtest:
 #
 # - Retorno total: `exp(sum(retornos logarítmicos)) - 1`.
-# - Sharpe: `media / desviación * sqrt(252)`, **sin tasa libre de riesgo**.
+# - Sharpe: `(media - rf) / desviación * sqrt(252)` con rf = 3 % anual
+#   (`RISK_FREE_RATE`), la misma tasa de la definición del Cap. Estrategias.
 #
-# El Sharpe no lleva tasa libre de riesgo por coherencia con `bt.sharpe`,
-# que es la cifra que el resto del cuaderno reporta y audita.  Es la
-# convención habitual para comparar estrategias entre sí, pero conviene
-# tener presente que un Sharpe sin ``rf`` no es el Sharpe "de mercado": al
-# omitir el término ``rf`` el valor queda inflado en la misma proporción
-# que el retorno sin riesgo del periodo.
+# La estrategia y los benchmarks usan la misma `rf`, de modo que el Sharpe
+# de la tabla coincide con `bt.sharpe` y con la definición del texto.
 #
 # Los benchmarks se calculan con **retornos logarítmicos**, igual que la
 # estrategia, de modo que el retorno total sea directamente comparable.
@@ -334,6 +332,7 @@ bt.results["bh_equity_SPY"] = np.exp(
 comparativa = build_strategy_comparison(
     bt.results["strategy_ret"],
     benchmarks,
+    rf_annual=RISK_FREE_RATE,
 )
 
 print("=== Comparativa con benchmarks (mismo periodo) ===")

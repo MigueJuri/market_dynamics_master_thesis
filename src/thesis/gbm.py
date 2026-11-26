@@ -143,6 +143,7 @@ def gbm_density_grid(
     sigma: float,
     t_grid: Any,
     n_bins: int = 200,
+    normalize: str = "level",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Densidad lognormal de ``S_t`` en una grilla de precios y tiempos.
 
@@ -155,6 +156,13 @@ def gbm_density_grid(
     (densidad **relativa** por fila).  El instante ``t = 0`` es una delta de
     Dirac: se excluye del normalizador (su pico no es comparable con el resto
     de la densidad) y el resultado se recorta a ``[0, 1]``.
+
+    Con ``normalize="time"`` cada **instante** se normaliza por su propio
+    máximo: la columna es la forma de la distribución en esa fecha (pico = 1,
+    campana de ancho ``sigma sqrt(t)``).  Es la lectura natural de un *fan
+    chart*: el color no depende de cómo se reparte la densidad entre fechas,
+    de modo que no exagera el contraste en la franja de precios donde se
+    cruzan las colas de fechas distintas.
 
     Returns
     -------
@@ -171,6 +179,8 @@ def gbm_density_grid(
         raise ValueError("sigma debe ser no negativo")
     if n_bins < 2:
         raise ValueError("n_bins debe ser al menos 2")
+    if normalize not in ("level", "time"):
+        raise ValueError("normalize debe ser 'level' o 'time'")
 
     times = _finite_1d(t_grid, "t_grid")
     if np.any(times < 0.0):
@@ -190,6 +200,13 @@ def gbm_density_grid(
         loc=mu_t[:, None],
         scale=sigma_t[:, None],
     )
+    if normalize == "time":
+        time_max = density.max(axis=1, keepdims=True)
+        density = np.divide(
+            density, time_max, out=np.zeros_like(density), where=time_max > 0.0
+        )
+        return log_grid, density.T
+
     # Normalización por nivel de precio: el máximo de cada nivel (columna de
     # la disposición interna) sobre el tiempo es 1 en la disposición final
     # (n_bins, n_t).  La columna t = 0 (delta de Dirac) se excluye del

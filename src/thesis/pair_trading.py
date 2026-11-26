@@ -1818,6 +1818,7 @@ def pair_trading_backtest(
     max_holding_period: int | None = None,
     cost: float = 0.001,
     rebalance_hedge: str = "on_entry",
+    rf_annual: float = 0.0,
 ) -> PairBacktestResult:
     """Backtest walk-forward de pair trading sin look-ahead.
 
@@ -1875,6 +1876,9 @@ def pair_trading_backtest(
     rebalance_hedge : {"on_entry", "daily"}
         ``on_entry`` mantiene el hedge ratio fijo durante cada operación;
         ``daily`` lo recalcula cada día (aumenta el turnover real).
+    rf_annual : float
+        Tasa libre de riesgo anual (0.03 = 3 %) que se resta del retorno
+        medio diario en el Sharpe.  Por defecto 0.
 
     Returns
     -------
@@ -2035,7 +2039,8 @@ def pair_trading_backtest(
     valid_rets = strategy_ret
     sharpe = 0.0
     if len(valid_rets) > 1 and valid_rets.std() > 0:
-        sharpe = (valid_rets.mean() / valid_rets.std()) * np.sqrt(252)
+        rf_daily = np.log1p(rf_annual) / 252
+        sharpe = ((valid_rets.mean() - rf_daily) / valid_rets.std()) * np.sqrt(252)
 
     total_return = equity.iloc[-1] - 1.0 if not equity.empty else 0.0
     max_drawdown = float(drawdown.min())
@@ -2094,6 +2099,7 @@ def build_strategy_comparison(
     strategy_returns: pd.Series,
     benchmarks: Mapping[str, pd.Series],
     periods_per_year: int = TRADING_DAYS,
+    rf_annual: float = 0.0,
 ) -> pd.DataFrame:
     """Compara la estrategia con una serie de benchmarks en el mismo periodo.
 
@@ -2108,8 +2114,10 @@ def build_strategy_comparison(
 
     - **Retorno total**: capital final menos uno, calculado sobre retornos
       logarítmicos acumulados.
-    - **Sharpe**: ``media / desviación * sqrt(periods_per_year)``, sin tasa
-      libre de riesgo, para que sea comparable con ``bt.sharpe``.
+    - **Sharpe**: ``(media - rf) / desviación * sqrt(periods_per_year)``,
+      con ``rf = log(1 + rf_annual) / periods_per_year`` por periodo (la
+      tasa libre es nula por defecto), para que sea comparable con
+      ``bt.sharpe`` si se pasa el mismo ``rf_annual``.
 
     Parameters
     ----------
@@ -2120,6 +2128,8 @@ def build_strategy_comparison(
         Retornos diarios de cada benchmark, indexados por fecha.
     periods_per_year : int
         Factor de anualización del Sharpe.
+    rf_annual : float
+        Tasa libre de riesgo anual (0.03 = 3 %) restada del retorno medio.
 
     Returns
     -------
@@ -2152,7 +2162,11 @@ def build_strategy_comparison(
         equity = float(np.exp(ret.sum()) - 1.0)
         std = float(ret.std(ddof=1))
         sharpe = (
-            float(ret.mean() / std * np.sqrt(periods_per_year))
+            float(
+                (ret.mean() - np.log1p(rf_annual) / periods_per_year)
+                / std
+                * np.sqrt(periods_per_year)
+            )
             if std > 0
             else 0.0
         )

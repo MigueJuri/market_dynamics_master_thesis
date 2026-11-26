@@ -229,7 +229,7 @@ def test_run_vol_timing_backtest_periods_per_year_scales_sharpe() -> None:
 
 
 def test_run_vol_timing_backtest_momentum_window_scales_with_bars_per_day() -> None:
-    """La ventana de momentum equivale a 63 sesiones (63 * bars_per_day barras).
+    """La ventana de momentum escala con ``bars_per_day`` (63 sesiones aquí).
 
     Se usa un impulso aislado que sólo mantiene la señal mientras está
     dentro de la ventana: con 63 barras el impulso sale de la media en
@@ -240,9 +240,11 @@ def test_run_vol_timing_backtest_momentum_window_scales_with_bars_per_day() -> N
     ret[100] = 10.0
     pred_vol = np.full(n, 0.2)
 
-    bt_daily = run_vol_timing_backtest(ret, pred_vol, 0.2, cost_bps=0.0)
+    bt_daily = run_vol_timing_backtest(
+        ret, pred_vol, 0.2, cost_bps=0.0, mom_window=63
+    )
     bt_intra = run_vol_timing_backtest(
-        ret, pred_vol, 0.2, cost_bps=0.0, bars_per_day=26
+        ret, pred_vol, 0.2, cost_bps=0.0, bars_per_day=26, mom_window=63
     )
 
     # Posición larga (retorno base negativo) mientras el impulso está en la
@@ -251,6 +253,26 @@ def test_run_vol_timing_backtest_momentum_window_scales_with_bars_per_day() -> N
     assert bt_daily["ret_base"][164] > 0.0
     assert bt_intra["ret_base"][1738] < 0.0
     assert bt_intra["ret_base"][1739] > 0.0
+
+
+def test_run_vol_timing_backtest_warmup_completes_window() -> None:
+    """Con ``ret_warmup`` la ventana de 252 es completa desde ``t = 0``.
+
+    Un impulso en el warm-up 10 barras antes del inicio mantiene la señal
+    larga hasta que sale de la ventana (``t = 242``), aunque los retornos
+    operados sean todos negativos.
+    """
+    n = 400
+    ret = np.full(n, -0.001)
+    warm = np.full(300, -0.001)
+    warm[-10] = 10.0
+    pred_vol = np.full(n, 0.2)
+
+    bt = run_vol_timing_backtest(ret, pred_vol, 0.2, cost_bps=0.0, ret_warmup=warm)
+
+    assert bt["ret_base"][0] < 0.0  # largo desde la primera barra
+    assert bt["ret_base"][242] < 0.0
+    assert bt["ret_base"][243] > 0.0  # el impulso salió: corto
 
 
 def test_calculate_adaptability_no_shocks() -> None:
@@ -275,3 +297,25 @@ def test_calculate_adaptability_with_shocks() -> None:
     # Si hay suficientes shocks, curve_fit debería devolver un half_life finito.
     # Lo relajamos a no-NaN cuando hay shocks.
     assert not np.isnan(half_life) or True  # curve_fit puede fallar; no es crítico.
+
+
+def test_sharpe_ratio_resta_la_tasa_libre_de_riesgo() -> None:
+    """Con ``rf_annual`` el Sharpe usa el exceso sobre la tasa por periodo."""
+    rng = np.random.default_rng(0)
+    r = rng.normal(0.001, 0.01, 500)
+    rf_d = 1.03 ** (1 / 252) - 1
+    expected = np.sqrt(252) * np.mean(r - rf_d) / (np.std(r) + 1e-10)
+    assert sharpe_ratio(r, rf_annual=0.03) == pytest.approx(expected)
+    assert sharpe_ratio(r, rf_annual=0.03) < sharpe_ratio(r)
+
+
+def test_linear_lag_model_recupera_coeficientes() -> None:
+    """MCO sobre secuencias aplanadas recupera un modelo lineal exacto."""
+    from thesis.volatility_models import LinearLagModel
+
+    rng = np.random.default_rng(1)
+    X = rng.normal(size=(200, 5, 3))
+    w = rng.normal(size=15)
+    y = 0.5 + X.reshape(200, -1) @ w
+    pred = LinearLagModel().fit(X, y).predict(X)
+    assert np.allclose(pred, y)

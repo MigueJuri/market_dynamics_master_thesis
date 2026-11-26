@@ -145,8 +145,10 @@ def diebold_mariano_test(
     return {"DM_stat": float(dm_stat), "DM_pvalue": float(dm_pval)}
 
 
-def sharpe_ratio(r: np.ndarray, periods_per_year: float = 252.0) -> float:
-    """Sharpe anualizado sobre retornos simples (tasa libre de riesgo nula).
+def sharpe_ratio(
+    r: np.ndarray, periods_per_year: float = 252.0, rf_annual: float = 0.0
+) -> float:
+    """Sharpe anualizado sobre retornos simples en exceso de ``rf_annual``.
 
     Parameters
     ----------
@@ -155,6 +157,10 @@ def sharpe_ratio(r: np.ndarray, periods_per_year: float = 252.0) -> float:
     periods_per_year : float
         Número de periodos por año usados para anualizar (252 para datos
         diarios; 6552 para barras de 15 minutos).
+    rf_annual : float
+        Tasa libre de riesgo anual (0.03 = 3 %).  Se convierte a tasa por
+        periodo, ``(1 + rf)^(1/periods_per_year) - 1``, y se resta de cada
+        retorno antes de promediar.  Por defecto 0 (sin tasa libre).
 
     Returns
     -------
@@ -164,6 +170,7 @@ def sharpe_ratio(r: np.ndarray, periods_per_year: float = 252.0) -> float:
     r = np.asarray(r, dtype=float)
     if r.size == 0:
         return float("nan")
+    r = r - ((1.0 + rf_annual) ** (1.0 / periods_per_year) - 1.0)
     return float(
         np.sqrt(periods_per_year) * np.mean(r) / (np.std(r) + 1e-10)
     )
@@ -216,7 +223,9 @@ def calmar_ratio(r: np.ndarray, periods_per_year: float = 252.0) -> float:
     return float(cagr / mdd)
 
 
-def summarize_returns(r: np.ndarray, periods_per_year: float = 252.0) -> dict[str, float]:
+def summarize_returns(
+    r: np.ndarray, periods_per_year: float = 252.0, rf_annual: float = 0.0
+) -> dict[str, float]:
     """Resumen de una serie de retornos simples.
 
     Parameters
@@ -226,6 +235,8 @@ def summarize_returns(r: np.ndarray, periods_per_year: float = 252.0) -> dict[st
     periods_per_year : float
         Número de periodos por año usados para anualizar (252 para datos
         diarios; 6552 para barras de 15 minutos).
+    rf_annual : float
+        Tasa libre de riesgo anual para el Sharpe (ver :func:`sharpe_ratio`).
 
     Returns
     -------
@@ -237,7 +248,7 @@ def summarize_returns(r: np.ndarray, periods_per_year: float = 252.0) -> dict[st
     total_return = float(np.prod(1.0 + r)) - 1.0
     return {
         "total_return": total_return,
-        "sharpe": sharpe_ratio(r, periods_per_year),
+        "sharpe": sharpe_ratio(r, periods_per_year, rf_annual),
         "maxdd": max_drawdown(r),
         "calmar": calmar_ratio(r, periods_per_year),
     }
@@ -250,12 +261,19 @@ def run_vol_timing_backtest(
     cost_bps: float = 5.0,
     periods_per_year: float = 252.0,
     bars_per_day: int = 1,
+    mom_window: int = 252,
+    ret_warmup: np.ndarray | None = None,
+    rf_annual: float = 0.0,
 ) -> dict[str, Any]:
     """Estrategia de vol-timing sobre una señal de momentum.
 
-    La señal base es el signo del retorno medio de los últimos 63 sesiones
-    (63 barras por sesión en datos intradía: ventana adaptativa
-    ``min(63 * bars_per_day, n // 4)``, con un mínimo de 5 observaciones).
+    La señal base es el signo del retorno medio de las últimas
+    ``mom_window`` sesiones (``mom_window * bars_per_day`` barras en datos
+    intradía), es decir, el signo de :math:`M_t(252)` por defecto.  Si se
+    pasa ``ret_warmup`` (retornos inmediatamente anteriores a ``ret[0]``),
+    la ventana es completa desde la primera barra.  Sin ``ret_warmup`` la
+    ventana se limita a ``min(mom_window * bars_per_day, n // 4)`` y arranca
+    con un mínimo de 5 observaciones.
     El ``shift(1)`` hace que la posición de ``t`` use únicamente retornos
     hasta ``t-1`` (sin look-ahead).  La posición se escala por la
     volatilidad predicha inversa:
@@ -278,8 +296,15 @@ def run_vol_timing_backtest(
         Número de periodos por año para anualizar Sharpe y CAGR (252 para
         datos diarios; 6552 para barras de 15 minutos).
     bars_per_day : int
-        Barras por sesión.  Escala la ventana de momentum a 63 sesiones
-        equivalentes.
+        Barras por sesión.  Escala la ventana de momentum a ``mom_window``
+        sesiones equivalentes.
+    mom_window : int
+        Ventana del momentum en sesiones (252 = un año).
+    ret_warmup : np.ndarray | None
+        Retornos logarítmicos previos al período operado, usados sólo para
+        completar la ventana de momentum (no se operan).
+    rf_annual : float
+        Tasa libre de riesgo anual para los Sharpe (ver :func:`sharpe_ratio`).
 
     Returns
     -------
@@ -293,9 +318,18 @@ def run_vol_timing_backtest(
     # Señal de momentum: media móvil de los retornos con desplazamiento de una
     # barra, de modo que la posición de ``t`` use sólo información de ``t-1``
     # o anterior.  Los ``NaN`` del warm-up se tratan explícitamente (flat).
-    mom_win = min(63 * bars_per_day, max(1, n // 4))
+    mom_win = mom_window * bars_per_day
+    if ret_warmup is None:
+        mom_win = min(mom_win, max(1, n // 4))
+        warm = np.empty(0, dtype=float)
+    else:
+        warm = np.asarray(ret_warmup, dtype=float)[-mom_win:]
     mom = (
-        pd.Series(ret_arr).rolling(mom_win, min_periods=min(5, mom_win)).mean().shift(1)
+        pd.Series(np.r_[warm, ret_arr])
+        .rolling(mom_win, min_periods=min(5, mom_win))
+        .mean()
+        .shift(1)
+        .iloc[len(warm) :]
     )
     sig = np.sign(mom.fillna(0.0).to_numpy())
 
@@ -317,9 +351,9 @@ def run_vol_timing_backtest(
     ret_base = pos_base * r_simple - tc_base
     ret_bh = pos_bh * r_simple - tc_bh
 
-    vol_stats = summarize_returns(ret_vol, periods_per_year)
-    base_stats = summarize_returns(ret_base, periods_per_year)
-    bh_stats = summarize_returns(ret_bh, periods_per_year)
+    vol_stats = summarize_returns(ret_vol, periods_per_year, rf_annual)
+    base_stats = summarize_returns(ret_base, periods_per_year, rf_annual)
+    bh_stats = summarize_returns(ret_bh, periods_per_year, rf_annual)
 
     return {
         "ret_vol": ret_vol,
@@ -337,6 +371,8 @@ def run_vol_timing_backtest(
         "calmar_vol": vol_stats["calmar"],
         "calmar_base": base_stats["calmar"],
         "calmar_bh": bh_stats["calmar"],
+        "exposure_vol": float(np.mean(np.abs(pos_vol))),
+        "exposure_base": float(np.mean(np.abs(pos_base))),
         "sharpe_improvement": vol_stats["sharpe"] - base_stats["sharpe"],
         "sharpe_vs_bh": vol_stats["sharpe"] - bh_stats["sharpe"],
     }

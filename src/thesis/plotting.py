@@ -56,6 +56,69 @@ def _figsize(
     return (width, ratio * width)
 
 
+_YEAR_BASES = (1, 2, 5, 10, 20)
+_INCHES_PER_YEAR_LABEL = 0.8  # "2024" a 12 pt ocupa ~0.4 in; el resto es aire
+
+
+def year_axis(ax: plt.Axes, min_years: float = 2.5) -> bool:
+    """Eje x de fechas con una marca por año (``%Y``), sin solaparse.
+
+    Elige el paso en años (1, 2, 5, 10 o 20) más chico con el que las
+    etiquetas entran en el ancho del eje, las deja sin rotar y elimina las
+    marcas secundarias.  No toca ejes que no son de fechas ni tramos de
+    menos de ``min_years`` años (ahí el año solo no distingue las marcas).
+    Devuelve ``True`` si modificó el eje.
+    """
+    axis = ax.xaxis
+    is_date = isinstance(axis.get_major_locator(), mdates.DateLocator) or isinstance(
+        axis.get_major_formatter(), mdates.DateFormatter
+    )
+    if not is_date:
+        return False
+    lo, hi = ax.get_xlim()
+    span_years = abs(hi - lo) / 365.25
+    if span_years < min_years:
+        return False
+
+    width_in = ax.get_position().width * ax.figure.get_figwidth()
+    max_labels = max(2, int(width_in / _INCHES_PER_YEAR_LABEL))
+    base = next((b for b in _YEAR_BASES if span_years / b <= max_labels), _YEAR_BASES[-1])
+
+    axis.set_major_locator(mdates.YearLocator(base=base))
+    axis.set_major_formatter(mdates.DateFormatter("%Y"))
+    axis.set_minor_locator(plt.NullLocator())
+    ax.tick_params(axis="x", which="both", labelrotation=0)
+    for label in ax.get_xticklabels():
+        label.set_horizontalalignment("center")
+    ax.set_xlim(lo, hi)
+    return True
+
+
+def _install_year_axes() -> None:
+    """Aplica :func:`year_axis` a toda figura justo antes de guardarla.
+
+    Así las figuras de la tesis comparten el mismo eje de fechas sin repetir
+    el código en cada cuaderno.  Es idempotente.
+    """
+    from matplotlib.figure import Figure
+
+    if getattr(Figure.savefig, "_thesis_year_axes", False):
+        return
+    original = Figure.savefig
+
+    def savefig(self, *args, **kwargs):
+        for ax in self.axes:
+            year_axis(ax)
+        return original(self, *args, **kwargs)
+
+    savefig._thesis_year_axes = True  # type: ignore[attr-defined]
+    savefig.__doc__ = original.__doc__
+    Figure.savefig = savefig  # type: ignore[method-assign]
+
+
+_install_year_axes()
+
+
 # =============================================================================
 # Visualización
 # =============================================================================
@@ -99,7 +162,34 @@ def plot_correlation_matrix(
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.invert_yaxis()
+    _center_square_heatmap(fig, ax)
     return fig
+
+
+def _center_square_heatmap(fig: plt.Figure, ax: plt.Axes, gap: float = 0.015) -> None:
+    """Pega la colorbar a la matriz cuadrada y centra el bloque en la figura.
+
+    Con ``set_box_aspect(1)`` el eje queda más angosto que el espacio que le
+    reserva ``constrained_layout``, y la colorbar (a la derecha del espacio
+    reservado) deja el conjunto corrido del centro.  Se fija el layout, se
+    acerca la colorbar y se desplaza todo el bloque (rótulos incluidos) para
+    que su centro coincida con el de la figura.
+    """
+    fig.canvas.draw()  # resuelve constrained_layout y fija las posiciones
+    cax = next(a for a in fig.axes if a is not ax)
+    fig.set_layout_engine("none")
+
+    pos, cpos = ax.get_position(), cax.get_position()
+    cax.set_position([pos.x1 + gap, cpos.y0, cpos.width, cpos.height])
+
+    renderer = fig.canvas.get_renderer()
+    fig_w = fig.bbox.width
+    x0 = min(a.get_tightbbox(renderer).x0 for a in (ax, cax)) / fig_w
+    x1 = max(a.get_tightbbox(renderer).x1 for a in (ax, cax)) / fig_w
+    dx = 0.5 - (x0 + x1) / 2
+    for a in (ax, cax):
+        p = a.get_position()
+        a.set_position([p.x0 + dx, p.y0, p.width, p.height])
 
 
 def plot_scatter_grid(
@@ -224,6 +314,7 @@ def plot_feature_boxplots(
     palette: str = "viridis",
     return_correlation: bool = True,
     show_cumulative: bool = False,
+    show_density: bool = False,
 ) -> Optional[float]:
     """Boxplot del objetivo agrupado por la característica.
 
@@ -246,6 +337,11 @@ def plot_feature_boxplots(
     la frecuencia por cuantil es aproximadamente uniforme y poco
     informativa.
 
+    Si ``show_density`` es ``True``, el panel inferior muestra en su lugar
+    la densidad de probabilidad de la característica estimada con un
+    kernel gaussiano (:class:`scipy.stats.gaussian_kde`, ancho de banda
+    por la regla de Scott).  Tiene prioridad sobre ``show_cumulative``.
+
     Si ``return_correlation`` es ``True`` devuelve la correlación de
     Pearson entre ``feature`` y ``target`` sobre la muestra conjunta; si
     es ``False`` devuelve ``None``.
@@ -263,8 +359,8 @@ def plot_feature_boxplots(
     if x_axis == "quantiles":
         labels = [f"Q{i + 1}" for i in range(n_quantiles)]
         if n_quantiles >= 2:
-            labels[0] = "Q1\n(Más bajo)"
-            labels[-1] = f"Q{n_quantiles}\n(Más Alto)"
+            labels[0] = "Q1\n(más bajo)"
+            labels[-1] = f"Q{n_quantiles}\n(más alto)"
         data["quantile"] = pd.qcut(data[feature_name], q=n_quantiles, labels=labels)
         x_label_suffix = f"Cuantiles {feature_name}"
     else:
@@ -282,12 +378,18 @@ def plot_feature_boxplots(
         )
         x_label_suffix = f"{feature_name}"
 
-    fw_str = f"({feature_window/252:.2f} años)" if feature_window is not None else ""
-    tw_str = f"({target_window/252:.2f} años) " if target_window is not None else ""
+    fw_str = (
+        rf" ($\tau_p = {feature_window / TRADING_DAYS:.2f}$ años)"
+        if feature_window is not None else ""
+    )
+    tw_str = (
+        rf" ($\tau_f = {target_window / TRADING_DAYS:.2f}$ años)"
+        if target_window is not None else ""
+    )
     y_label = f"{target_name}{tw_str}".strip()
     x_label_full = f"{x_label_suffix}{fw_str}".strip()
 
-    if show_cumulative:
+    if show_cumulative or show_density:
         created_fig = ax is None
         if created_fig:
             # Con constrained_layout los dos ejes salen de la misma grilla.
@@ -315,12 +417,22 @@ def plot_feature_boxplots(
         ax_box.set_ylabel(y_label)
 
         sorted_feat = data[feature_name].dropna().sort_values().to_numpy()
-        ecdf_y = np.arange(1, len(sorted_feat) + 1) / len(sorted_feat)
-        ax_ecdf.plot(sorted_feat, ecdf_y, color="C0", lw=1.5)
-        ax_ecdf.set_ylim(0.0, 1.05)
+        if show_density:
+            from scipy.stats import gaussian_kde
+
+            grid = np.linspace(sorted_feat[0], sorted_feat[-1], 512)
+            dens = gaussian_kde(sorted_feat)(grid)
+            ax_ecdf.plot(grid, dens, color="C0", lw=1.5)
+            ax_ecdf.fill_between(grid, dens, color="C0", alpha=0.2, lw=0)
+            ax_ecdf.set_ylim(0.0, 1.1 * dens.max())
+            ax_ecdf.set_ylabel("Densidad")
+        else:
+            ecdf_y = np.arange(1, len(sorted_feat) + 1) / len(sorted_feat)
+            ax_ecdf.plot(sorted_feat, ecdf_y, color="C0", lw=1.5)
+            ax_ecdf.set_ylim(0.0, 1.05)
+            ax_ecdf.set_ylabel("Frec. acum.")
         ax_ecdf.set_xlim(sorted_feat[0], sorted_feat[-1])
         ax_ecdf.set_xlabel(x_label_full)
-        ax_ecdf.set_ylabel("Frec. acum.")
     else:
         created_fig = ax is None
         if created_fig:
@@ -849,8 +961,10 @@ def plot_pair_overview(
     axes[0].plot(prices.index, prices[ticker_a], linewidth=1, label=ticker_a)
     axes[0].plot(prices.index, prices[ticker_b], linewidth=1, label=ticker_b)
     axes[0].set_ylabel("Precio (USD, log)" if log_scale else "Precio (USD)")
-    # axes[0].set_title(f"{ticker_a} vs {ticker_b}")
-    axes[0].legend(loc="best")
+    # Leyendas sobre el eje, en una fila, para que no tapen las curvas.
+    axes[0].legend(
+        loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, frameon=False
+    )
     axes[0].grid(True, alpha=0.3)
     if log_scale:
         axes[0].set_yscale("log")
@@ -889,7 +1003,9 @@ def plot_pair_overview(
         )
     axes[1].set_ylabel(r"$Z_t$")
     axes[1].set_xlabel("Fecha")
-    axes[1].legend(loc="best")
+    axes[1].legend(
+        loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=4, frameon=False
+    )
     axes[1].grid(True, alpha=0.3)
 
     return fig

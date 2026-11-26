@@ -17,6 +17,10 @@ TICKER: str = "SPY"
 START: str = "1993-01-01"
 END: str = "2026-01-01"
 TRADING_DAYS: int = 252
+
+#: Tasa libre de riesgo anual con la que se calculan los Sharpe de la tesis
+#: (bono del Tesoro de EE.UU., ver Cap. Estrategias).
+RISK_FREE_RATE: float = 0.03
 SEED: int = 42
 
 #: Mínimo de sesiones que un ticker debe tener dentro de ``START:END`` para
@@ -40,7 +44,7 @@ SEED: int = 42
 #: El valor por defecto son 5 años bursátiles: 484 activos y unas 1 267
 #: sesiones.  Subirlo a 7560 (~30 años) acorta la intersección a cambio de
 #: descartar 183 empresas más.
-PAIR_SELECTION_MIN_HISTORY_OBS: int = 252 * 10
+PAIR_SELECTION_MIN_HISTORY_OBS: int = 252 * 20
 
 #: Raíz del repositorio (dos niveles por encima de ``src/thesis/config.py``).
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]

@@ -116,12 +116,12 @@ vol_corr_matrix, lookbacks, lookaheads = compute_correlation_matrix(
     log_ret, log_ret,
     max_lookback=1 * TRADING_DAYS, max_lookahead=2 * TRADING_DAYS,
     steps=100, overlap=True,
-    feature_op="std", target_op="sum", correlation="spearman",
+    feature_op="std", target_op="sum", correlation="pearson",
 )
 fig = plot_correlation_matrix(
     vol_corr_matrix, lookbacks, lookaheads,
-    title="Volatility–Forward Spearman Correlation",
-    cbar_label="Correlación de Spearman",
+    title="Volatility–Forward Pearson Correlation",
+    cbar_label="Correlación de Pearson",
 )
 fig.savefig(FIG_DIR / "volatility_spy_corr_matrix.pdf")
 
@@ -180,7 +180,7 @@ CONFIG: dict[str, Any] = {
     "vol_windows": list(vol_windows),
     "vol_window": vol_window,
     "target_window": target_window,
-    "matrix_correlation": "spearman",
+    "matrix_correlation": "pearson",
 }
 
 # %%

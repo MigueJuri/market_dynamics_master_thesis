@@ -162,3 +162,36 @@ def test_nan_input_is_rejected() -> None:
     log_ret.iloc[10] = np.nan
     with pytest.raises(ValueError):
         bootstrap_momentum_forward_correlation(log_ret, [5], n_bootstrap=10)
+
+
+def test_fixed_cell_correlation_matches_matrix_cell() -> None:
+    """El punto de la celda fija coincide con la celda de la matriz."""
+    import pandas as pd
+
+    from thesis.correlation import compute_correlation_matrix, fixed_cell_correlation
+
+    rng = np.random.default_rng(1)
+    r = pd.Series(rng.normal(0.0, 0.01, 1500))
+    mat, _, _ = compute_correlation_matrix(
+        r, r, feature_windows=[40], target_windows=[30],
+        correlation="pearson", verbose=False,
+    )
+    res = fixed_cell_correlation(r, r, 40, 30, n_bootstrap=200, seed=0)
+    assert res["rho"] == pytest.approx(mat[0, 0])
+    assert res["block_length"] == 70
+    assert res["ci_low"] <= res["rho_median"] <= res["ci_high"]
+
+
+def test_fixed_cell_correlation_blocks_widen_interval() -> None:
+    """Con pares solapados, el IC por bloques es más ancho que el i.i.d."""
+    import pandas as pd
+
+    from thesis.correlation import fixed_cell_correlation
+
+    rng = np.random.default_rng(2)
+    r = pd.Series(rng.normal(0.0, 0.01, 3000))
+    wide = fixed_cell_correlation(r, r, 100, 100, n_bootstrap=300, seed=0)
+    iid = fixed_cell_correlation(
+        r, r, 100, 100, block_length=1, n_bootstrap=300, seed=0
+    )
+    assert (wide["ci_high"] - wide["ci_low"]) > 2 * (iid["ci_high"] - iid["ci_low"])

@@ -62,7 +62,7 @@ _SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from thesis.config import SEED
+from thesis.config import RISK_FREE_RATE, SEED, TRADING_DAYS
 from thesis.volatility import (
     align_har_features_with_sequences,
     build_volatility_dataset,
@@ -82,6 +82,7 @@ from thesis.volatility_evaluation import (
 )
 from thesis.volatility_models import (
     HARRVModel,
+    LinearLagModel,
     VolatilityLSTM,
     set_volatility_seed,
     train_lstm,
@@ -118,18 +119,22 @@ CONFIG: dict[str, Any] = {
         "mean_ret_5",
     ],
     # Arquitectura
-    "hidden": 12,
-    "dropout": 0.2,
+    "hidden": 3,
+    "dropout": 0.1,
     # Entrenamiento
     "batch_size": 16,
-    "lr": 5e-5,
-    "weight_decay": 1e-3,
+    "lr": 1e-4,
+    "weight_decay": 1e-4,
     "min_epochs": 50,
-    "max_epochs": 1000,
-    "patience": 15,
+    "max_epochs": 300,
+    "patience": 10,
     "grad_clip": 1.0,
     # Backtest
     "cost_bps": 0.0,
+    # Ventana del momentum de la estrategia (sesiones): M_t(252), un año.
+    "mom_window": 252,
+    # Tasa libre de riesgo anual para los Sharpe (3 %, como en el Cap. Estrategias).
+    "rf_annual": RISK_FREE_RATE,
     # Salidas
     "model_path": "lstm_vol_model.pt",
     "scaler_path": "scaler.pkl",
@@ -657,10 +662,24 @@ def run_backtest_and_strategies(
     # El último forecast no es operable (su ventana cae fuera del test): se
     # descarta para que ``ret_te_aligned``, ``y_lstm[:-1]`` y ``bt_dates``
     # tengan la misma longitud.
+    # Retornos previos al primer día operado: sólo completan la ventana de
+    # M_t(252) desde el inicio del test (no se operan ni se evalúan).
+    close = download_ohlcv(cfg["ticker"], start=cfg["start_date"])["Close"]
+    log_ret = np.log(close / close.shift(1)).dropna()
+    ret_warmup = log_ret[log_ret.index < bt_dates[0]].to_numpy()
+
     bt = run_vol_timing_backtest(
-        ret_te_aligned, y_lstm[:-1], sigma_bar, cfg["cost_bps"]
+        ret_te_aligned,
+        y_lstm[:-1],
+        sigma_bar,
+        cfg["cost_bps"],
+        mom_window=cfg["mom_window"],
+        ret_warmup=ret_warmup,
+        rf_annual=cfg["rf_annual"],
     )
-    asset_stats = summarize_returns(np.expm1(ret_te_aligned))
+    asset_stats = summarize_returns(
+        np.expm1(ret_te_aligned), rf_annual=cfg["rf_annual"]
+    )
 
     summary = pd.DataFrame(
         [
@@ -755,6 +774,147 @@ def run_experiment(config: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 # %%
+def run_controls(
+    config: dict[str, Any] | None = None,
+    prepared: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Etapa 5b: controles de la LSTM (re-ejecutable sin reentrenar).
+
+    Responde a dos preguntas sobre el aporte de la red:
+
+    1. *Pronóstico.*  Una regresión lineal (MCO) con los **mismos 13
+       predictores y 5 rezagos** que la LSTM (:class:`LinearLagModel`), ¿qué
+       tan bien pronostica frente a la LSTM y al HAR-RV?  Se compara con las
+       métricas del test y con el test de Diebold-Mariano.
+    2. *Estrategia.*  La regla de la Tab. ``vol-timed`` con la LSTM, la
+       persistencia (volatilidad realizada de los 5 días previos), el HAR-RV
+       y la regresión lineal como ``sigma_hat``; con la misma ``sigma_bar``
+       (mediana del train), la misma señal de momentum y ``rf_annual`` de la
+       configuración.  ``Base`` (``f = 1``) es el caso sin pronóstico.
+
+    Lee ``inference.pkl`` (predicciones crudas de la LSTM y el HAR-RV) y no
+    reentrena nada: solo ajusta la regresión lineal, que es instantánea.
+
+    Parameters
+    ----------
+    config : dict[str, Any] | None
+        Sobrescribe claves de :data:`CONFIG`.
+    prepared : dict[str, Any] | None
+        Salida de :func:`prepare_data`.  Si es ``None`` se calcula.
+
+    Returns
+    -------
+    dict[str, Any]
+        ``metrics`` (DataFrame LSTM/HAR-RV/Lineal con R², RMSE, MAE y sesgo),
+        ``dm`` (p-values de Diebold-Mariano), ``strategies`` (DataFrame con
+        retorno, Sharpe, caída máxima y exposición media) y ``y_linear``.
+    """
+    cfg = _merge_config(config)
+    if prepared is None:
+        prepared = prepare_data(cfg)
+    with open(cfg["inference_path"], "rb") as f:
+        art = pickle.load(f)
+
+    LB = cfg["lookback"]
+    n = len(art["y_true_log"])
+    lin = LinearLagModel().fit(prepared["Xtr_seq"], prepared["ytr_seq"])
+    p_s = lin.predict(prepared["Xte_seq"])[:n]
+    y_lin_log = prepared["y_scaler"].inverse_transform(p_s.reshape(-1, 1)).ravel()
+
+    y_true = np.exp(art["y_true_log"])
+    preds = {
+        "LSTM": np.exp(art["y_lstm_log"]),
+        "HAR-RV": np.exp(art["y_har_log"]),
+        "Lineal 13x5": np.exp(y_lin_log),
+    }
+    rows = []
+    for name, pred in preds.items():
+        m = evaluate_forecasts(y_true, pred, label=name)
+        m["Sesgo"] = float(np.mean(pred - y_true))
+        rows.append({"model": name, **m})
+    metrics_df = pd.DataFrame(rows)
+
+    dm = {
+        "LSTM vs HAR-RV": diebold_mariano_test(
+            y_true - preds["LSTM"], y_true - preds["HAR-RV"], h=cfg["forecast_horizon"]
+        ),
+        "LSTM vs Lineal": diebold_mariano_test(
+            y_true - preds["LSTM"],
+            y_true - preds["Lineal 13x5"],
+            h=cfg["forecast_horizon"],
+        ),
+        "Lineal vs HAR-RV": diebold_mariano_test(
+            y_true - preds["Lineal 13x5"],
+            y_true - preds["HAR-RV"],
+            h=cfg["forecast_horizon"],
+        ),
+    }
+
+    # Persistencia: volatilidad de los 5 días previos (``har_w``, sin
+    # anualizar) del día en que arranca el objetivo; reproduce la tabla de
+    # desempeño del Cap. Volatilidad (R² = 0.05).
+    har_w = prepared["test_df"]["har_w"].to_numpy()
+    persist = np.exp(har_w[LB : LB + n] + 0.5 * np.log(TRADING_DAYS))
+
+    close = prepared["raw"]["Close"]
+    log_ret = np.log(close / close.shift(1)).dropna()
+    bt_dates = art["bt_dates"]
+    warm = log_ret[log_ret.index < bt_dates[0]].to_numpy()
+
+    sigma_hats = {
+        "Vol (LSTM)": preds["LSTM"],
+        "Vol (persistencia)": persist,
+        "Vol (HAR-RV)": preds["HAR-RV"],
+        "Vol (lineal 13x5)": preds["Lineal 13x5"],
+    }
+    strat_rows = []
+    for name, sig in sigma_hats.items():
+        bt = run_vol_timing_backtest(
+            art["ret_te_aligned"],
+            sig[:-1],
+            art["sigma_bar"],
+            cfg["cost_bps"],
+            mom_window=cfg["mom_window"],
+            ret_warmup=warm,
+            rf_annual=cfg["rf_annual"],
+        )
+        strat_rows.append(
+            {
+                "strategy": name,
+                "total_return": bt["total_vol"],
+                "sharpe": bt["sharpe_vol"],
+                "maxdd": bt["maxdd_vol"],
+                "exposure": bt["exposure_vol"],
+            }
+        )
+    strat_rows.append(
+        {
+            "strategy": "Base",
+            "total_return": bt["total_base"],
+            "sharpe": bt["sharpe_base"],
+            "maxdd": bt["maxdd_base"],
+            "exposure": bt["exposure_base"],
+        }
+    )
+    strategies = pd.DataFrame(strat_rows)
+
+    print("\n[CONTROLES] Pronóstico (test):")
+    print(
+        metrics_df[["model", "R2", "RMSE", "MAE", "Sesgo"]].to_string(index=False)
+    )
+    for k, v in dm.items():
+        print(f"  DM {k}: p = {v['DM_pvalue']:.4f}")
+    print("\n[CONTROLES] Estrategia con distintos sigma_hat:")
+    print(strategies.to_string(index=False))
+    return {
+        "metrics": metrics_df,
+        "dm": dm,
+        "strategies": strategies,
+        "y_linear": preds["Lineal 13x5"],
+    }
+
+
+# %%
 # ## Ejecución por etapas
 #
 # Cada etapa tiene su propia celda para poder re-ejecutar el post-proceso
@@ -797,6 +957,17 @@ if __name__ == "__main__":
 
 if __name__ == "__main__":
     backtest = run_backtest_and_strategies(CONFIG, smoothed)
+
+
+# %%
+# ### Etapa 5b: controles (regresión lineal y sigma ingenua)
+#
+# Reproduce la comparación con una regresión lineal de los mismos 13
+# predictores y 5 rezagos, y la regla de posicionamiento con pronósticos
+# alternativos.  No reentrena la LSTM.
+
+if __name__ == "__main__":
+    controls = run_controls(CONFIG)
 
 
 # %%
@@ -868,7 +1039,7 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     history = trained["history"]
 
-    fig, ax = plt.subplots(figsize=(W, 0.5 * W))
+    fig, ax = plt.subplots()
     ax.plot(history["train_loss"], color="C0", lw=1.2, label="Entrenamiento")
     ax.plot(history["val_loss"], color="C1", lw=1.2, label="Validación")
     ax.set_xlabel("Época")
@@ -903,7 +1074,7 @@ if __name__ == "__main__":
 # ### 3. Evolución de la volatilidad
 
 if __name__ == "__main__":
-    fig, ax = plt.subplots(figsize=(W, 0.35 * W))
+    fig, ax = plt.subplots()
 
     # Serie real como área sombreada de fondo + borde sutil
     ax.fill_between(dates, 0, y_true, color="#888888", alpha=0.1, zorder=1, label="Real")
@@ -918,8 +1089,6 @@ if __name__ == "__main__":
     ax.set_ylim(bottom=0)
     # ax.set_title("Volatilidad realizada forward — test")
     ax.legend(frameon=False)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-    fig.autofmt_xdate()
     fig.savefig(PLOT_PATHS["timeseries"])
     plt.show()
 
@@ -978,7 +1147,7 @@ if __name__ == "__main__":
     equity_base = np.cumprod(1.0 + bt["ret_base"])
     equity_bh = np.cumprod(1.0 + bt["ret_bh"])
 
-    fig, ax = plt.subplots(figsize=(W, 0.35 * W))
+    fig, ax = plt.subplots()
     ax.plot(
         bt_dates,
         equity_vol,
@@ -1006,9 +1175,7 @@ if __name__ == "__main__":
     ax.set_xlabel("Fecha")
     ax.set_ylabel("Retorno acumulado")
     ax.set_title("Backtest de vol-timing — test")
-    ax.legend()
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-    fig.autofmt_xdate()
+    ax.legend(loc="upper left")
     fig.savefig(PLOT_PATHS["backtest"])
     plt.show()
 
@@ -1061,7 +1228,7 @@ if __name__ == "__main__":
         (pd.Timestamp("2025-04-09"), "9 abr: pausa de 90 días", "9 abr"),
     ]
 
-    fig, ax = plt.subplots(figsize=(W, 0.35 * W))
+    fig, ax = plt.subplots()
     ax.plot(
         dates[mask],
         y_true[mask],
@@ -1106,7 +1273,6 @@ if __name__ == "__main__":
     ax.set_title("Volatilidad realizada vs predicción LSTM — abril de 2025")
     ax.legend(loc="upper right")
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
-    fig.autofmt_xdate()
     fig.savefig(PLOT_PATHS["april2025"])
     plt.show()
 
